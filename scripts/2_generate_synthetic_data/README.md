@@ -3,7 +3,7 @@
 This folder provides a modular CLI pipeline to create synthetic biomedical context sentences for UMLS concepts and export them in BigBio JSON format.
 
 ## Overview Pipeline
-1. (Optional) Prepare UMLS concept synonym & definition parquets (already produced elsewhere).
+1. (Optional) Prepare UMLS concept synonym & definition parquets (already produced in step 1).
 2. Build per‑CUI user prompts (chunked) via `prepare_concepts.py`.
 3. Generate synthetic sentences for each chunk with `generate.py`.
 4. Convert generated parquet outputs to BigBio JSON with `convert_to_bigbio.py` (or let `generate.py` write JSON directly).
@@ -91,7 +91,7 @@ done
 ## 3. Convert Parquet(s) to BigBio JSON
 `convert_to_bigbio.py` offers multiple commands.
 
-### a) Directory of parquets
+### a. Directory of parquets
 ```bash
 python scripts/2_generate_synthetic_data/convert_to_bigbio.py convert \
   --parquet data/SynthMM \
@@ -104,7 +104,7 @@ python scripts/2_generate_synthetic_data/convert_to_bigbio.py convert \
 ```
 Options: `--limit` (row cap), `--fail-pattern` (default FAIL).
 
-### b) Directly from HuggingFace Hub dataset
+### b. Directly from HuggingFace Hub dataset
 ```bash
 python scripts/2_generate_synthetic_data/convert_to_bigbio.py from-hub \
   --repo-id Aremaki/SynCABEL \

@@ -54,22 +54,22 @@ def process_sentence(
         "coreferences": [],
         "relations": [],
     }
-    entities = re.findall(r"\[(.*?)\]", sentence)
-    for entity in set(entities):  # avoid duplicates
-        escaped = re.escape(entity)
-        for match_num, match in enumerate(re.finditer(escaped, sentence), 1):
-            output["entities"].append({
-                "id": f"{document_id}_{sentence_num}_T{match_num}",
-                "type": "LLM_generated",
-                "text": [entity],
-                "offsets": [[match.start(), match.end()]],
-                "normalized": [
-                    {
-                        "db_name": "UMLS",
-                        "db_id": cui,
-                    }
-                ],
-            })
+    pattern = r"\[(.*?)\]"
+    for match_num, match in enumerate(re.finditer(pattern, sentence), 1):
+        entity = match.group(1)  # the text inside [ ... ]
+        start, end = match.span(1)  # offsets of the inner group (entity only)
+        output["entities"].append({
+            "id": f"{document_id}_{sentence_num}_T{match_num}",
+            "type": "LLM_generated",
+            "text": [entity],
+            "offsets": [[start, end]],
+            "normalized": [
+                {
+                    "db_name": "UMLS",
+                    "db_id": cui,
+                }
+            ],
+        })
     return output
 
 
@@ -83,6 +83,7 @@ def dataframe_to_bigbio(df: pl.DataFrame) -> list[dict]:
         cui = filtered["CUI"][i]
         for j, sentence in enumerate(filtered["llm_output"][i].split("\n")):
             if sentence.strip():
+                sentence = sentence.replace("benzo[a]pyrene", "benzo(a)pyrene").strip()
                 records.append(process_sentence(sentence, i, j, cui))
     return records
 

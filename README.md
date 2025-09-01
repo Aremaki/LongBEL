@@ -10,7 +10,7 @@ A novel approach for biomedical entity linking using synthetic contextualized da
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Clone the repository
-git clone https://github.com/yourusername/syncabel.git
+git clone https://github.com/Aremaki/syncabel.git
 cd syncabel
 
 # Create virtual environment and install dependencies

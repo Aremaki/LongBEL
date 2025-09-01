@@ -98,19 +98,13 @@ def _clean_syn(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def _disambiguate(
-    df: pl.DataFrame, extra_sem_name: bool = False
-) -> tuple[pl.DataFrame, pl.DataFrame]:
+def _disambiguate(df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
     # Add disambiguation columns
-    if extra_sem_name and "SEM_NAME_MM" in df.columns:
-        base_cols = ["Syn", "SEM_NAME", "SEM_NAME_MM", "CUI"]
-    else:
-        base_cols = ["Syn", "SEM_NAME", "CUI"]
     df = df.with_columns(
-        Entity=pl.concat_str(
-            [pl.col("Syn"), pl.lit("of type"), pl.col("SEM_NAME")], separator=" "
+        Entity_full=pl.concat_str(
+            [pl.col("Syn"), pl.col("CUI")],
+            separator=" ",
         ),
-        Entity_full=pl.concat_str(base_cols, separator=" "),
     )
     # Language specific subset
     df_fr = (
@@ -118,9 +112,9 @@ def _disambiguate(
         .select([
             "CUI",
             "SEM_NAME",
+            "GROUP",
             "CATEGORY",
             "Syn",
-            "Entity",
             "Entity_full",
             "is_main",
         ])
@@ -129,9 +123,9 @@ def _disambiguate(
     df_all = df.select([
         "CUI",
         "SEM_NAME",
+        "GROUP",
         "CATEGORY",
         "Syn",
-        "Entity",
         "Entity_full",
         "is_main",
     ]).unique()
@@ -141,50 +135,85 @@ def _disambiguate(
 def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
     # Follow original multi-stage ambiguity reduction logic
     n_cui = (
-        df.group_by("Syn")
+        df.group_by(["Syn", "GROUP"])
         .agg(pl.col("CUI").n_unique().alias("n_CUI"))
-        .join(df, on="Syn")
+        .join(df, on=["Syn", "GROUP"])
     )
     one_cui = (
         n_cui.filter(pl.col("n_CUI") == 1)
-        .with_columns(Entity=pl.col("Syn"))
-        .select(["CUI", "Entity", "SEM_NAME", "CATEGORY", "is_main"])
+        .with_columns(Entity=pl.col("Syn"), ambiguous_level=pl.lit(0))
+        .select([
+            "CUI",
+            "Entity",
+            "SEM_NAME",
+            "CATEGORY",
+            "GROUP",
+            "is_main",
+            "ambiguous_level",
+        ])
     )
-    more = n_cui.filter(pl.col("n_CUI") > 1).drop("n_CUI")
-    n_entity = (
-        more.group_by("Entity")
+
+    # Get CUIs that have unambiguous synonyms using set operations for efficiency
+    cuis_with_unambiguous = set(one_cui["CUI"].to_numpy())
+    more = (
+        n_cui.filter(pl.col("n_CUI") > 1)
+        .filter(~pl.col("CUI").is_in(list(cuis_with_unambiguous)))
+        .drop("n_CUI")
+    )
+    n_cui_unambiguous = (
+        more.group_by(["Syn", "GROUP"])
         .agg(pl.col("CUI").n_unique().alias("n_CUI"))
-        .join(more, on="Entity")
+        .join(more, on=["Syn", "GROUP"])
     )
-    one_cui_type = n_entity.filter(pl.col("n_CUI") == 1).select([
+    one_cui_unambiguous = (
+        n_cui_unambiguous.filter(pl.col("n_CUI") == 1)
+        .with_columns(Entity=pl.col("Syn"), ambiguous_level=pl.lit(1))
+        .select([
+            "CUI",
+            "Entity",
+            "SEM_NAME",
+            "CATEGORY",
+            "GROUP",
+            "is_main",
+            "ambiguous_level",
+        ])
+    )
+
+    unambiguous_cui = pl.concat([one_cui, one_cui_unambiguous])
+
+    # Use set operations again for the next filtering step
+    cuis_with_unambiguous = set(unambiguous_cui["CUI"].to_numpy())
+    more2 = (
+        n_cui_unambiguous.filter(pl.col("n_CUI") > 1)
+        .filter(~pl.col("CUI").is_in(list(cuis_with_unambiguous)))
+        .drop("n_CUI")
+        .sort("CUI")
+        .unique(subset=["Syn", "GROUP"])
+    )
+
+    one_cui_full = more2.with_columns(
+        Entity=pl.col("Syn"), ambiguous_level=pl.lit(2)
+    ).select([
         "CUI",
         "Entity",
         "SEM_NAME",
         "CATEGORY",
+        "GROUP",
         "is_main",
+        "ambiguous_level",
     ])
-    more2 = n_entity.filter(pl.col("n_CUI") > 1).drop("n_CUI")
-    n_entity_full = (
-        more2.group_by("Entity_full")
-        .agg(pl.col("CUI").n_unique().alias("n_CUI"))
-        .join(more2, on="Entity_full")
-    )
-    one_cui_full = (
-        n_entity_full.filter(pl.col("n_CUI") == 1)
-        .with_columns(Entity=pl.col("Entity_full"))
-        .select(["CUI", "Entity", "SEM_NAME", "CATEGORY", "is_main"])
-    )
-    return pl.concat([one_cui_type, one_cui, one_cui_full])
+
+    return pl.concat([unambiguous_cui, one_cui_full])
 
 
-def _explode_language_frames(base: pl.DataFrame, is_mm: bool) -> pl.DataFrame:
+def _explode_language_frames(base: pl.DataFrame) -> pl.DataFrame:
     # Split language columns and explode synonyms / titles
     fr = (
         base.select([
             "CUI",
             "SEM_NAME",
-            *(["SEM_NAME_MM"] if is_mm else []),
             "CATEGORY",
+            "GROUP",
             "UMLS_Title_fr",
             "UMLS_alias_fr",
         ])
@@ -196,8 +225,8 @@ def _explode_language_frames(base: pl.DataFrame, is_mm: bool) -> pl.DataFrame:
     en = base.select([
         "CUI",
         "SEM_NAME",
-        *(["SEM_NAME_MM"] if is_mm else []),
         "CATEGORY",
+        "GROUP",
         "UMLS_Title_main",
         "UMLS_Title_en",
         "UMLS_alias_en",
@@ -206,10 +235,6 @@ def _explode_language_frames(base: pl.DataFrame, is_mm: bool) -> pl.DataFrame:
 
     # Build unified rows for each type source (mark main True appropriately)
     parts = []
-    if is_mm:
-        sem_extra_cols = ["SEM_NAME_MM"]
-    else:
-        sem_extra_cols = []
 
     def _mk(df: pl.DataFrame, col: str, is_main: bool) -> pl.DataFrame:
         return (
@@ -217,8 +242,8 @@ def _explode_language_frames(base: pl.DataFrame, is_mm: bool) -> pl.DataFrame:
                 "CUI",
                 "lang",
                 "SEM_NAME",
-                *sem_extra_cols,
                 "CATEGORY",
+                "GROUP",
                 pl.col(col).alias("Syn"),
             ])
             .filter((pl.col("Syn") != "") & (pl.col("Syn").is_not_null()))
@@ -227,9 +252,9 @@ def _explode_language_frames(base: pl.DataFrame, is_mm: bool) -> pl.DataFrame:
 
     # Titles and aliases
     if "UMLS_Title_main" in en.columns:  # main (English main title)
-        parts.append(_mk(en, "UMLS_Title_main", is_main=True if not is_mm else True))
+        parts.append(_mk(en, "UMLS_Title_main", is_main=True))
     if "UMLS_Title_fr" in fr.columns:
-        parts.append(_mk(fr, "UMLS_Title_fr", is_main=False if not is_mm else False))
+        parts.append(_mk(fr, "UMLS_Title_fr", is_main=False))
     if "UMLS_Title_en" in en.columns:
         parts.append(_mk(en, "UMLS_Title_en", is_main=False))
     if "UMLS_alias_fr" in fr.columns:
@@ -250,9 +275,9 @@ def _prepare_mm(
         ])
     ).with_columns(_build_mm_semantic_expr())
     base = codes.join(semantic_filtered, on="CUI").join(titles, on="CUI", how="left")
-    exploded = _explode_language_frames(base, is_mm=True)
-    exploded = _clean_syn(exploded).unique()
-    all_df, fr_df = _disambiguate(exploded, extra_sem_name=True)
+    exploded = _explode_language_frames(base)
+    exploded = _clean_syn(exploded).unique(subset=["CUI", "Syn", "CATEGORY"])
+    all_df, fr_df = _disambiguate(exploded)
     return _filter_non_ambiguous(all_df), _filter_non_ambiguous(fr_df)
 
 
@@ -261,8 +286,8 @@ def _prepare_quaero(
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     semantic_filtered = semantic.filter(pl.col("CATEGORY").is_in(QUAERO_CATEGORIES))
     base = codes.join(semantic_filtered, on="CUI").join(titles, on="CUI", how="left")
-    exploded = _explode_language_frames(base, is_mm=False)
-    exploded = _clean_syn(exploded).unique()
+    exploded = _explode_language_frames(base)
+    exploded = _clean_syn(exploded).unique(subset=["CUI", "Syn", "CATEGORY"])
     all_df, fr_df = _disambiguate(exploded)
     return _filter_non_ambiguous(all_df), _filter_non_ambiguous(fr_df)
 
@@ -289,8 +314,12 @@ def prepare(
 
     if dataset == "MM":
         all_df, fr_df = _prepare_mm(codes, titles, semantic)
-    else:
+    elif dataset == "QUAERO":
         all_df, fr_df = _prepare_quaero(codes, titles, semantic)
+    else:
+        raise typer.BadParameter(
+            f"Unknown dataset: {dataset}. Must be 'MM' or 'QUAERO'."
+        )
 
     all_path = umls_dir / "all_disambiguated.parquet"
     fr_path = umls_dir / "fr_disambiguated.parquet"
@@ -299,5 +328,5 @@ def prepare(
     typer.echo(f"Wrote {all_path} and {fr_path}")
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
     app()
