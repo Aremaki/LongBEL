@@ -1,11 +1,14 @@
 import re
 from pathlib import Path
+from typing import Optional
 
 import nltk
 import nltk.data
 import numpy as np
 from tqdm import tqdm
 from transformers import AutoTokenizer
+
+from syncabel.embeddings import best_by_cosine  # type: ignore
 
 
 def clean_natural(text):
@@ -30,6 +33,9 @@ def parse_text(
     natural=False,
     tokenizer=None,
     corrected_cui=None,
+    selection_method: str = "levenshtein",
+    syn_embeddings: Optional[dict[str, np.ndarray]] = None,
+    mention_embeddings: Optional[dict[str, np.ndarray]] = None,
 ):
     """Create simple (source, target) pairs per entity.
 
@@ -110,14 +116,20 @@ def parse_text(
                 possible_syns = None
 
             if possible_syns:
-                if Syn_to_annotation is not None:
-                    # Choose the closest synonym to the surface form
+                if selection_method == "embedding":
+                    best_syn = best_by_cosine(
+                        mention=entity_text,
+                        candidates=list(possible_syns),
+                        mention_embeds=mention_embeddings or {},
+                        syn_embeds=syn_embeddings or {},
+                    )
+                    annotation = best_syn if best_syn is not None else normalized_id
+                else:
+                    # Default to Levenshtein matching (previous behavior)
                     text = entity_text
                     dists = [nltk.edit_distance(text, syn) for syn in possible_syns]
                     best_syn = possible_syns[int(np.argmin(dists))]
                     annotation = best_syn
-                else:
-                    annotation = normalized_id
             else:
                 # If no synonyms mapping, fall back to the normalized id
                 annotation = normalized_id
@@ -149,8 +161,12 @@ def process_bigbio_dataset(
     Syn_to_annotation=None,
     natural=False,
     model_name=None,
+    encoder_name=None,
     corrected_cui=None,
     language: str = "english",
+    selection_method: str = "levenshtein",
+    syn_embeddings: Optional[dict[str, np.ndarray]] = None,
+    mention_embeddings: Optional[dict[str, np.ndarray]] = None,
 ):
     """Process a BigBio KB dataset into source/target sequences.
 
@@ -214,6 +230,9 @@ def process_bigbio_dataset(
             natural,
             tokenizer,
             corrected_cui,
+            selection_method,
+            syn_embeddings,
+            mention_embeddings,
         )
         # Each entity yields one pair; extend the global lists accordingly.
         target_data.extend(target_texts)

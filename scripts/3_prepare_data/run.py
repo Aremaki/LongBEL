@@ -15,7 +15,7 @@ import polars as pl
 import typer
 from datasets import load_dataset
 
-from syncabel.parse_data import process_bigbio_dataset
+from syncabel.parse_data_v2 import process_bigbio_dataset
 
 app = typer.Typer(
     help="Preprocess BigBio datasets into model-specific train/dev/test pickles."
@@ -28,6 +28,33 @@ DEFAULT_MODELS = [
     "facebook/genre-linking-blink",
     "facebook/mbart-large-50",
 ]
+
+
+def _load_syn_embeddings(emb_dir: Path, dataset_name: str):
+    # Choose UMLS synonym space based on dataset family
+    # MedMentions -> MM, EMEA/MEDLINE -> QUAERO
+    tag = "MM" if dataset_name == "MedMentions" else "QUAERO"
+    path = emb_dir / f"umls_synonyms_{tag}.parquet"
+    if path.exists():
+        return _load_embeddings_parquet(path)
+    return None
+
+
+def _load_mention_embeddings(emb_dir: Path, name: str):
+    path = emb_dir / f"mentions_{name}.parquet"
+    if path.exists():
+        return _load_embeddings_parquet(path)
+    return None
+
+
+def _load_embeddings_parquet(path: Path):
+    df = pl.read_parquet(path)
+    mapping = {}
+    for row in df.iter_rows(named=True):
+        text = str(row["text"]).strip()
+        vec = row["embedding"]
+        mapping[text.lower()] = vec / (sum(v * v for v in vec) ** 0.5 or 1.0)
+    return mapping
 
 
 def _load_json_if_exists(path: Path):
@@ -74,6 +101,8 @@ def _process_single_dataset(
     start_tag: str,
     end_tag: str,
     out_root: Path,
+    selection_method: str,
+    emb_dir: Path,
 ):
     typer.echo(f"→ Loading dataset {hf_id}:{hf_config} ...")
     ds = load_dataset(hf_id, name=hf_config)
@@ -82,6 +111,14 @@ def _process_single_dataset(
 
     # Determine sentence tokenizer language: MedMentions (English), else French for QUAERO variants.
     language = "english" if name == "MedMentions" else "french"
+
+    # Load embeddings once per dataset
+    syn_embeds = _load_syn_embeddings(
+        out_root.parent / "embeddings" if not emb_dir else emb_dir, name
+    )
+    mention_embeds = _load_mention_embeddings(
+        out_root.parent / "embeddings" if not emb_dir else emb_dir, name
+    )
 
     for model_name in model_names:
         typer.echo(f"  • Processing model {model_name}")
@@ -97,6 +134,12 @@ def _process_single_dataset(
                 Syn_to_annotation=syn_df,
                 model_name=model_name,
                 language=language,
+                selection_method=selection_method,
+                syn_embeddings=syn_embeds,
+                mention_embeddings=_load_mention_embeddings(
+                    out_root.parent / "embeddings" if not emb_dir else emb_dir,
+                    "SynthMM" if name == "MedMentions" else "SynthQUAERO",
+                ),
             )
         else:
             synth_src, synth_tgt = [], []
@@ -122,6 +165,9 @@ def _process_single_dataset(
                 Syn_to_annotation=syn_df,
                 model_name=model_name,
                 language=language,
+                selection_method=selection_method,
+                syn_embeddings=syn_embeds,
+                mention_embeddings=mention_embeds,
             )
             processed[split_name] = (src, tgt)
 
@@ -147,6 +193,12 @@ def run(
     end_entity: str = typer.Option("]", help="End entity marker"),
     start_tag: str = typer.Option("{", help="Start tag marker"),
     end_tag: str = typer.Option("}", help="End tag marker"),
+    selection_method: str = typer.Option(
+        "levenshtein", help="Annotation selection: 'levenshtein' or 'embedding'"
+    ),
+    embeddings_dir: Path = typer.Option(
+        Path("data/embeddings"), help="Directory with precomputed embeddings"
+    ),
     synth_mm_path: Path = typer.Option(
         Path("data/synthetic_data/SynthMM/SynthMM_bigbio.json"),
         help="Synthetic MM JSON",
@@ -201,6 +253,8 @@ def run(
             start_tag,
             end_tag,
             out_root,
+            selection_method,
+            embeddings_dir,
         )
     if "EMEA" in datasets:
         _process_single_dataset(
@@ -216,6 +270,8 @@ def run(
             start_tag,
             end_tag,
             out_root,
+            selection_method,
+            embeddings_dir,
         )
     if "MEDLINE" in datasets:
         _process_single_dataset(
@@ -231,6 +287,8 @@ def run(
             start_tag,
             end_tag,
             out_root,
+            selection_method,
+            embeddings_dir,
         )
     typer.echo("✅ Preprocessing complete.")
 

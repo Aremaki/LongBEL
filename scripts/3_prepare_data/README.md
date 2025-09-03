@@ -1,16 +1,16 @@
-# 3_prepare_data.py – BigBio ➜ Model-Specific Pickle Builder
+# Prepare data – BigBio ➜ Model-Specific Pickle Builder
 
 This CLI prepares source / target sequence pickle files for multiple NLG/seq2seq models from selected BigBio biomedical entity linking datasets (MedMentions, QUAERO EMEA, QUAERO MEDLINE). It can also augment the training set with synthetic sentences you generated earlier (SynthMM / SynthQUAERO).
 
 ## Quick Start
 Minimal run with all default datasets & models (will silently skip synthetic if JSONs absent):
 ```bash
-python scripts/3_prepare_data.py
+python scripts/3_prepare_data/run.py run
 ```
 
 Limit to a subset of datasets and models:
 ```bash
-python scripts/3_prepare_data.py run \
+python scripts/3_prepare_data/run.py run \
   --datasets MedMentions EMEA \
   --models mt5-large bart-large \
   --out-root data/preprocessed_dataset
@@ -18,10 +18,42 @@ python scripts/3_prepare_data.py run \
 
 Add custom entity/tag markers (if your model relies on different tokens):
 ```bash
-python scripts/3_prepare_data.py run \
+python scripts/3_prepare_data/run.py run \
   --start-entity « --end-entity » \
   --start-tag <start> --end-tag <end›
 ```
+
+## Embedding-based annotation selection (optional but recommended)
+
+You can precompute text embeddings with CODER (GanjinZero/coder-large-v3) for both UMLS synonyms and dataset mentions, then let the prepare step choose the best synonym by cosine similarity instead of Levenshtein.
+
+1) Build and store embeddings locally:
+```bash
+python scripts/3_prepare_data/generate_embeddings.py run \
+  --out-dir data/embeddings \
+  --coder-model GanjinZero/coder-large-v3 \
+  --include-datasets MedMentions EMEA MEDLINE \
+  --include-synth true
+```
+This writes Parquet files like:
+```
+data/embeddings/
+  umls_synonyms_MM.parquet
+  umls_synonyms_QUAERO.parquet
+  mentions_MedMentions.parquet
+  mentions_EMEA.parquet
+  mentions_MEDLINE.parquet
+  mentions_SynthMM.parquet
+  mentions_SynthQUAERO.parquet
+```
+
+2) Run prepare with embedding selection:
+```bash
+python scripts/3_prepare_data/run.py run \
+  --selection-method embedding \
+  --embeddings-dir data/embeddings
+```
+If embeddings are not found, the script falls back to Levenshtein.
 
 ## CLI Arguments (with defaults)
 | Option | Default | Description |
@@ -32,6 +64,8 @@ python scripts/3_prepare_data.py run \
 | `--end-entity` | `]` | Closing marker for entity surface forms. |
 | `--start-tag` | `{` | Opening marker for concept / tag tokens. |
 | `--end-tag` | `}` | Closing marker for concept / tag tokens. |
+| `--selection-method` | `levenshtein` | How to pick best annotation among synonyms: `levenshtein` or `embedding`. |
+| `--embeddings-dir` | `data/embeddings` | Directory containing precomputed embeddings from `0_build_embeddings.py`. |
 | `--synth-mm-path` | `data/bigbio_datasets/SynthMM.json` | Synthetic MedMentions-style BigBio JSON. If missing: skipped. |
 | `--synth-quaero-path` | `data/bigbio_datasets/SynthQUAERO.json` | Synthetic QUAERO-style BigBio JSON. If missing: skipped. |
 | `--umls-mm-parquet` | `data/MM_2017_all.parquet` | UMLS MedMentions concept parquet (for synonym mapping). |
@@ -63,6 +97,8 @@ For each requested dataset (e.g., `MedMentions`) a folder is created under `--ou
 ```
 Each pickle contains a Python list of strings (sources or targets) already formatted with the specified markers and any model-specific adjustments applied by `process_bigbio_dataset`.
 
+When `--selection-method embedding` is used, target strings are built with the synonym that has maximum cosine similarity to the mention among the synonyms of the same CUI; otherwise the closest edit-distance synonym is used.
+
 ## Synthetic Augmentation Logic
 - If `SynthMM.json` exists: its examples are processed once per model and stored as `synth_train_*` pickles for MedMentions.
 - If `SynthQUAERO.json` exists: used for EMEA + MEDLINE.
@@ -76,7 +112,7 @@ Feel free to choose Unicode or rare tokens to minimize collisions with natural t
 
 ## Example: Full Custom Run
 ```bash
-python scripts/3_prepare_data.py run \
+python scripts/3_prepare_data/run.py run \
   --datasets MedMentions MEDLINE \
   --models mt5-large mbart-large-50 \
   --start-entity <e> --end-entity </e> \
