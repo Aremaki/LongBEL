@@ -3,7 +3,7 @@
 This CLI prepares source / target sequence pickle files for multiple NLG/seq2seq models from selected BigBio biomedical entity linking datasets (MedMentions, QUAERO EMEA, QUAERO MEDLINE). It can also augment the training set with synthetic sentences you generated earlier (SynthMM / SynthQUAERO).
 
 ## Quick Start
-Minimal run with all default datasets & models (will silently skip synthetic if JSONs absent):
+Minimal run with all default datasets & models. If required embeddings are missing, they will be generated automatically using CODER (GanjinZero/coder-large-v3). Synthetic JSONs are optional and skipped if absent.
 ```bash
 python scripts/3_prepare_data/run.py run
 ```
@@ -23,11 +23,21 @@ python scripts/3_prepare_data/run.py run \
   --start-tag <start> --end-tag <end›
 ```
 
-## Embedding-based annotation selection (optional but recommended)
+## Embedding-based annotation selection
 
-You can precompute text embeddings with CODER (GanjinZero/coder-large-v3) for both UMLS synonyms and dataset mentions, then let the prepare step choose the best synonym by cosine similarity instead of Levenshtein.
+Embedding selection is now the default. The script will try to load the following parquet files from `--embeddings-dir` (default `data/embeddings`):
+```
+umls_synonyms_MM.parquet (for MedMentions)
+umls_synonyms_QUAERO.parquet (for EMEA/MEDLINE)
+mentions_MedMentions.parquet
+mentions_EMEA.parquet
+mentions_MEDLINE.parquet
+mentions_SynthMM.parquet (if SynthMM JSON exists)
+mentions_SynthQUAERO.parquet (if SynthQUAERO JSON exists)
+```
+If any are missing, they will be generated automatically before processing.
 
-1) Build and store embeddings locally:
+If you prefer to precompute embeddings manually, you can still use the helper script:
 ```bash
 python scripts/3_prepare_data/generate_embeddings.py run \
   --out-dir data/embeddings \
@@ -35,7 +45,7 @@ python scripts/3_prepare_data/generate_embeddings.py run \
   --include-datasets MedMentions EMEA MEDLINE \
   --include-synth true
 ```
-This writes Parquet files like:
+This writes parquet files like:
 ```
 data/embeddings/
   umls_synonyms_MM.parquet
@@ -47,13 +57,16 @@ data/embeddings/
   mentions_SynthQUAERO.parquet
 ```
 
-2) Run prepare with embedding selection:
+Run prepare with embedding selection explicitly (optional, as it's the default):
 ```bash
 python scripts/3_prepare_data/run.py run \
   --selection-method embedding \
   --embeddings-dir data/embeddings
 ```
-If embeddings are not found, the script falls back to Levenshtein.
+To switch back to edit-distance selection:
+```bash
+python scripts/3_prepare_data/run.py run --selection-method levenshtein
+```
 
 ## CLI Arguments (with defaults)
 | Option | Default | Description |
@@ -64,13 +77,14 @@ If embeddings are not found, the script falls back to Levenshtein.
 | `--end-entity` | `]` | Closing marker for entity surface forms. |
 | `--start-tag` | `{` | Opening marker for concept / tag tokens. |
 | `--end-tag` | `}` | Closing marker for concept / tag tokens. |
-| `--selection-method` | `levenshtein` | How to pick best annotation among synonyms: `levenshtein` or `embedding`. |
-| `--embeddings-dir` | `data/embeddings` | Directory containing precomputed embeddings from `0_build_embeddings.py`. |
-| `--synth-mm-path` | `data/bigbio_datasets/SynthMM.json` | Synthetic MedMentions-style BigBio JSON. If missing: skipped. |
-| `--synth-quaero-path` | `data/bigbio_datasets/SynthQUAERO.json` | Synthetic QUAERO-style BigBio JSON. If missing: skipped. |
-| `--umls-mm-parquet` | `data/MM_2017_all.parquet` | UMLS MedMentions concept parquet (for synonym mapping). |
-| `--umls-quaero-parquet` | `data/QUAERO_2014_all.parquet` | UMLS QUAERO concept parquet. |
-| `--out-root` | `data/preprocessed_dataset` | Output root folder. |
+| `--selection-method` | `embedding` | How to pick best annotation among synonyms: `levenshtein` or `embedding`. |
+| `--embeddings-dir` | `data/embeddings` | Directory containing or storing embeddings. Missing files will be generated. |
+| `--coder-model` | `GanjinZero/coder-large-v3` | Encoder used when generating embeddings automatically. |
+| `--synth-mm-path` | `data/synthetic_data/SynthMM/SynthMM_bigbio.json` | Synthetic MedMentions-style BigBio JSON. If missing: skipped. |
+| `--synth-quaero-path` | `data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio.json` | Synthetic QUAERO-style BigBio JSON. If missing: skipped. |
+| `--umls-mm-parquet` | `data/UMLS_processed/MM/all_disambiguated.parquet` | UMLS MedMentions concept parquet (for synonym mapping). |
+| `--umls-quaero-parquet` | `data/UMLS_processed/QUAERO/all_disambiguated.parquet` | UMLS QUAERO concept parquet. |
+| `--out-root` | `data/final_data` | Output root folder. |
 
 ## Supported Models (DEFAULT_MODELS)
 ```

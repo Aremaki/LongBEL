@@ -31,8 +31,8 @@ uv run python scripts/2_generate_synthetic_data/prepare_concepts.py
 uv run python scripts/2_generate_synthetic_data/generate_synthMM.py
 uv run python scripts/2_generate_synthetic_data/generate_synthQUAERO.py
 
-# Step 3: Prepare final training data
-uv run python scripts/3_prepare_data.py
+# Step 3: Prepare final training data (auto-generates embeddings if missing)
+uv run python scripts/3_prepare_data/run.py run
 
 # Step 4: Train model
 uv run python scripts/4_train.py
