@@ -22,8 +22,17 @@ class TextEncoder:
     device = None
 
     def __post_init__(self):
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self.model = AutoModel.from_pretrained(self.model_name)
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            self.model = AutoModel.from_pretrained(self.model_name)
+        except Exception as hub_err:  # pragma: no cover - network / availability branch
+            local_dir = Path("models") / str(self.model_name)
+            if local_dir.exists():
+                print(
+                    f"⚠️ Hub load failed for '{self.model_name}' ({hub_err}); falling back to local path {local_dir}."
+                )
+                self.tokenizer = AutoTokenizer.from_pretrained(str(local_dir))
+                self.model = AutoModel.from_pretrained(str(local_dir))
         if self.device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
