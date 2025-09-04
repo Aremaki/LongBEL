@@ -353,7 +353,7 @@ def run(
         Path("data/embeddings"), help="Directory with precomputed embeddings"
     ),
     coder_model: str = typer.Option(
-        "GanjinZero/coder-large-v3", help="Text encoder model for embeddings"
+        "GanjinZero/coder-all", help="Text encoder model for embeddings"
     ),
     synth_mm_path: Path = typer.Option(
         Path("data/synthetic_data/SynthMM/SynthMM_bigbio.json"),
