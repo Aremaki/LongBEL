@@ -124,19 +124,40 @@ def _ensure_embeddings(
     if need_mm_syn:
         if umls_parquet_mm.exists():
             df_mm = pl.read_parquet(umls_parquet_mm)
-            # get unique CUIs
-            cuis = df_mm["CUI"].unique()
-            for cui in tqdm(cuis, desc="Processing CUIs", unit="CUI"):
-                if not (out_dir / "MM" / f"umls_synonyms_MM_{cui}.parquet").exists():
-                    df_cui = df_mm.filter(pl.col("CUI") == cui)
-                    syns_cui = df_cui["Entity"].drop_nulls().unique().to_list()
-                    if syns_cui:
-                        embs = encoder.encode(syns_cui, tqdm_bar=False)
-                        save_embeddings_parquet(
-                            syns_cui,
-                            embs,
-                            out_dir / "MM" / f"umls_synonyms_MM_{cui}.parquet",
-                        )
+            # group CUIs -> synonyms
+            grouped = df_mm.group_by("CUI").agg(pl.col("Entity").drop_nulls().unique())
+            # Flatten all entities to one big list
+            all_synonyms = grouped["Entity"].explode().to_list()
+
+            # Encode once, in batches
+            typer.echo(f"Encoding {len(all_synonyms)} UMLS MM synonyms with CODER…")
+            embs = encoder.encode(all_synonyms, batch_size=1024, tqdm_bar=True)
+
+            # Map embeddings back to CUIs
+            typer.echo("Saving UMLS MM synonym embeddings per CUI to parquet…")
+            idx = 0
+            rows = []
+            for cui, syns in tqdm(
+                zip(grouped["CUI"].to_list(), grouped["Entity"].to_list()),
+                desc="CUIs",
+                unit="CUI",
+            ):
+                n = len(syns)
+                cui_embs = embs[idx : idx + n]
+                rows.append(
+                    pl.DataFrame({
+                        "CUI": [cui] * n,
+                        "Entity": syns,
+                        "embedding": cui_embs.tolist(),
+                    })
+                )
+                idx += n
+                save_embeddings_parquet(
+                    syns,
+                    cui_embs,
+                    out_dir / "MM" / f"umls_synonyms_MM_{cui}.parquet",
+                    extra_cols={"CUI": [cui] * n},
+                )
         else:
             typer.echo(f"⚠️ Missing UMLS MM parquet: {umls_parquet_mm}")
 
@@ -144,21 +165,38 @@ def _ensure_embeddings(
     if need_quaero_syn:
         if umls_parquet_quaero.exists():
             df_q = pl.read_parquet(umls_parquet_quaero)
-            # get unique CUIs
-            cuis = df_q["CUI"].drop_nulls().unique().to_list()
-            for cui in tqdm(cuis, desc="Processing CUIs", unit="CUI"):
-                if not (
-                    out_dir / "QUAERO" / f"umls_synonyms_QUAERO_{cui}.parquet"
-                ).exists():
-                    df_cui = df_q.filter(pl.col("CUI") == cui)
-                    syns_cui = df_cui["Entity"].drop_nulls().unique().to_list()
-                    if syns_cui:
-                        embs = encoder.encode(syns_cui, tqdm_bar=False)
-                        save_embeddings_parquet(
-                            syns_cui,
-                            embs,
-                            out_dir / "QUAERO" / f"umls_synonyms_QUAERO_{cui}.parquet",
-                        )
+            # group CUIs -> synonyms
+            grouped = df_q.group_by("CUI").agg(pl.col("Entity").drop_nulls().unique())
+            # Flatten all entities to one big list
+            all_synonyms = grouped["Entity"].explode().to_list()
+            # Encode once, in batches
+            typer.echo(f"Encoding {len(all_synonyms)} UMLS QUAERO synonyms with CODER…")
+            embs = encoder.encode(all_synonyms, batch_size=1024, tqdm_bar=True)
+            # Map embeddings back to CUIs
+            typer.echo("Saving UMLS QUAERO synonym embeddings per CUI to parquet…")
+            idx = 0
+            rows = []
+            for cui, syns in tqdm(
+                zip(grouped["CUI"].to_list(), grouped["Entity"].to_list()),
+                desc="CUIs",
+                unit="CUI",
+            ):
+                n = len(syns)
+                cui_embs = embs[idx : idx + n]
+                rows.append(
+                    pl.DataFrame({
+                        "CUI": [cui] * n,
+                        "Entity": syns,
+                        "embedding": cui_embs.tolist(),
+                    })
+                )
+                idx += n
+                save_embeddings_parquet(
+                    syns,
+                    cui_embs,
+                    out_dir / "QUAERO" / f"umls_synonyms_QUAERO_{cui}.parquet",
+                    extra_cols={"CUI": [cui] * n},
+                )
         else:
             typer.echo(f"⚠️ Missing UMLS QUAERO parquet: {umls_parquet_quaero}")
 
