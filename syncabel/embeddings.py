@@ -112,21 +112,11 @@ def best_by_cosine(
     mention: str,
     candidates: list[str],
 ):
-    m_vec = encoder.encode([mention])
-    if m_vec.size:
-        m_vec = m_vec[0]
-    else:
-        return None
-    best_syn = None
-    best_score = -1.0
-    for cand in candidates:
-        c_vec = encoder.encode([cand])
-        if c_vec.size:
-            c_vec = c_vec[0]
-        else:
-            continue
-        score = cosine_sim(m_vec, c_vec)  # both normalized
-        if score > best_score:
-            best_score = score
-            best_syn = cand
-    return best_syn, best_score
+    m_vec = encoder.encode([mention], tqdm_bar=False)[0]
+    c_vecs = encoder.encode(candidates, tqdm_bar=False)
+    # Compute cosine similarity for all candidates at once
+    scores = np.dot(c_vecs, m_vec) / (
+        np.linalg.norm(c_vecs, axis=1) * np.linalg.norm(m_vec) + 1e-9
+    )
+    best_idx = np.argmax(scores)
+    return candidates[best_idx], scores[best_idx]
