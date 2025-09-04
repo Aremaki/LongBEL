@@ -41,24 +41,24 @@ DEFAULT_MODELS = [
 
 
 def _yield_mentions_from_bigbio(ds) -> list[str]:
-    mentions: list[str] = []
+    mentions: set[str] = set()
     for page in ds:
         for ent in page.get("entities", []):
             if ent.get("text"):
-                mentions.append(ent["text"][0])
-    return mentions
+                mentions.add(ent["text"][0])
+    return list(mentions)
 
 
 def _yield_mentions_from_synth(json_path: Path) -> list[str]:
     if not json_path.exists():
         return []
     data = json.loads(json_path.read_text(encoding="utf-8"))
-    mentions: list[str] = []
+    mentions: set[str] = set()
     for page in data:
         for ent in page.get("entities", []):
             if ent.get("text"):
-                mentions.append(ent["text"][0])
-    return mentions
+                mentions.add(ent["text"][0])
+    return list(mentions)
 
 
 def _ensure_embeddings(
@@ -112,36 +112,28 @@ def _ensure_embeddings(
     if need_mm_syn and not (out_dir / "umls_synonyms_MM.parquet").exists():
         if umls_parquet_mm.exists():
             df_mm = pl.read_parquet(umls_parquet_mm)
-            syns_mm = (
-                df_mm.select(pl.col("Entity"))
-                .to_series()
-                .drop_nulls()
-                .unique()
-                .to_list()
-            )
+            syns_mm = df_mm["Entity"].drop_nulls().unique().to_list()
             if syns_mm:
+                typer.echo("Encoding UMLS MM synonyms...")
                 embs = encoder.encode(syns_mm)
                 save_embeddings_parquet(
                     syns_mm, embs, out_dir / "umls_synonyms_MM.parquet"
                 )
+                typer.echo("UMLS MM synonyms saved.")
         else:
             typer.echo(f"⚠️ Missing UMLS MM parquet: {umls_parquet_mm}")
 
     if need_quaero_syn and not (out_dir / "umls_synonyms_QUAERO.parquet").exists():
         if umls_parquet_quaero.exists():
             df_q = pl.read_parquet(umls_parquet_quaero)
-            syns_q = (
-                df_q.select(pl.col("Entity"))
-                .to_series()
-                .drop_nulls()
-                .unique()
-                .to_list()
-            )
+            syns_q = df_q["Entity"].drop_nulls().unique().to_list()
             if syns_q:
+                typer.echo("Encoding UMLS QUAERO synonyms...")
                 embs = encoder.encode(syns_q)
                 save_embeddings_parquet(
                     syns_q, embs, out_dir / "umls_synonyms_QUAERO.parquet"
                 )
+                typer.echo("UMLS QUAERO synonyms saved.")
         else:
             typer.echo(f"⚠️ Missing UMLS QUAERO parquet: {umls_parquet_quaero}")
 
