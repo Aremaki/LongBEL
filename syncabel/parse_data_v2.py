@@ -125,14 +125,26 @@ def parse_text(
 
             # Find the sentence that contains the entity start
             sent_text = passage_text
+            sent_start_offset = 0
             for s_start, s_end, s_text in sentences:
                 if s_start <= rel_start < s_end:
                     sent_text = s_text
+                    sent_start_offset = s_start
                     break
 
-            # Add entity markers around the entity text
-            marked_sent_text = sent_text.replace(
-                entity_text, f"{start_entity}{entity_text}{end_entity}"
+            # Add entity markers around the specific entity occurrence
+            global_end = entity["offsets"][0][1]
+            rel_end = global_end - start_offset_passage
+
+            start_in_sent = rel_start - sent_start_offset
+            end_in_sent = rel_end - sent_start_offset
+
+            marked_sent_text = (
+                sent_text[:start_in_sent]
+                + start_entity
+                + sent_text[start_in_sent:end_in_sent]
+                + end_entity
+                + sent_text[end_in_sent:]
             )
 
             # Emit the pair
@@ -277,55 +289,3 @@ def compute_best_synonym_df(
         })
 
     return pl.DataFrame(rows)
-
-
-def load_data(source_data, target_data, nlp, tokenizer, max_length=512):
-    """
-    Load and preprocess source and target data, ensuring that the target text is split into passages
-    while maintaining token limit constraints and balanced entity markers.
-
-    Args:
-        source_data (list of str): List of source texts.
-        target_data (list of str): List of target texts with annotated entities.
-        nlp (nltk.tokenize): NLTK tokenizer with a `.tokenize()` method (e.g., nltk.sent_tokenize).
-        tokenizer (transformers.PreTrainedTokenizer): Tokenizer for computing token lengths.
-        max_length (int, optional): Maximum allowed token length for each target passage. Default is 512.
-
-    Returns:
-        dict: A dictionary containing:
-            - "source" (list of str): Source passages with entity annotations removed.
-            - "target" (list of str): Target passages containing entity annotations.
-    """
-    data = {"source": [], "target": []}
-    for _, target in zip(source_data, target_data):
-        tokens = 0
-        target_passage = ""
-        target_doc = nlp.tokenize(target)
-        for sent in target_doc:
-            sent_tokens = len(tokenizer.encode(sent))
-            tokens += sent_tokens
-            if (
-                tokens < max_length
-                or (target_passage.count("<s_e>") != target_passage.count("<e_e>"))
-                or (target_passage.count("<s_m>") != target_passage.count("<e_e>"))
-            ):
-                target_passage += sent + " "
-            else:
-                target_passage = target_passage[:-1]
-                data["target"].append(target_passage)
-                source_passage = re.sub(r"<s_m>\s|\s<s_e>.*?<e_e>", "", target_passage)
-                data["source"].append(source_passage)
-                target_passage = sent + " "
-                tokens = sent_tokens
-        if tokens > 20:
-            target_passage = target_passage[:-1]
-            data["target"].append(target_passage)
-            source_passage = re.sub(r"<s_m>\s|\s<s_e>.*?<e_e>", "", target_passage)
-            data["source"].append(source_passage)
-        elif tokens < 20:
-            target_passage = data["target"][-1] + " " + target_passage[:-1]
-            data["target"][-1] = target_passage
-            source_passage = re.sub(r"<s_m>\s|\s<s_e>.*?<e_e>", "", target_passage)
-            data["source"][-1] = source_passage
-
-    return data
