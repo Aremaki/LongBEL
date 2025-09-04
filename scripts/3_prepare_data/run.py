@@ -9,13 +9,13 @@ import json
 import pickle
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 import polars as pl
 import typer
 from datasets import load_dataset
 
-from syncabel.parse_data_v2 import process_bigbio_dataset
+from syncabel.parse_data_v2 import compute_best_synonym_df, process_bigbio_dataset
 
 app = typer.Typer(
     help="Preprocess BigBio datasets into model-specific train/dev/test pickles."
@@ -115,6 +115,30 @@ def _process_single_dataset(
     # Determine sentence tokenizer language: MedMentions (English), else French for QUAERO variants.
     language = "english" if name == "MedMentions" else "french"
 
+    # Precompute best synonyms across synth + all splits, save once per dataset
+    def _iter_pages_all():
+        if synth_data is not None:
+            for p in synth_data:
+                yield p
+        for split_key in ("train", "validation", "test"):
+            if split_key in ds:
+                for p in ds[split_key]:
+                    yield p
+
+    typer.echo("  • Precomputing best synonyms (batched embeddings)…")
+    best_syn_df = compute_best_synonym_df(
+        cast(Iterable[dict], list(_iter_pages_all())),
+        CUI_to_Syn=cui_to_syn,
+        encoder_name=encoder_name,
+        batch_size=4096,
+    )
+    best_syn_path = data_folder / "best_synonyms.parquet"
+    best_syn_df.to_parquet(best_syn_path)
+    best_syn_map = {
+        (row["CUI"], row["entity"]): row["best_synonym"]
+        for row in best_syn_df.to_dict(orient="records")
+    }
+
     for model_name in model_names:
         typer.echo(f"  • Processing model {model_name}")
         if synth_data is not None:
@@ -131,6 +155,7 @@ def _process_single_dataset(
                 encoder_name=encoder_name,
                 language=language,
                 selection_method=selection_method,
+                best_syn_map=best_syn_map,
             )
         else:
             synth_src, synth_tgt = [], []
@@ -158,6 +183,7 @@ def _process_single_dataset(
                 encoder_name=encoder_name,
                 language=language,
                 selection_method=selection_method,
+                best_syn_map=best_syn_map,
             )
             processed[split_name] = (src, tgt)
 

@@ -111,12 +111,44 @@ def best_by_cosine(
     encoder: TextEncoder,
     mention: str,
     candidates: list[str],
+    *,
+    mention_vec: np.ndarray | None = None,
+    candidates_vecs: np.ndarray | None = None,
 ):
-    m_vec = encoder.encode([mention], tqdm_bar=False)[0]
-    c_vecs = encoder.encode(candidates, tqdm_bar=False)
+    """Return best candidate by cosine similarity.
+
+    Backwards-compatible API, with optional precomputed embeddings to avoid
+    repeated encoding in tight loops.
+
+    Parameters
+    ----------
+    encoder : TextEncoder
+        Encoder used when precomputed vectors are not supplied.
+    mention : str
+        Mention text.
+    candidates : list[str]
+        Candidate synonym strings.
+    mention_vec : np.ndarray | None, optional
+        Precomputed embedding for the mention (shape: [D]). If None, will be
+        computed via encoder.
+    candidates_vecs : np.ndarray | None, optional
+        Precomputed embeddings for candidates (shape: [N, D]). If None, will be
+        computed via encoder.
+    """
+    if mention_vec is None:
+        m_vec = encoder.encode([mention], tqdm_bar=False)[0]
+    else:
+        m_vec = mention_vec
+
+    if candidates_vecs is None:
+        c_vecs = encoder.encode(candidates, tqdm_bar=False)
+    else:
+        c_vecs = candidates_vecs
+
     # Compute cosine similarity for all candidates at once
-    scores = np.dot(c_vecs, m_vec) / (
-        np.linalg.norm(c_vecs, axis=1) * np.linalg.norm(m_vec) + 1e-9
-    )
-    best_idx = np.argmax(scores)
-    return candidates[best_idx], scores[best_idx]
+    denom = np.linalg.norm(c_vecs, axis=1) * np.linalg.norm(m_vec) + 1e-9
+    scores = np.dot(c_vecs, m_vec) / denom
+    best_idx = int(np.argmax(scores)) if len(scores) > 0 else -1
+    if best_idx < 0:
+        return (candidates[0] if candidates else None), float("-inf")
+    return candidates[best_idx], float(scores[best_idx])
