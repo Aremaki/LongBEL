@@ -91,11 +91,38 @@ def _iter_selected(options: Optional[Iterable[str]], all_list: list[str]) -> lis
     return [m for m in options if m in all_list]
 
 
-def _process_single_dataset(
+def _compute_or_load_best_syn(
+    pages: Iterable[dict],
+    CUI_to_Syn: dict,
+    encoder_name: str,
+    cache_path: Path,
+    batch_size: int = 4096,
+):
+    """Return best_syn DataFrame and mapping, using a parquet cache if present."""
+    if cache_path.exists():
+        typer.echo(f"  • Loading cached best synonyms: {cache_path}")
+        best_syn_df = pl.read_parquet(cache_path)
+    else:
+        typer.echo("  • Precomputing best synonyms (batched embeddings)…")
+        best_syn_df = compute_best_synonym_df(
+            cast(Iterable[dict], list(pages)),
+            CUI_to_Syn=CUI_to_Syn,
+            encoder_name=encoder_name,
+            batch_size=batch_size,
+        )
+        best_syn_df.write_parquet(cache_path)
+    # Use polars DataFrame -> list of dicts
+    best_syn_map = {
+        (row["CUI"], row["entity"]): row["best_synonym"]
+        for row in best_syn_df.to_dicts()
+    }
+    return best_syn_df, best_syn_map
+
+
+def _process_hf_dataset(
     name: str,
     hf_id: str,
     hf_config: str,
-    synth_data,
     syn_df,
     cui_to_syn,
     encoder_name: str,
@@ -115,52 +142,24 @@ def _process_single_dataset(
     # Determine sentence tokenizer language: MedMentions (English), else French for QUAERO variants.
     language = "english" if name == "MedMentions" else "french"
 
-    # Precompute best synonyms across synth + all splits, save once per dataset
+    # Precompute best synonyms on this dataset's splits only, cache per dataset
     def _iter_pages_all():
-        if synth_data is not None:
-            for p in synth_data:
-                yield p
         for split_key in ("train", "validation", "test"):
             if split_key in ds:
-                for p in ds[split_key]:
-                    yield p
+                yield from ds[split_key]
 
-    typer.echo("  • Precomputing best synonyms (batched embeddings)…")
-    best_syn_df = compute_best_synonym_df(
+    best_syn_path = data_folder / "best_synonyms.parquet"
+    _, best_syn_map = _compute_or_load_best_syn(
         cast(Iterable[dict], list(_iter_pages_all())),
         CUI_to_Syn=cui_to_syn,
         encoder_name=encoder_name,
-        batch_size=4096,
+        cache_path=best_syn_path,
     )
-    best_syn_path = data_folder / "best_synonyms.parquet"
-    best_syn_df.to_parquet(best_syn_path)
-    best_syn_map = {
-        (row["CUI"], row["entity"]): row["best_synonym"]
-        for row in best_syn_df.to_dict(orient="records")
-    }
 
     for model_name in model_names:
         typer.echo(f"  • Processing model {model_name}")
-        if synth_data is not None:
-            synth_src, synth_tgt = process_bigbio_dataset(
-                synth_data,
-                start_entity,
-                end_entity,
-                start_tag,
-                end_tag,
-                natural=True,
-                CUI_to_Syn=cui_to_syn,
-                Syn_to_annotation=syn_df,
-                model_name=model_name,
-                encoder_name=encoder_name,
-                language=language,
-                selection_method=selection_method,
-                best_syn_map=best_syn_map,
-            )
-        else:
-            synth_src, synth_tgt = [], []
 
-        # Build splits dict only for existing keys to avoid static type checker complaints
+        # Build splits dict only for existing keys
         splits = {"train": ds["train"]}
         if "validation" in ds:
             splits["validation"] = ds["validation"]
@@ -188,12 +187,63 @@ def _process_single_dataset(
             processed[split_name] = (src, tgt)
 
         # Write outputs
-        if synth_src:
-            _dump(synth_src, data_folder / f"synth_train_source_{model_name}.pkl")
-            _dump(synth_tgt, data_folder / f"synth_train_target_{model_name}.pkl")
         for split_name, (src, tgt) in processed.items():
             _dump(src, data_folder / f"{split_name}_source_{model_name}.pkl")
             _dump(tgt, data_folder / f"{split_name}_target_{model_name}.pkl")
+
+
+def _process_synth_dataset(
+    name: str,
+    synth_pages: Optional[list[dict]],
+    syn_df,
+    cui_to_syn,
+    encoder_name: str,
+    model_names: list[str],
+    start_entity: str,
+    end_entity: str,
+    start_tag: str,
+    end_tag: str,
+    out_root: Path,
+    selection_method: str,
+):
+    """Process a synthetic dataset as an independent dataset (train split)."""
+    if not synth_pages:
+        typer.echo(f"⚠️ {name}: no synthetic data found; skipping.")
+        return
+    data_folder = out_root / name
+    _ensure_dir(data_folder)
+
+    # Language: assume English for SynthMM, French for SynthQUAERO
+    language = "english" if "MM" in name or "MedMentions" in name else "french"
+
+    best_syn_path = data_folder / "best_synonyms.parquet"
+    _, best_syn_map = _compute_or_load_best_syn(
+        cast(Iterable[dict], synth_pages),
+        CUI_to_Syn=cui_to_syn,
+        encoder_name=encoder_name,
+        cache_path=best_syn_path,
+    )
+
+    for model_name in model_names:
+        typer.echo(f"  • Processing synthetic model {model_name}")
+        src, tgt = process_bigbio_dataset(
+            synth_pages,
+            start_entity,
+            end_entity,
+            start_tag,
+            end_tag,
+            natural=True,
+            CUI_to_Syn=cui_to_syn,
+            Syn_to_annotation=syn_df,
+            model_name=model_name,
+            encoder_name=encoder_name,
+            language=language,
+            selection_method=selection_method,
+            best_syn_map=best_syn_map,
+        )
+        # Treat as train split for the synthetic dataset
+        _dump(src, data_folder / f"train_source_{model_name}.pkl")
+        _dump(tgt, data_folder / f"train_target_{model_name}.pkl")
 
 
 @app.command()
@@ -254,13 +304,13 @@ def run(
             "⚠️ SynthQUAERO not found; skipping synthetic augmentation for QUAERO-based datasets."
         )
 
-    # Dispatch per dataset
+    # Dispatch per dataset (HF datasets)
+    processed_synth: set[str] = set()
     if "MedMentions" in datasets:
-        _process_single_dataset(
+        _process_hf_dataset(
             "MedMentions",
             "bigbio/medmentions",
             "medmentions_st21pv_bigbio_kb",
-            synth_mm,
             syn_mm_df,
             cui_to_syn_mm,
             encoder_name,
@@ -272,12 +322,28 @@ def run(
             out_root,
             selection_method,
         )
+        # Synthetic MM as its own dataset
+        if synth_mm is not None and "SynthMM" not in processed_synth:
+            _process_synth_dataset(
+                "SynthMM",
+                synth_mm,
+                syn_mm_df,
+                cui_to_syn_mm,
+                encoder_name,
+                model_list,
+                start_entity,
+                end_entity,
+                start_tag,
+                end_tag,
+                out_root,
+                selection_method,
+            )
+            processed_synth.add("SynthMM")
     if "EMEA" in datasets:
-        _process_single_dataset(
+        _process_hf_dataset(
             "EMEA",
             "bigbio/quaero",
             "quaero_emea_bigbio_kb",
-            synth_quaero,
             syn_quaero_df,
             cui_to_syn_quaero,
             encoder_name,
@@ -289,12 +355,27 @@ def run(
             out_root,
             selection_method,
         )
+        if synth_quaero is not None and "SynthQUAERO" not in processed_synth:
+            _process_synth_dataset(
+                "SynthQUAERO",
+                synth_quaero,
+                syn_quaero_df,
+                cui_to_syn_quaero,
+                encoder_name,
+                model_list,
+                start_entity,
+                end_entity,
+                start_tag,
+                end_tag,
+                out_root,
+                selection_method,
+            )
+            processed_synth.add("SynthQUAERO")
     if "MEDLINE" in datasets:
-        _process_single_dataset(
+        _process_hf_dataset(
             "MEDLINE",
             "bigbio/quaero",
             "quaero_medline_bigbio_kb",
-            synth_quaero,
             syn_quaero_df,
             cui_to_syn_quaero,
             encoder_name,
@@ -306,6 +387,22 @@ def run(
             out_root,
             selection_method,
         )
+        if synth_quaero is not None and "SynthQUAERO" not in processed_synth:
+            _process_synth_dataset(
+                "SynthQUAERO",
+                synth_quaero,
+                syn_quaero_df,
+                cui_to_syn_quaero,
+                encoder_name,
+                model_list,
+                start_entity,
+                end_entity,
+                start_tag,
+                end_tag,
+                out_root,
+                selection_method,
+            )
+            processed_synth.add("SynthQUAERO")
     typer.echo("✅ Preprocessing complete.")
 
 

@@ -6,7 +6,7 @@ from typing import Optional
 import nltk
 import nltk.data
 import numpy as np
-import pandas as pd
+import polars as pl
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
@@ -243,7 +243,7 @@ def compute_best_synonym_df(
     batch_size: int = 4096,
     corrected_cui: Optional[dict[str, str]] = None,
     language: str = "english",
-) -> "pd.DataFrame":
+) -> "pl.DataFrame":
     """Precompute best synonyms per unique (CUI, entity) using batched embeddings.
 
     Returns a DataFrame with columns: [CUI, entity, best_synonym].
@@ -315,7 +315,7 @@ def compute_best_synonym_df(
             "score": best_score,
         })
 
-    return pd.DataFrame(rows)
+    return pl.DataFrame(rows)
 
 
 def load_data(source_data, target_data, nlp, tokenizer, max_length=512):
