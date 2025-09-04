@@ -122,7 +122,7 @@ def parse_text(
                     dists = [nltk.edit_distance(text, syn) for syn in possible_syns]
                     best_syn = possible_syns[int(np.argmin(dists))]
                     annotation = best_syn
-            else:
+            if annotation is None:
                 # If no synonyms mapping, fall back to the normalized id
                 annotation = normalized_id
 
