@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import torch
+import tqdm
 from transformers import AutoModel, AutoTokenizer
 
 
@@ -18,7 +19,7 @@ def _mean_pooling(token_embeddings: torch.Tensor, mask: torch.Tensor) -> torch.T
 
 @dataclass
 class TextEncoder:
-    model_name: str = "GanjinZero/coder-large-v3"
+    model_name: str = "GanjinZero/coder-all"
     device = None
 
     def __post_init__(self):
@@ -39,23 +40,64 @@ class TextEncoder:
         self.model.eval()
 
     @torch.inference_mode()
-    def encode(self, texts: list[str], batch_size: int = 64) -> np.ndarray:
-        embs: list[np.ndarray] = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            inputs = self.tokenizer(
-                batch,
-                padding=True,
-                truncation=True,
-                max_length=256,
-                return_tensors="pt",
-            ).to(self.device)
-            outputs = self.model(**inputs)
-            pooled = _mean_pooling(outputs.last_hidden_state, inputs["attention_mask"])  # type: ignore
-            # Normalize to unit vectors
-            pooled = torch.nn.functional.normalize(pooled, p=2, dim=1)
-            embs.append(pooled.detach().cpu().numpy())
-        return np.vstack(embs) if embs else np.empty((0,))
+    def encode(
+        self,
+        texts: list[str],
+        batch_size: int = 64,
+        normalize: bool = True,
+        summary_method: str = "CLS",
+        tqdm_bar: bool = True,
+        max_length: int = 32,
+    ) -> np.ndarray:
+        """
+        CODER-like encoder with batching and optional progress bar.
+
+        - summary_method: "CLS" uses pooler_output or first token as fallback; "MEAN" uses masked mean pooling.
+        - normalize: L2-normalize each embedding to unit length.
+        - max_length: truncation length for tokenizer.
+        """
+        if not texts:
+            return np.empty((0,), dtype=np.float32)
+
+        self.model.eval()
+
+        out_parts: list[np.ndarray] = []
+        total = len(texts)
+        pbar = tqdm.tqdm(total=total, disable=not tqdm_bar)
+        try:
+            for start in range(0, total, batch_size):
+                batch = texts[start : start + batch_size]
+                inputs = self.tokenizer(
+                    batch,
+                    padding=True,
+                    truncation=True,
+                    max_length=max_length,
+                    return_tensors="pt",
+                ).to(self.device)
+
+                outputs = self.model(**inputs)
+
+                if summary_method.upper() == "CLS":
+                    # Prefer pooler_output; fallback to first token if missing
+                    embed = getattr(outputs, "pooler_output", None)
+                    if embed is None or (
+                        isinstance(embed, torch.Tensor) and embed.numel() == 0
+                    ):
+                        embed = outputs.last_hidden_state[:, 0, :]
+                else:  # MEAN
+                    embed = _mean_pooling(
+                        outputs.last_hidden_state, inputs["attention_mask"]
+                    )  # type: ignore
+
+                if normalize:
+                    embed = torch.nn.functional.normalize(embed, p=2, dim=1)
+
+                out_parts.append(embed.detach().cpu().numpy())
+                pbar.update(len(batch))
+        finally:
+            pbar.close()
+
+        return np.vstack(out_parts) if out_parts else np.empty((0,), dtype=np.float32)
 
 
 def save_embeddings_parquet(

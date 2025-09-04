@@ -107,7 +107,7 @@ def _ensure_embeddings(
 
     typer.echo("🔎 Some embedding files are missing. Generating them now…")
     encoder = TextEncoder(model_name=coder_model)
-
+    typer.echo("CODER is loaded.")
     # Synonym embeddings
     if need_mm_syn and not (out_dir / "umls_synonyms_MM.parquet").exists():
         if umls_parquet_mm.exists():
