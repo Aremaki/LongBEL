@@ -188,8 +188,14 @@ def _process_hf_dataset(
 
         # Write outputs
         for split_name, (src, tgt) in processed.items():
-            _dump(src, data_folder / f"{split_name}_source_{model_name}.pkl")
-            _dump(tgt, data_folder / f"{split_name}_target_{model_name}.pkl")
+            _dump(
+                src,
+                data_folder / f"{split_name}_source_{model_name.split('/')[-1]}.pkl",
+            )
+            _dump(
+                tgt,
+                data_folder / f"{split_name}_target_{model_name.split('/')[-1]}.pkl",
+            )
 
 
 def _process_synth_dataset(
