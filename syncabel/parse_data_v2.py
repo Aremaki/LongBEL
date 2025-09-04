@@ -27,13 +27,10 @@ def parse_text(
     data,
     start_entity,
     end_entity,
-    start_tag,
-    end_tag,
     nlp,
     CUI_to_Syn=None,
     Syn_to_annotation=None,
     natural=False,
-    tokenizer=None,
     corrected_cui=None,
     selection_method: str = "levenshtein",
     encoder: Optional[TextEncoder] = None,
@@ -45,12 +42,6 @@ def parse_text(
       - source: the sentence text that contains the entity mention
       - target: "<entity> is <annotation>" where <annotation> is the best synonym
         if available (or the normalized id otherwise).
-
-    Notes
-    -----
-    - start_entity/end_entity/start_tag/end_tag parameters are kept for
-      signature compatibility but are not used in this simplified mode.
-    - Tokenizer is not required.
     """
     source_sentences: list[str] = []
     target_sentences: list[str] = []
@@ -95,6 +86,9 @@ def parse_text(
             normalized_id = entity["normalized"][0]["db_id"]
             if corrected_cui and normalized_id in corrected_cui:
                 normalized_id = corrected_cui[normalized_id]
+                print(
+                    f"Corrected CUI {entity['normalized'][0]['db_id']} -> {normalized_id} for entity '{entity_text}'"
+                )
 
             annotation = None
             if CUI_to_Syn is not None:
@@ -136,8 +130,13 @@ def parse_text(
                     sent_text = s_text
                     break
 
+            # Add entity markers around the entity text
+            marked_sent_text = sent_text.replace(
+                entity_text, f"{start_entity}{entity_text}{end_entity}"
+            )
+
             # Emit the pair
-            source_sentences.append(sent_text)
+            source_sentences.append(marked_sent_text)
             target_sentences.append(f"{entity_text} is {annotation}")
 
     return source_sentences, target_sentences
@@ -147,12 +146,9 @@ def process_bigbio_dataset(
     bigbio_dataset,
     start_entity,
     end_entity,
-    start_tag,
-    end_tag,
     CUI_to_Syn=None,
     Syn_to_annotation=None,
     natural=False,
-    model_name=None,
     encoder_name=None,
     corrected_cui=None,
     language: str = "english",
@@ -173,39 +169,6 @@ def process_bigbio_dataset(
     except LookupError:
         print(f"⚠️ Punkt model for '{language}' not found; falling back to English.")
         nlp = nltk.data.load("tokenizers/punkt/english.pickle")
-    # Tokenizer is optional for the simplified pipeline; only load if a model name is provided.
-    tokenizer = None
-    if model_name:
-        try:
-            tokenizer = AutoTokenizer.from_pretrained(
-                model_name, add_prefix_space=False
-            )
-        except Exception as hub_err:  # pragma: no cover - network / availability branch
-            local_dir = Path("models") / str(model_name)
-            if local_dir.exists():
-                print(
-                    f"⚠️ Hub load failed for '{model_name}' ({hub_err}); falling back to local path {local_dir}."
-                )
-                tokenizer = AutoTokenizer.from_pretrained(
-                    str(local_dir), add_prefix_space=False
-                )
-            else:
-                print(
-                    f"⚠️ Failed to load tokenizer for '{model_name}' from hub and no local fallback at {local_dir}. Proceeding without a tokenizer."
-                )
-                tokenizer = None
-        if tokenizer is not None:
-            tokenizer.add_special_tokens(
-                {
-                    "additional_special_tokens": [
-                        start_entity,
-                        end_entity,
-                        start_tag,
-                        end_tag,
-                    ]
-                },
-                replace_additional_special_tokens=False,
-            )
     target_data = []
     source_data = []
     if selection_method == "embedding" and encoder_name and best_syn_map is None:
@@ -213,18 +176,16 @@ def process_bigbio_dataset(
         print(f"Using embedding-based selection with encoder '{encoder_name}'.")
     else:
         encoder = None
+
     for page in tqdm(bigbio_dataset, total=len(bigbio_dataset)):
         source_texts, target_texts = parse_text(
             page,
             start_entity,
             end_entity,
-            start_tag,
-            end_tag,
             nlp,
             CUI_to_Syn,
             Syn_to_annotation,
             natural,
-            tokenizer,
             corrected_cui,
             selection_method,
             encoder,

@@ -21,15 +21,6 @@ app = typer.Typer(
     help="Preprocess BigBio datasets into model-specific train/dev/test pickles."
 )
 
-DEFAULT_MODELS = [
-    "google/mt5-large",
-    "facebook/bart-large",
-    "GanjinZero/biobart-v2-large",
-    "facebook/genre-linking-blink",
-    "facebook/mbart-large-50",
-]
-
-
 # --- Embedding helpers -----------------------------------------------------
 
 
@@ -126,11 +117,8 @@ def _process_hf_dataset(
     syn_df,
     cui_to_syn,
     encoder_name: str,
-    model_names: list[str],
     start_entity: str,
     end_entity: str,
-    start_tag: str,
-    end_tag: str,
     out_root: Path,
     selection_method: str,
 ):
@@ -156,46 +144,49 @@ def _process_hf_dataset(
         cache_path=best_syn_path,
     )
 
-    for model_name in model_names:
-        typer.echo(f"  • Processing model {model_name}")
+    # Optional: corrected CUI mapping for QUAERO (from manual review)
+    corrected_cui = None
+    if name in ("EMEA", "MEDLINE"):
+        corrected_cui_path = Path("data") / "corrected_cui" / "QUAERO_2014_adapted.csv"
+        if corrected_cui_path.exists():
+            typer.echo("Using corrected CUI mapping...")
+            corrected_cui = dict(pl.read_csv(corrected_cui_path).iter_rows())
+    typer.echo(f"Processing dataset {name} ...")
+    # Build splits dict only for existing keys
+    splits = {"train": ds["train"]}
+    if "validation" in ds:
+        splits["validation"] = ds["validation"]
+    if "test" in ds:
+        splits["test"] = ds["test"]
+    processed = {}
+    for split_name, split_data in splits.items():
+        if not split_data:
+            continue
+        src, tgt = process_bigbio_dataset(
+            split_data,
+            start_entity,
+            end_entity,
+            natural=True,
+            CUI_to_Syn=cui_to_syn,
+            Syn_to_annotation=syn_df,
+            encoder_name=encoder_name,
+            corrected_cui=corrected_cui,
+            language=language,
+            selection_method=selection_method,
+            best_syn_map=best_syn_map,
+        )
+        processed[split_name] = (src, tgt)
 
-        # Build splits dict only for existing keys
-        splits = {"train": ds["train"]}
-        if "validation" in ds:
-            splits["validation"] = ds["validation"]
-        if "test" in ds:
-            splits["test"] = ds["test"]
-        processed = {}
-        for split_name, split_data in splits.items():
-            if not split_data:
-                continue
-            src, tgt = process_bigbio_dataset(
-                split_data,
-                start_entity,
-                end_entity,
-                start_tag,
-                end_tag,
-                natural=True,
-                CUI_to_Syn=cui_to_syn,
-                Syn_to_annotation=syn_df,
-                model_name=model_name,
-                encoder_name=encoder_name,
-                language=language,
-                selection_method=selection_method,
-                best_syn_map=best_syn_map,
-            )
-            processed[split_name] = (src, tgt)
-
-        # Write outputs
-        for split_name, (src, tgt) in processed.items():
-            _dump(
-                src,
-                data_folder / f"{split_name}_source_{model_name.split('/')[-1]}.pkl",
-            )
-            _dump(
-                tgt,
-                data_folder / f"{split_name}_target_{model_name.split('/')[-1]}.pkl",
-            )
+    # Write outputs
+    for split_name, (src, tgt) in processed.items():
+        _dump(
+            src,
+            data_folder / f"{split_name}_source.pkl",
+        )
+        _dump(
+            tgt,
+            data_folder / f"{split_name}_target.pkl",
+        )
 
 
 def _process_synth_dataset(
@@ -204,11 +195,8 @@ def _process_synth_dataset(
     syn_df,
     cui_to_syn,
     encoder_name: str,
-    model_names: list[str],
     start_entity: str,
     end_entity: str,
-    start_tag: str,
-    end_tag: str,
     out_root: Path,
     selection_method: str,
 ):
@@ -230,26 +218,22 @@ def _process_synth_dataset(
         cache_path=best_syn_path,
     )
 
-    for model_name in model_names:
-        typer.echo(f"  • Processing synthetic model {model_name}")
-        src, tgt = process_bigbio_dataset(
-            synth_pages,
-            start_entity,
-            end_entity,
-            start_tag,
-            end_tag,
-            natural=True,
-            CUI_to_Syn=cui_to_syn,
-            Syn_to_annotation=syn_df,
-            model_name=model_name,
-            encoder_name=encoder_name,
-            language=language,
-            selection_method=selection_method,
-            best_syn_map=best_syn_map,
-        )
-        # Treat as train split for the synthetic dataset
-        _dump(src, data_folder / f"train_source_{model_name.split('/')[-1]}.pkl")
-        _dump(tgt, data_folder / f"train_target_{model_name.split('/')[-1]}.pkl")
+    typer.echo(f"  • Processing synthetic dataset {name} ...")
+    src, tgt = process_bigbio_dataset(
+        synth_pages,
+        start_entity,
+        end_entity,
+        natural=True,
+        CUI_to_Syn=cui_to_syn,
+        Syn_to_annotation=syn_df,
+        encoder_name=encoder_name,
+        language=language,
+        selection_method=selection_method,
+        best_syn_map=best_syn_map,
+    )
+    # Treat as train split for the synthetic dataset
+    _dump(src, data_folder / "train_source.pkl")
+    _dump(tgt, data_folder / "train_target.pkl")
 
 
 @app.command()
@@ -258,13 +242,8 @@ def run(
         ["MedMentions", "EMEA", "MEDLINE"],
         help="Datasets to process (subset of MedMentions, EMEA, MEDLINE)",
     ),
-    models: list[str] = typer.Option(
-        None, help="Subset of model names; defaults to all supported if omitted"
-    ),
     start_entity: str = typer.Option("[", help="Start entity marker"),
     end_entity: str = typer.Option("]", help="End entity marker"),
-    start_tag: str = typer.Option("{", help="Start tag marker"),
-    end_tag: str = typer.Option("}", help="End tag marker"),
     selection_method: str = typer.Option(
         "embedding", help="Annotation selection: 'levenshtein' or 'embedding'"
     ),
@@ -291,9 +270,6 @@ def run(
     ),
 ) -> None:
     """Run preprocessing pipeline for selected datasets and models."""
-    model_list = _iter_selected(models, DEFAULT_MODELS)
-    typer.echo(f"Models: {model_list}")
-
     # Load UMLS mapping resources
     syn_mm_df, cui_to_syn_mm = _build_mappings(umls_mm_parquet)
     syn_quaero_df, cui_to_syn_quaero = _build_mappings(umls_quaero_parquet)
@@ -320,11 +296,8 @@ def run(
             syn_mm_df,
             cui_to_syn_mm,
             encoder_name,
-            model_list,
             start_entity,
             end_entity,
-            start_tag,
-            end_tag,
             out_root,
             selection_method,
         )
@@ -336,11 +309,8 @@ def run(
                 syn_mm_df,
                 cui_to_syn_mm,
                 encoder_name,
-                model_list,
                 start_entity,
                 end_entity,
-                start_tag,
-                end_tag,
                 out_root,
                 selection_method,
             )
@@ -353,11 +323,8 @@ def run(
             syn_quaero_df,
             cui_to_syn_quaero,
             encoder_name,
-            model_list,
             start_entity,
             end_entity,
-            start_tag,
-            end_tag,
             out_root,
             selection_method,
         )
@@ -368,11 +335,8 @@ def run(
                 syn_quaero_df,
                 cui_to_syn_quaero,
                 encoder_name,
-                model_list,
                 start_entity,
                 end_entity,
-                start_tag,
-                end_tag,
                 out_root,
                 selection_method,
             )
@@ -385,11 +349,8 @@ def run(
             syn_quaero_df,
             cui_to_syn_quaero,
             encoder_name,
-            model_list,
             start_entity,
             end_entity,
-            start_tag,
-            end_tag,
             out_root,
             selection_method,
         )
@@ -400,11 +361,8 @@ def run(
                 syn_quaero_df,
                 cui_to_syn_quaero,
                 encoder_name,
-                model_list,
                 start_entity,
                 end_entity,
-                start_tag,
-                end_tag,
                 out_root,
                 selection_method,
             )
