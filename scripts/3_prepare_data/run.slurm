@@ -18,6 +18,6 @@ module load arch/h100
 module load pytorch-gpu/py3/2.3.1
 
 # Run script
-python script/3_prepare_data/run.py --models google/mt5-large
+python scripts/3_prepare_data/run.py --models google/mt5-large
 
 echo SCRIPT FINISHED
