@@ -248,8 +248,8 @@ def _process_synth_dataset(
             best_syn_map=best_syn_map,
         )
         # Treat as train split for the synthetic dataset
-        _dump(src, data_folder / f"train_source_{model_name}.pkl")
-        _dump(tgt, data_folder / f"train_target_{model_name}.pkl")
+        _dump(src, data_folder / f"train_source_{model_name.split('/')[-1]}.pkl")
+        _dump(tgt, data_folder / f"train_target_{model_name.split('/')[-1]}.pkl")
 
 
 @app.command()
