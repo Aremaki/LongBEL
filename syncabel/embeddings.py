@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import polars as pl
 import torch
 import tqdm
 from transformers import AutoModel, AutoTokenizer
@@ -100,35 +99,6 @@ class TextEncoder:
         return np.vstack(out_parts) if out_parts else np.empty((0,), dtype=np.float32)
 
 
-def save_embeddings_parquet(
-    texts: list[str],
-    embeddings: np.ndarray,
-    out_path: Path,
-    extra_cols=None,
-) -> None:
-    data = {"text": texts, "embedding": embeddings.tolist()}
-    if extra_cols:
-        data.update(extra_cols)
-    df = pl.DataFrame(data)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    df.write_parquet(out_path)
-
-
-def load_embeddings_parquet(path: Path) -> dict[str, np.ndarray]:
-    df = pl.read_parquet(path)
-    # Expect columns: text, embedding (list[float])
-    mapping: dict[str, np.ndarray] = {}
-    for row in df.iter_rows(named=True):
-        text = str(row["text"]).strip()
-        vec = np.asarray(row["embedding"], dtype=np.float32)
-        # Ensure normalized vectors
-        norm = np.linalg.norm(vec)
-        if norm > 0:
-            vec = vec / norm
-        mapping[text.lower()] = vec
-    return mapping
-
-
 def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
     # Assumes normalized inputs; if not normalized, will compute cosine anyway
     denom = np.linalg.norm(a) * np.linalg.norm(b)
@@ -138,28 +108,25 @@ def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def best_by_cosine(
+    encoder: TextEncoder,
     mention: str,
     candidates: list[str],
-    mention_embeds: dict[str, np.ndarray],
-    syn_embeds: dict[str, np.ndarray],
-    encoder=None,
 ):
-    key = mention.lower().strip()
-    m_vec = mention_embeds.get(key)
-    if m_vec is None and encoder is not None:
-        m_vec = encoder.encode([mention])
-        if m_vec.size:
-            m_vec = m_vec[0]
-    if m_vec is None or (isinstance(m_vec, np.ndarray) and m_vec.size == 0):
+    m_vec = encoder.encode([mention])
+    if m_vec.size:
+        m_vec = m_vec[0]
+    else:
         return None
     best_syn = None
     best_score = -1.0
     for cand in candidates:
-        c_vec = syn_embeds.get(cand.lower().strip())
-        if c_vec is None:
+        c_vec = encoder.encode([cand])
+        if c_vec.size:
+            c_vec = c_vec[0]
+        else:
             continue
-        score = float(np.dot(m_vec, c_vec))  # both normalized
+        score = cosine_sim(m_vec, c_vec)  # both normalized
         if score > best_score:
             best_score = score
             best_syn = cand
-    return best_syn
+    return best_syn, best_score

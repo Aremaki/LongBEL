@@ -8,7 +8,7 @@ import numpy as np
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-from syncabel.embeddings import best_by_cosine  # type: ignore
+from syncabel.embeddings import TextEncoder, best_by_cosine
 
 
 def clean_natural(text):
@@ -34,8 +34,7 @@ def parse_text(
     tokenizer=None,
     corrected_cui=None,
     selection_method: str = "levenshtein",
-    syn_embeddings: Optional[dict[str, np.ndarray]] = None,
-    mention_embeddings: Optional[dict[str, np.ndarray]] = None,
+    encoder: Optional[TextEncoder] = None,
 ):
     """Create simple (source, target) pairs per entity.
 
@@ -116,13 +115,12 @@ def parse_text(
                 possible_syns = None
 
             if possible_syns:
-                if selection_method == "embedding":
-                    best_syn = best_by_cosine(
+                if selection_method == "embedding" and encoder is not None:
+                    best_syn, _ = best_by_cosine(
+                        encoder=encoder,
                         mention=entity_text,
                         candidates=list(possible_syns),
-                        mention_embeds=mention_embeddings or {},
-                        syn_embeds=syn_embeddings or {},
-                    )
+                    )  # type: ignore
                     annotation = best_syn if best_syn is not None else normalized_id
                 else:
                     # Default to Levenshtein matching (previous behavior)
@@ -165,8 +163,6 @@ def process_bigbio_dataset(
     corrected_cui=None,
     language: str = "english",
     selection_method: str = "levenshtein",
-    syn_embeddings: Optional[dict[str, np.ndarray]] = None,
-    mention_embeddings: Optional[dict[str, np.ndarray]] = None,
 ):
     """Process a BigBio KB dataset into source/target sequences.
 
@@ -217,6 +213,11 @@ def process_bigbio_dataset(
             )
     target_data = []
     source_data = []
+    if selection_method == "embedding" and encoder_name:
+        encoder = TextEncoder(model_name=encoder_name)
+        print(f"Using embedding-based selection with encoder '{encoder_name}'.")
+    else:
+        encoder = None
     for page in tqdm(bigbio_dataset, total=len(bigbio_dataset)):
         source_texts, target_texts = parse_text(
             page,
@@ -231,8 +232,7 @@ def process_bigbio_dataset(
             tokenizer,
             corrected_cui,
             selection_method,
-            syn_embeddings,
-            mention_embeddings,
+            encoder,
         )
         # Each entity yields one pair; extend the global lists accordingly.
         target_data.extend(target_texts)

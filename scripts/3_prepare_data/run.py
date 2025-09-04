@@ -11,19 +11,10 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 import polars as pl
 import typer
 from datasets import load_dataset
-from tqdm import tqdm
 
-from syncabel.embeddings import (
-    TextEncoder,
-    save_embeddings_parquet,
-)
-from syncabel.embeddings import (
-    load_embeddings_parquet as _read_emb_map,
-)
 from syncabel.parse_data_v2 import process_bigbio_dataset
 
 app = typer.Typer(
@@ -69,250 +60,6 @@ def _yield_mentions_from_synth(json_path: Path) -> set[tuple[str, str]]:
     return mention_cui
 
 
-def _ensure_embeddings(
-    datasets: list[str],
-    out_dir: Path,
-    umls_parquet_mm: Path,
-    umls_parquet_quaero: Path,
-    synth_mm_path: Path,
-    synth_quaero_path: Path,
-    coder_model: str,
-) -> None:
-    """Ensure all required embedding parquet files exist; generate missing ones.
-
-    Required files per dataset:
-    - Synonyms: umls_synonyms_MM.parquet if MedMentions selected,
-                umls_synonyms_QUAERO.parquet if EMEA or MEDLINE selected.
-    - Mentions: mentions_{DATASET}.parquet for each selected dataset.
-    - Synthetic mentions (optional): mentions_SynthMM.parquet if SynthMM JSON exists,
-                                    mentions_SynthQUAERO.parquet if SynthQUAERO JSON exists.
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Determine which synonym spaces are needed
-    need_mm_syn = "MedMentions" in datasets
-    if need_mm_syn:
-        (out_dir / "MM").mkdir(parents=True, exist_ok=True)
-    need_quaero_syn = any(d in datasets for d in ["EMEA", "MEDLINE"])
-    if need_quaero_syn:
-        (out_dir / "QUAERO").mkdir(parents=True, exist_ok=True)
-    # required_files: list[Path] = []
-    # if need_mm_syn:
-    #     required_files.append(out_dir / "umls_synonyms_MM.parquet")
-    # if need_quaero_syn:
-    #     required_files.append(out_dir / "umls_synonyms_QUAERO.parquet")
-
-    # # Mentions for datasets
-    # for ds_name in datasets:
-    #     required_files.append(out_dir / f"mentions_{ds_name}.parquet")
-
-    # # Synthetic mention embeddings if JSON files exist
-    # if synth_mm_path.exists():
-    #     required_files.append(out_dir / "mentions_SynthMM.parquet")
-    # if synth_quaero_path.exists():
-    #     required_files.append(out_dir / "mentions_SynthQUAERO.parquet")
-
-    # missing = [p for p in required_files if not p.exists()]
-    # if not missing:
-    #     return
-
-    typer.echo("🔎 Some embedding files are missing. Generating them now…")
-    encoder = TextEncoder(model_name=coder_model)
-    typer.echo("CODER is loaded.")
-    # Synonym embeddings
-    # UMLS MM
-    if need_mm_syn:
-        if umls_parquet_mm.exists():
-            df_mm = pl.read_parquet(umls_parquet_mm)
-            # group CUIs -> synonyms
-            grouped = df_mm.group_by("CUI").agg(pl.col("Entity").drop_nulls().unique())
-            # Flatten all entities to one big list
-            all_synonyms = grouped["Entity"].explode().to_list()
-
-            # Encode once, in batches
-            typer.echo(f"Encoding {len(all_synonyms)} UMLS MM synonyms with CODER…")
-            embs = encoder.encode(all_synonyms, batch_size=1024, tqdm_bar=True)
-
-            # Map embeddings back to CUIs
-            typer.echo("Saving UMLS MM synonym embeddings per CUI to parquet…")
-            idx = 0
-            rows = []
-            for cui, syns in tqdm(
-                zip(grouped["CUI"].to_list(), grouped["Entity"].to_list()),
-                desc="CUIs",
-                unit="CUI",
-            ):
-                n = len(syns)
-                cui_embs = embs[idx : idx + n]
-                rows.append(
-                    pl.DataFrame({
-                        "CUI": [cui] * n,
-                        "Entity": syns,
-                        "embedding": cui_embs.tolist(),
-                    })
-                )
-                idx += n
-                save_embeddings_parquet(
-                    syns,
-                    cui_embs,
-                    out_dir / "MM" / f"umls_synonyms_MM_{cui}.parquet",
-                    extra_cols={"CUI": [cui] * n},
-                )
-        else:
-            typer.echo(f"⚠️ Missing UMLS MM parquet: {umls_parquet_mm}")
-
-    # UMLS QUAERO
-    if need_quaero_syn:
-        if umls_parquet_quaero.exists():
-            df_q = pl.read_parquet(umls_parquet_quaero)
-            # group CUIs -> synonyms
-            grouped = df_q.group_by("CUI").agg(pl.col("Entity").drop_nulls().unique())
-            # Flatten all entities to one big list
-            all_synonyms = grouped["Entity"].explode().to_list()
-            # Encode once, in batches
-            typer.echo(f"Encoding {len(all_synonyms)} UMLS QUAERO synonyms with CODER…")
-            embs = encoder.encode(all_synonyms, batch_size=1024, tqdm_bar=True)
-            # Map embeddings back to CUIs
-            typer.echo("Saving UMLS QUAERO synonym embeddings per CUI to parquet…")
-            idx = 0
-            rows = []
-            for cui, syns in tqdm(
-                zip(grouped["CUI"].to_list(), grouped["Entity"].to_list()),
-                desc="CUIs",
-                unit="CUI",
-            ):
-                n = len(syns)
-                cui_embs = embs[idx : idx + n]
-                rows.append(
-                    pl.DataFrame({
-                        "CUI": [cui] * n,
-                        "Entity": syns,
-                        "embedding": cui_embs.tolist(),
-                    })
-                )
-                idx += n
-                save_embeddings_parquet(
-                    syns,
-                    cui_embs,
-                    out_dir / "QUAERO" / f"umls_synonyms_QUAERO_{cui}.parquet",
-                    extra_cols={"CUI": [cui] * n},
-                )
-        else:
-            typer.echo(f"⚠️ Missing UMLS QUAERO parquet: {umls_parquet_quaero}")
-
-    # Mentions from datasets
-    ds_map = {
-        "MedMentions": ("bigbio/medmentions", "medmentions_st21pv_bigbio_kb"),
-        "EMEA": ("bigbio/quaero", "quaero_emea_bigbio_kb"),
-        "MEDLINE": ("bigbio/quaero", "quaero_medline_bigbio_kb"),
-    }
-    for ds_name in datasets:
-        typer.echo(f"Finding best synonyms for mentions in {ds_name}…")
-        out_path = out_dir / f"mentions_{ds_name}.parquet"
-        if out_path.exists() or ds_name not in ds_map:
-            continue
-        hf_id, cfg = ds_map[ds_name]
-        try:
-            ds = load_dataset(hf_id, name=cfg)
-        except Exception as e:  # pragma: no cover - network/IO variability
-            typer.echo(f"⚠️ Could not load dataset {ds_name} ({hf_id}:{cfg}): {e}")
-            continue
-        all_mentions_cuis = set()
-        results = []
-        for split in [k for k in ["train", "validation", "test"] if k in ds]:
-            all_mentions_cuis |= _yield_mentions_from_bigbio(ds[split])
-        for mention, cui in tqdm(all_mentions_cuis, desc="Mentions", unit="mention"):
-            mention_emb = encoder.encode([mention])[0]
-            # Get synonyms for this CUI from the appropriate UMLS parquet
-            if ds_name == "MedMentions":
-                syn_embs = pl.read_parquet(
-                    out_dir / "MM" / f"umls_synonyms_MM_{cui}.parquet"
-                )
-            else:
-                syn_embs = pl.read_parquet(
-                    out_dir / "QUAERO" / f"umls_synonyms_QUAERO_{cui}.parquet"
-                )
-            # Compute cosine similarity
-            sims = np.dot(syn_embs["embedding"], mention_emb) / (
-                np.linalg.norm(syn_embs["embedding"], axis=1)
-                * np.linalg.norm(mention_emb)
-                + 1e-8
-            )
-            best_idx = int(np.argmax(sims))
-            best_syn = syn_embs["text"][best_idx]
-            best_score = float(sims[best_idx])
-            results.append({
-                "mention": mention,
-                "CUI": cui,
-                "best_synonym": best_syn,
-                "similarity": best_score,
-            })
-
-        if results:
-            df_results = pl.DataFrame(results)
-            df_results.write_parquet(out_path)
-
-    # Mentions from synthetic JSONs
-    synth_inputs = [
-        ("SynthMM", synth_mm_path),
-        ("SynthQUAERO", synth_quaero_path),
-    ]
-    for name, path in synth_inputs:
-        typer.echo(f"Finding best synonyms for mentions in {name}…")
-        out_path = out_dir / f"mentions_{name}.parquet"
-        if not path.exists() or out_path.exists():
-            continue
-        all_mentions_cuis = _yield_mentions_from_synth(path)
-        results = []
-        for mention, cui in tqdm(all_mentions_cuis, desc="Mentions", unit="mention"):
-            mention_emb = encoder.encode([mention])[0]
-            # Get synonyms for this CUI from the appropriate UMLS parquet
-            if name == "SynthMM":
-                syn_embs = pl.read_parquet(
-                    out_dir / "MM" / f"umls_synonyms_MM_{cui}.parquet"
-                )
-            else:
-                syn_embs = pl.read_parquet(
-                    out_dir / "QUAERO" / f"umls_synonyms_QUAERO_{cui}.parquet"
-                )
-            # Compute cosine similarity
-            sims = np.dot(syn_embs["embedding"], mention_emb) / (
-                np.linalg.norm(syn_embs["embedding"], axis=1)
-                * np.linalg.norm(mention_emb)
-                + 1e-8
-            )
-            best_idx = int(np.argmax(sims))
-            best_syn = syn_embs["text"][best_idx]
-            best_score = float(sims[best_idx])
-            results.append({
-                "mention": mention,
-                "CUI": cui,
-                "best_synonym": best_syn,
-                "similarity": best_score,
-            })
-
-        if results:
-            df_results = pl.DataFrame(results)
-            df_results.write_parquet(out_path)
-
-
-def _load_syn_embeddings(emb_dir: Path, dataset_name: str):
-    # Choose UMLS synonym space based on dataset family
-    # MedMentions -> MM, EMEA/MEDLINE -> QUAERO
-    tag = "MM" if dataset_name == "MedMentions" else "QUAERO"
-    path = emb_dir / f"umls_synonyms_{tag}.parquet"
-    if path.exists():
-        return _read_emb_map(path)
-    return None
-
-
-def _load_mention_embeddings(emb_dir: Path, name: str):
-    path = emb_dir / f"mentions_{name}.parquet"
-    if path.exists():
-        return _read_emb_map(path)
-    return None
-
-
 def _load_json_if_exists(path: Path):
     if path and path.exists():
         with path.open("r", encoding="utf-8") as f:
@@ -322,7 +69,7 @@ def _load_json_if_exists(path: Path):
 
 def _build_mappings(umls_parquet: Path):
     df = pl.read_parquet(umls_parquet)
-    syn_df = df.with_columns(Syn=pl.col("Entity").str.split(" of type ").list.get(0))
+    syn_df = df.with_columns(Syn=pl.col("Entity"))
     cui_to_syn = dict(
         syn_df.group_by("CUI").agg([pl.col("Entity").unique()]).iter_rows()
     )
@@ -351,6 +98,7 @@ def _process_single_dataset(
     synth_data,
     syn_df,
     cui_to_syn,
+    encoder_name: str,
     model_names: list[str],
     start_entity: str,
     end_entity: str,
@@ -358,7 +106,6 @@ def _process_single_dataset(
     end_tag: str,
     out_root: Path,
     selection_method: str,
-    emb_dir: Path,
 ):
     typer.echo(f"→ Loading dataset {hf_id}:{hf_config} ...")
     ds = load_dataset(hf_id, name=hf_config)
@@ -367,14 +114,6 @@ def _process_single_dataset(
 
     # Determine sentence tokenizer language: MedMentions (English), else French for QUAERO variants.
     language = "english" if name == "MedMentions" else "french"
-
-    # Load embeddings once per dataset
-    syn_embeds = _load_syn_embeddings(
-        out_root.parent / "embeddings" if not emb_dir else emb_dir, name
-    )
-    mention_embeds = _load_mention_embeddings(
-        out_root.parent / "embeddings" if not emb_dir else emb_dir, name
-    )
 
     for model_name in model_names:
         typer.echo(f"  • Processing model {model_name}")
@@ -389,13 +128,9 @@ def _process_single_dataset(
                 CUI_to_Syn=cui_to_syn,
                 Syn_to_annotation=syn_df,
                 model_name=model_name,
+                encoder_name=encoder_name,
                 language=language,
                 selection_method=selection_method,
-                syn_embeddings=syn_embeds,
-                mention_embeddings=_load_mention_embeddings(
-                    out_root.parent / "embeddings" if not emb_dir else emb_dir,
-                    "SynthMM" if name == "MedMentions" else "SynthQUAERO",
-                ),
             )
         else:
             synth_src, synth_tgt = [], []
@@ -420,10 +155,9 @@ def _process_single_dataset(
                 CUI_to_Syn=cui_to_syn,
                 Syn_to_annotation=syn_df,
                 model_name=model_name,
+                encoder_name=encoder_name,
                 language=language,
                 selection_method=selection_method,
-                syn_embeddings=syn_embeds,
-                mention_embeddings=mention_embeds,
             )
             processed[split_name] = (src, tgt)
 
@@ -452,10 +186,7 @@ def run(
     selection_method: str = typer.Option(
         "embedding", help="Annotation selection: 'levenshtein' or 'embedding'"
     ),
-    embeddings_dir: Path = typer.Option(
-        Path("data/embeddings"), help="Directory with precomputed embeddings"
-    ),
-    coder_model: str = typer.Option(
+    encoder_name: str = typer.Option(
         "GanjinZero/coder-all", help="Text encoder model for embeddings"
     ),
     synth_mm_path: Path = typer.Option(
@@ -480,17 +211,6 @@ def run(
     """Run preprocessing pipeline for selected datasets and models."""
     model_list = _iter_selected(models, DEFAULT_MODELS)
     typer.echo(f"Models: {model_list}")
-
-    # Ensure required embeddings exist (generate missing ones automatically)
-    _ensure_embeddings(
-        datasets,
-        embeddings_dir,
-        umls_mm_parquet,
-        umls_quaero_parquet,
-        synth_mm_path,
-        synth_quaero_path,
-        coder_model,
-    )
 
     # Load UMLS mapping resources
     syn_mm_df, cui_to_syn_mm = _build_mappings(umls_mm_parquet)
@@ -517,6 +237,7 @@ def run(
             synth_mm,
             syn_mm_df,
             cui_to_syn_mm,
+            encoder_name,
             model_list,
             start_entity,
             end_entity,
@@ -524,7 +245,6 @@ def run(
             end_tag,
             out_root,
             selection_method,
-            embeddings_dir,
         )
     if "EMEA" in datasets:
         _process_single_dataset(
@@ -534,6 +254,7 @@ def run(
             synth_quaero,
             syn_quaero_df,
             cui_to_syn_quaero,
+            encoder_name,
             model_list,
             start_entity,
             end_entity,
@@ -541,7 +262,6 @@ def run(
             end_tag,
             out_root,
             selection_method,
-            embeddings_dir,
         )
     if "MEDLINE" in datasets:
         _process_single_dataset(
@@ -551,6 +271,7 @@ def run(
             synth_quaero,
             syn_quaero_df,
             cui_to_syn_quaero,
+            encoder_name,
             model_list,
             start_entity,
             end_entity,
@@ -558,7 +279,6 @@ def run(
             end_tag,
             out_root,
             selection_method,
-            embeddings_dir,
         )
     typer.echo("✅ Preprocessing complete.")
 
