@@ -86,37 +86,44 @@ def main(
     augmented_data: bool,
     with_group: bool = False,
     selection_method: str = "embedding",
+    start_mention: str = "[",
+    end_mention: str = "]",
 ):
     print(
         f"The model {model_name} will start training with learning rate {lr} on dataset {dataset_name} {'with' if augmented_data else 'without'} augmented data and selection method {selection_method}."
     )
     model_short_name = model_name.split("/")[-1]
+    # Initialize Distributed Training
+    # The Trainer will handle the distributed training setup automatically.
+    # No need to manually initialize the process group.
     if model_short_name == "mt5-xl":
         # Remove the DDP initialization completely
         if dist.is_available() and dist.is_initialized():
             dist.destroy_process_group()
 
-    # Initialize Distributed Training
-    elif dist.is_available() and not dist.is_initialized():
-        dist.init_process_group(backend="nccl")
-
-    # Define model paths
-    root_path = Path("/models")
-    model_path = root_path / model_name
-
     # Load tokenizer and model
-    start_mention, end_mention = "[", "]"
-    tokenizer = AutoTokenizer.from_pretrained(model_path, add_prefix_space=False)
-    tokenizer.add_special_tokens(
-        {
-            "additional_special_tokens": [
-                start_mention,
-                end_mention,
-            ]
-        },
-        replace_additional_special_tokens=False,
-    )
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_name, add_prefix_space=False)
+        tokenizer.add_special_tokens(
+            {
+                "additional_special_tokens": [
+                    start_mention,
+                    end_mention,
+                ]
+            },
+            replace_additional_special_tokens=False,
+        )
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+    except Exception as hub_err:  # pragma: no cover - network / availability branch
+        local_dir = Path("models") / str(model_name)
+        if local_dir.exists():
+            print(
+                f"⚠️ Hub load failed for '{model_name}' ({hub_err}); falling back to local path {local_dir}."
+            )
+            tokenizer = AutoTokenizer.from_pretrained(str(local_dir))
+            model = AutoModelForSeq2SeqLM.from_pretrained(str(local_dir))
+        else:
+            raise hub_err
 
     # Make sure all model parameters are contiguous on memory. This is necessary to save model state dict as safetensor
     for name, param in model.named_parameters():
@@ -319,6 +326,18 @@ if __name__ == "__main__":
         choices=["embedding", "tfidf", "levenshtein"],
         help="The method to select concept synonyms",
     )
+    parser.add_argument(
+        "--start-mention",
+        type=str,
+        default="[",
+        help="The token to indicate the start of a mention",
+    )
+    parser.add_argument(
+        "--end-mention",
+        type=str,
+        default="]",
+        help="The token to indicate the end of a mention",
+    )
     # Parse the command-line arguments
     args = parser.parse_args()
 
@@ -330,4 +349,6 @@ if __name__ == "__main__":
         args.augmented_data,
         args.with_group,
         args.selection_method,
+        args.start_mention,
+        args.end_mention,
     )
