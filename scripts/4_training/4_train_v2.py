@@ -1,7 +1,6 @@
 import argparse
 import glob
 import pickle
-import re
 import shutil
 from functools import partial
 from pathlib import Path
@@ -17,19 +16,19 @@ from transformers import (
     Seq2SeqTrainingArguments,  # type: ignore
 )
 
-from syncabel.utils import (
-    get_entity_spans_finalize,
-    get_macro_f1,
-    get_macro_precision,
-    get_macro_recall,
-    get_micro_f1,
-    get_micro_precision,
-    get_micro_recall,
-)
-
 
 # Preprocess function for tokenization
 def preprocess_function(examples, tokenizer):
+    """
+    Tokenizes the source and target texts in the examples dictionary using the provided tokenizer.
+
+    Args:
+        examples (dict): A dictionary containing 'source' and 'target' keys with lists of texts.
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for encoding the texts.
+
+    Returns:
+        dict: A dictionary containing tokenized inputs and labels suitable for seq2seq training.
+    """
     inputs = tokenizer(examples["source"], padding="longest", return_tensors="pt")
     targets = tokenizer(examples["target"], padding="longest", return_tensors="pt")
 
@@ -41,14 +40,7 @@ def preprocess_function(examples, tokenizer):
 
 # Define evaluation metrics
 def skip_undesired_tokens(outputs, tokenizer):
-    if any("tag" in token for token in tokenizer.all_special_tokens):
-        tokens_to_remove = tokenizer.all_special_tokens[:-3]
-    elif any("{" in token for token in tokenizer.all_special_tokens):
-        tokens_to_remove = tokenizer.all_special_tokens[:-4]
-        # if "mt5" in tokenizer.name_or_path:
-        #     outputs = [sequence[0] + sequence[1:].replace("[", " [") for sequence in outputs]
-    else:
-        tokens_to_remove = tokenizer.all_special_tokens
+    tokens_to_remove = tokenizer.all_special_tokens
     cleaned_outputs = []
     for sequence in outputs:
         for token in tokens_to_remove:
@@ -57,15 +49,7 @@ def skip_undesired_tokens(outputs, tokenizer):
     return cleaned_outputs
 
 
-def get_entity_spans(sources, labels, start_entity, start_tag, end_tag):
-    result = get_entity_spans_finalize(
-        sources, labels, start_entity, start_tag, end_tag
-    )
-    result = [(k,) + tuple(x) for k, e in zip(range(len(result)), result) for x in e]
-    return result
-
-
-def compute_metrics(eval_preds, tokenizer, start_entity, start_tag, end_tag):
+def compute_metrics(eval_preds, tokenizer):
     preds, labels = eval_preds
     if isinstance(preds, tuple):
         preds = preds[0]
@@ -83,32 +67,15 @@ def compute_metrics(eval_preds, tokenizer, start_entity, start_tag, end_tag):
     decoded_preds = skip_undesired_tokens(decoded_preds, tokenizer)
     decoded_labels = skip_undesired_tokens(decoded_labels, tokenizer)
 
-    # Compute source from labels
-    reg_start_entity, reg_start_tag, reg_end_tag = (
-        token.replace("|", r"\|")
-        .replace("/", r"\/")
-        .replace("[", r"\[")
-        .replace("]", r"\]")
-        for token in (start_entity, start_tag, end_tag)
-    )
-    sources = [
-        re.sub(rf"{reg_start_entity}|{reg_start_tag}.*?{reg_end_tag}", "", sent)
-        for sent in decoded_labels
-    ]
-    gold_entities = get_entity_spans(
-        sources, decoded_labels, start_entity, start_tag, end_tag
-    )
-    guess_entities = get_entity_spans(
-        sources, decoded_preds, start_entity, start_tag, end_tag
-    )
+    # Compute recall
+    recall = sum(
+        pred == gold for pred, gold in zip(decoded_preds, decoded_labels)
+    ) / len(decoded_labels)
 
     return {
-        "micro_p": round(get_micro_precision(guess_entities, gold_entities), 4),  # type: ignore
-        "micro_r": round(get_micro_recall(guess_entities, gold_entities), 4),  # type: ignore
-        "micro_f1": round(get_micro_f1(guess_entities, gold_entities), 4),
-        "macro_p": round(get_macro_precision(guess_entities, gold_entities), 4),
-        "macro_r": round(get_macro_recall(guess_entities, gold_entities), 4),
-        "macro_f1": round(get_macro_f1(guess_entities, gold_entities), 4),
+        "recall": round(recall, 4),
+        "num_gold": len(decoded_labels),
+        "num_guess": len(decoded_preds),
     }
 
 
@@ -117,13 +84,14 @@ def main(
     lr: float,
     dataset_name: str,
     augmented_data: bool,
+    with_group: bool = False,
     selection_method: str = "embedding",
 ):
     print(
         f"The model {model_name} will start training with learning rate {lr} on dataset {dataset_name} {'with' if augmented_data else 'without'} augmented data and selection method {selection_method}."
     )
-
-    if model_name == "mt5-xl":
+    model_short_name = model_name.split("/")[-1]
+    if model_short_name == "mt5-xl":
         # Remove the DDP initialization completely
         if dist.is_available() and dist.is_initialized():
             dist.destroy_process_group()
@@ -133,8 +101,8 @@ def main(
         dist.init_process_group(backend="nccl")
 
     # Define model paths
-    root_path = "/models"
-    model_path = root_path + "/" + model_name
+    root_path = Path("/models")
+    model_path = root_path / model_name
 
     # Load tokenizer and model
     start_mention, end_mention = "[", "]"
@@ -157,14 +125,23 @@ def main(
             param.data = param.data.contiguous()
 
     # Load and preprocess data
+    with_group_extension = "_with_group" if with_group else ""
     data_folder = Path("/data/final_data")
-    with open(data_folder / dataset_name / "train_source.pkl", "rb") as file:
+    with open(
+        data_folder / dataset_name / f"train_source{with_group_extension}.pkl", "rb"
+    ) as file:
         train_source_data = pickle.load(file)
-    with open(data_folder / dataset_name / "train_target.pkl", "rb") as file:
+    with open(
+        data_folder / dataset_name / f"train_target{with_group_extension}.pkl", "rb"
+    ) as file:
         train_target_data = pickle.load(file)
-    with open(data_folder / dataset_name / "dev_source.pkl", "rb") as file:
+    with open(
+        data_folder / dataset_name / f"dev_source{with_group_extension}.pkl", "rb"
+    ) as file:
         dev_source_data = pickle.load(file)
-    with open(data_folder / dataset_name / "dev_target.pkl", "rb") as file:
+    with open(
+        data_folder / dataset_name / f"dev_target{with_group_extension}.pkl", "rb"
+    ) as file:
         dev_target_data = pickle.load(file)
 
     train_data = {"source": train_source_data, "target": train_target_data}
@@ -184,14 +161,26 @@ def main(
 
     if augmented_data:
         if dataset_name == "MedMentions":
-            with open(data_folder / "SynthMM" / "train_source.pkl", "rb") as file:
+            with open(
+                data_folder / "SynthMM" / f"train_source{with_group_extension}.pkl",
+                "rb",
+            ) as file:
                 train_generated_source_data = pickle.load(file)
-            with open(data_folder / "SynthMM" / "train_target.pkl", "rb") as file:
+            with open(
+                data_folder / "SynthMM" / f"train_target{with_group_extension}.pkl",
+                "rb",
+            ) as file:
                 train_generated_target_data = pickle.load(file)
         else:
-            with open(data_folder / "SynthQUAERO" / "train_source.pkl", "rb") as file:
+            with open(
+                data_folder / "SynthQUAERO" / f"train_source{with_group_extension}.pkl",
+                "rb",
+            ) as file:
                 train_generated_source_data = pickle.load(file)
-            with open(data_folder / "SynthQUAERO" / "train_target.pkl", "rb") as file:
+            with open(
+                data_folder / "SynthQUAERO" / f"train_target{with_group_extension}.pkl",
+                "rb",
+            ) as file:
                 train_generated_target_data = pickle.load(file)
         train_generated_data = {
             "source": train_generated_source_data,
@@ -214,16 +203,16 @@ def main(
     data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
 
     # Training params
-    train_max_batch = 6 if "mt5" in model_name else 16
-    eval_max_batch = 6 if "mt5" in model_name else 16
+    train_max_batch = 6
+    eval_max_batch = 6
     eval_accumulation_steps = None
-    gradient_accumulation_steps = 1
+    gradient_accumulation_steps = 2
     ddp_backend = "nccl"  # Enable Distributed Data Parallel with NCCL backend
     auto_find_batch_size = False
     fsdp = ""
     fsdp_transformer_layer_cls_to_wrap = None
     gradient_checkpointing = False
-    if model_name == "mt5-xl":
+    if model_short_name == "mt5-xl":
         fsdp = ["full_shard", "auto_wrap"]
         fsdp_transformer_layer_cls_to_wrap = "MT5Block"
         ddp_backend = None  # Enable Distributed Data Parallel with NCCL backend
@@ -234,13 +223,11 @@ def main(
         eval_accumulation_steps = (
             int(len(validation_dataset) / (eval_max_batch * 2)) + 2
         )
-    elif model_name == "mt5-large":
-        gradient_accumulation_steps = 2
-    output_dir = f"/models/{dataset_name}_{'augmented' if augmented_data else 'original'}/{model_name}"
+    output_dir = f"/models/NED/{dataset_name}_{'augmented' if augmented_data else 'original'}_{selection_method}{with_group_extension}/{model_short_name}"
     print(f"BATCH SIZE : {train_max_batch}")
     training_args = Seq2SeqTrainingArguments(
         output_dir=output_dir,
-        logging_dir=f"data/logs/{dataset_name}_{'augmented' if augmented_data else 'original'}/{model_name}",
+        logging_dir=f"data/logs/{dataset_name}_{'augmented' if augmented_data else 'original'}_{selection_method}{with_group_extension}/{model_short_name}",
         logging_strategy="epoch",
         report_to="tensorboard",
         eval_strategy="epoch",
@@ -259,7 +246,7 @@ def main(
         bf16_full_eval=True,
         label_smoothing_factor=0.1,
         load_best_model_at_end=True,
-        metric_for_best_model="eval_micro_f1",
+        metric_for_best_model="eval_recall",
         greater_is_better=True,
         # eval_on_start=True,
         seed=42,
@@ -280,9 +267,6 @@ def main(
         compute_metrics=partial(
             compute_metrics,
             tokenizer=tokenizer,
-            start_entity="[",
-            start_tag="]{",
-            end_tag="}",
         ),
     )
 
@@ -323,8 +307,27 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to use augmented data for training",
     )
+    parser.add_argument(
+        "--with-group",
+        action="store_true",
+        help="Whether to use data with group annotations for training",
+    )
+    parser.add_argument(
+        "--selection-method",
+        type=str,
+        default="embedding",
+        choices=["embedding", "tfidf", "levenshtein"],
+        help="The method to select concept synonyms",
+    )
     # Parse the command-line arguments
     args = parser.parse_args()
 
     # Pass the parsed argument to the main function
-    main(args.model_name, args.lr, args.dataset_name, args.augmented_data)
+    main(
+        args.model_name,
+        args.lr,
+        args.dataset_name,
+        args.augmented_data,
+        args.with_group,
+        args.selection_method,
+    )
