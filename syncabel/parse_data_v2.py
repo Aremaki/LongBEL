@@ -88,7 +88,7 @@ def parse_text(
             # rel_end isn't strictly required for sentence selection, but computed for completeness
             # rel_end = global_end - start_offset_passage
 
-            entity_text = " ".join([entity["text"]])
+            entity_text = " ".join(entity["text"])
             if natural:
                 entity_text = clean_natural(entity_text)
 
@@ -292,7 +292,7 @@ def compute_best_synonym_df(
             cui = ent["normalized"][0]["db_id"]
             if corrected_cui and cui in corrected_cui:
                 cui = corrected_cui[cui]
-            mention = clean_natural(" ".join([ent["text"]]))
+            mention = clean_natural(" ".join(ent["text"]))
             unique_pairs.add((cui, mention))
             present_cuis.add(cui)
 
