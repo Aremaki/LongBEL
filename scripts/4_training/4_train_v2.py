@@ -126,28 +126,28 @@ def main(
     with open(
         data_folder
         / dataset_name
-        / f"train_source_{selection_method}{with_group_extension}.pkl",
+        / f"train_{selection_method}_source{with_group_extension}.pkl",
         "rb",
     ) as file:
         train_source_data = pickle.load(file)
     with open(
         data_folder
         / dataset_name
-        / f"train_target_{selection_method}{with_group_extension}.pkl",
+        / f"train_{selection_method}_target{with_group_extension}.pkl",
         "rb",
     ) as file:
         train_target_data = pickle.load(file)
     with open(
         data_folder
         / dataset_name
-        / f"dev_source_{selection_method}{with_group_extension}.pkl",
+        / f"dev_{selection_method}_source{with_group_extension}.pkl",
         "rb",
     ) as file:
         dev_source_data = pickle.load(file)
     with open(
         data_folder
         / dataset_name
-        / f"dev_target_{selection_method}{with_group_extension}.pkl",
+        / f"dev_{selection_method}_target{with_group_extension}.pkl",
         "rb",
     ) as file:
         dev_target_data = pickle.load(file)
@@ -172,14 +172,14 @@ def main(
             with open(
                 data_folder
                 / "SynthMM"
-                / f"train_source_{selection_method}{with_group_extension}.pkl",
+                / f"train_{selection_method}_source{with_group_extension}.pkl",
                 "rb",
             ) as file:
                 train_generated_source_data = pickle.load(file)
             with open(
                 data_folder
                 / "SynthMM"
-                / f"train_target_{selection_method}{with_group_extension}.pkl",
+                / f"train_{selection_method}_target{with_group_extension}.pkl",
                 "rb",
             ) as file:
                 train_generated_target_data = pickle.load(file)
@@ -187,14 +187,14 @@ def main(
             with open(
                 data_folder
                 / "SynthQUAERO"
-                / f"train_source_{selection_method}{with_group_extension}.pkl",
+                / f"train_{selection_method}_source{with_group_extension}.pkl",
                 "rb",
             ) as file:
                 train_generated_source_data = pickle.load(file)
             with open(
                 data_folder
                 / "SynthQUAERO"
-                / f"train_target_{selection_method}{with_group_extension}.pkl",
+                / f"train_{selection_method}_target{with_group_extension}.pkl",
                 "rb",
             ) as file:
                 train_generated_target_data = pickle.load(file)
