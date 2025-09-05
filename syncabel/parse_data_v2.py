@@ -55,6 +55,7 @@ def parse_text(
         if available (or the normalized id otherwise).
     """
     source_sentences: list[str] = []
+    source_with_group_sentences: list[str] = []
     target_sentences: list[str] = []
 
     # Build a fast lookup of sentence spans per passage
@@ -193,32 +194,41 @@ def parse_text(
             # Sort spans in reverse to mark from the end, preventing offset shifts
             all_spans_in_sent.sort(key=lambda x: x[0], reverse=True)
 
+            marked_with_group_text = marked_sent_text
             for i, (start_in_sent, end_in_sent) in enumerate(all_spans_in_sent):
                 if i == len(all_spans_in_sent) - 1:
-                    marked_sent_text = (
-                        marked_sent_text[:start_in_sent]
+                    marked_with_group_text = (
+                        marked_with_group_text[:start_in_sent]
                         + start_entity
-                        + marked_sent_text[start_in_sent:end_in_sent]
+                        + marked_with_group_text[start_in_sent:end_in_sent]
                         + end_entity
                         + start_group
                         + group
                         + end_group
-                        + marked_sent_text[end_in_sent:]
+                        + marked_with_group_text[end_in_sent:]
                     )
                 else:
-                    marked_sent_text = (
-                        marked_sent_text[:start_in_sent]
+                    marked_with_group_text = (
+                        marked_with_group_text[:start_in_sent]
                         + start_entity
-                        + marked_sent_text[start_in_sent:end_in_sent]
+                        + marked_with_group_text[start_in_sent:end_in_sent]
                         + end_entity
-                        + marked_sent_text[end_in_sent:]
+                        + marked_with_group_text[end_in_sent:]
                     )
+                marked_sent_text = (
+                    marked_sent_text[:start_in_sent]
+                    + start_entity
+                    + marked_sent_text[start_in_sent:end_in_sent]
+                    + end_entity
+                    + marked_sent_text[end_in_sent:]
+                )
 
             # Emit the pair
             source_sentences.append(marked_sent_text)
+            source_with_group_sentences.append(marked_with_group_text)
             target_sentences.append(f"{entity_text} is {annotation}")
 
-    return source_sentences, target_sentences
+    return source_sentences, source_with_group_sentences, target_sentences
 
 
 def process_bigbio_dataset(
@@ -253,6 +263,7 @@ def process_bigbio_dataset(
         nlp = nltk.data.load("tokenizers/punkt/english.pickle")
     target_data = []
     source_data = []
+    source_with_group_data = []
     if selection_method == "embedding" and encoder_name and best_syn_map is None:
         encoder = TextEncoder(model_name=encoder_name)
         print(f"Using embedding-based selection with encoder '{encoder_name}'.")
@@ -273,7 +284,7 @@ def process_bigbio_dataset(
         tfidf_vectorizer = None
 
     for page in tqdm(bigbio_dataset, total=len(bigbio_dataset)):
-        source_texts, target_texts = parse_text(
+        source_texts, source_with_group_texts, target_texts = parse_text(
             page,
             start_entity,
             end_entity,
@@ -292,7 +303,9 @@ def process_bigbio_dataset(
         # Each entity yields one pair; extend the global lists accordingly.
         target_data.extend(target_texts)
         source_data.extend(source_texts)
-    return source_data, target_data
+        source_with_group_data.extend(source_with_group_texts)
+
+    return source_data, source_with_group_data, target_data
 
 
 def compute_best_synonym_df(

@@ -168,7 +168,7 @@ def _process_hf_dataset(
     for split_name, split_data in splits.items():
         if not split_data:
             continue
-        src, tgt = process_bigbio_dataset(
+        src, src_with_group, tgt = process_bigbio_dataset(
             split_data,
             start_entity,
             end_entity,
@@ -184,13 +184,17 @@ def _process_hf_dataset(
             selection_method=selection_method,
             best_syn_map=best_syn_map,
         )
-        processed[split_name] = (src, tgt)
+        processed[split_name] = (src, src_with_group, tgt)
 
     # Write outputs
-    for split_name, (src, tgt) in processed.items():
+    for split_name, (src, src_with_group, tgt) in processed.items():
         _dump(
             src,
             data_folder / f"{split_name}_{selection_method}_source.pkl",
+        )
+        _dump(
+            src_with_group,
+            data_folder / f"{split_name}_{selection_method}_source_with_group.pkl",
         )
         _dump(
             tgt,
@@ -233,7 +237,7 @@ def _process_synth_dataset(
         )
 
     typer.echo(f"  • Processing synthetic dataset {name} ...")
-    src, tgt = process_bigbio_dataset(
+    src, src_with_group, tgt = process_bigbio_dataset(
         synth_pages,
         start_entity,
         end_entity,
@@ -250,6 +254,9 @@ def _process_synth_dataset(
     )
     # Treat as train split for the synthetic dataset
     _dump(src, data_folder / f"train_{selection_method}_source.pkl")
+    _dump(
+        src_with_group, data_folder / f"train_{selection_method}_source_with_group.pkl"
+    )
     _dump(tgt, data_folder / f"train_{selection_method}_target.pkl")
 
 
