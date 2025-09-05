@@ -18,5 +18,5 @@ module load arch/h100
 module load pytorch-gpu/py3/2.3.1
 
 # Train models
-python scripts/4_training/4_train_v2.py "$@"
+python scripts/4_training/4_train_v2.py $SCRIPT_ARGS
 echo SCRIPT FINISHED

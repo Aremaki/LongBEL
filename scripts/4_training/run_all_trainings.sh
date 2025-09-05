@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Define arrays for the parameters
-DATASETS=("MedMentions" "QUAERO")
+DATASETS=("MedMentions")
 SELECTION_METHODS=("embedding" "tfidf" "levenshtein")
-AUGMENTED_OPTIONS=(true false)
+AUGMENTED_OPTIONS=(false)
 WITH_GROUP_OPTIONS=(true false)
 
 # Loop over all combinations
@@ -21,7 +21,7 @@ for dataset in "${DATASETS[@]}"; do
                 fi
 
                 # Submit the Slurm job
-                sbatch scripts/4_training/run.slurm "${ARGS}"
+                sbatch --export=ALL,SCRIPT_ARGS="${ARGS}" -A ssq@h100 scripts/4_training/run.slurm
                 echo "Submitted job for: ${ARGS}"
                 sleep 1 # To avoid overwhelming the scheduler
             done
