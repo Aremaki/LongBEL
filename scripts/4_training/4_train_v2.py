@@ -86,8 +86,6 @@ def main(
     augmented_data: bool,
     with_group: bool = False,
     selection_method: str = "embedding",
-    start_mention: str = "[",
-    end_mention: str = "]",
 ):
     print(
         f"The model {model_name} will start training with learning rate {lr} on dataset {dataset_name} {'with' if augmented_data else 'without'} augmented data and selection method {selection_method}."
@@ -103,16 +101,7 @@ def main(
 
     # Load tokenizer and model
     try:
-        tokenizer = AutoTokenizer.from_pretrained(model_name, add_prefix_space=False)
-        tokenizer.add_special_tokens(
-            {
-                "additional_special_tokens": [
-                    start_mention,
-                    end_mention,
-                ]
-            },
-            replace_additional_special_tokens=False,
-        )
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
     except Exception as hub_err:  # pragma: no cover - network / availability branch
         local_dir = Path("models") / str(model_name)
@@ -133,21 +122,33 @@ def main(
 
     # Load and preprocess data
     with_group_extension = "_with_group" if with_group else ""
-    data_folder = Path("/data/final_data")
+    data_folder = Path("data/final_data")
     with open(
-        data_folder / dataset_name / f"train_source{with_group_extension}.pkl", "rb"
+        data_folder
+        / dataset_name
+        / f"train_source_{selection_method}{with_group_extension}.pkl",
+        "rb",
     ) as file:
         train_source_data = pickle.load(file)
     with open(
-        data_folder / dataset_name / f"train_target{with_group_extension}.pkl", "rb"
+        data_folder
+        / dataset_name
+        / f"train_target_{selection_method}{with_group_extension}.pkl",
+        "rb",
     ) as file:
         train_target_data = pickle.load(file)
     with open(
-        data_folder / dataset_name / f"dev_source{with_group_extension}.pkl", "rb"
+        data_folder
+        / dataset_name
+        / f"dev_source_{selection_method}{with_group_extension}.pkl",
+        "rb",
     ) as file:
         dev_source_data = pickle.load(file)
     with open(
-        data_folder / dataset_name / f"dev_target{with_group_extension}.pkl", "rb"
+        data_folder
+        / dataset_name
+        / f"dev_target_{selection_method}{with_group_extension}.pkl",
+        "rb",
     ) as file:
         dev_target_data = pickle.load(file)
 
@@ -169,23 +170,31 @@ def main(
     if augmented_data:
         if dataset_name == "MedMentions":
             with open(
-                data_folder / "SynthMM" / f"train_source{with_group_extension}.pkl",
+                data_folder
+                / "SynthMM"
+                / f"train_source_{selection_method}{with_group_extension}.pkl",
                 "rb",
             ) as file:
                 train_generated_source_data = pickle.load(file)
             with open(
-                data_folder / "SynthMM" / f"train_target{with_group_extension}.pkl",
+                data_folder
+                / "SynthMM"
+                / f"train_target_{selection_method}{with_group_extension}.pkl",
                 "rb",
             ) as file:
                 train_generated_target_data = pickle.load(file)
         else:
             with open(
-                data_folder / "SynthQUAERO" / f"train_source{with_group_extension}.pkl",
+                data_folder
+                / "SynthQUAERO"
+                / f"train_source_{selection_method}{with_group_extension}.pkl",
                 "rb",
             ) as file:
                 train_generated_source_data = pickle.load(file)
             with open(
-                data_folder / "SynthQUAERO" / f"train_target{with_group_extension}.pkl",
+                data_folder
+                / "SynthQUAERO"
+                / f"train_target_{selection_method}{with_group_extension}.pkl",
                 "rb",
             ) as file:
                 train_generated_target_data = pickle.load(file)
@@ -326,18 +335,7 @@ if __name__ == "__main__":
         choices=["embedding", "tfidf", "levenshtein"],
         help="The method to select concept synonyms",
     )
-    parser.add_argument(
-        "--start-mention",
-        type=str,
-        default="[",
-        help="The token to indicate the start of a mention",
-    )
-    parser.add_argument(
-        "--end-mention",
-        type=str,
-        default="]",
-        help="The token to indicate the end of a mention",
-    )
+
     # Parse the command-line arguments
     args = parser.parse_args()
 
@@ -349,6 +347,4 @@ if __name__ == "__main__":
         args.augmented_data,
         args.with_group,
         args.selection_method,
-        args.start_mention,
-        args.end_mention,
     )
