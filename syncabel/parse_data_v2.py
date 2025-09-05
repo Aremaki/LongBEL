@@ -150,7 +150,7 @@ def parse_text(
                 best_syn = possible_syns[int(np.argmin(dists))]
                 annotation = best_syn
             if annotation is None:
-                # If no synonyms mapping, fall back to the normalized id
+                # If no synonyms mapping, skip entity
                 logging.warning(
                     f"No synonyms found for CUI {normalized_id} (entity '{entity_text}'); skipping entity."
                 )
@@ -196,7 +196,7 @@ def parse_text(
 
             marked_with_group_text = marked_sent_text
             for i, (start_in_sent, end_in_sent) in enumerate(all_spans_in_sent):
-                if i == len(all_spans_in_sent) - 1:
+                if i == 0:
                     marked_with_group_text = (
                         marked_with_group_text[:start_in_sent]
                         + start_entity
