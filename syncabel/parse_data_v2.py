@@ -106,32 +106,43 @@ def parse_text(
                 possible_syns = None
 
             # Prefer precomputed best synonyms if provided
-            if best_syn_map is not None:
-                pre_key = (normalized_id, entity_text)
-                if pre_key in best_syn_map:
-                    annotation = best_syn_map[pre_key]
-            # Otherwise select from possible synonyms
-            if annotation is None and possible_syns:
-                if selection_method == "embedding" and encoder is not None:
+            if selection_method == "embedding":
+                if best_syn_map is not None:
+                    pre_key = (normalized_id, entity_text)
+                    if pre_key in best_syn_map:
+                        annotation = best_syn_map[pre_key]
+                # Otherwise select from possible synonyms
+                if annotation is None and possible_syns and encoder is not None:
+                    logging.warning(
+                        f"No precomputed best synonym map provided; Selecting best synonym by embedding for CUI {normalized_id} (entity '{entity_text}')"
+                    )
                     best_syn, _ = best_by_cosine(
                         encoder=encoder,
                         mention=entity_text,
                         candidates=list(possible_syns),
                     )  # type: ignore
-                    annotation = best_syn if best_syn is not None else normalized_id
-                elif selection_method == "tfidf" and tfidf_vectorizer is not None:
+                    annotation = best_syn
+            elif selection_method == "tfidf":
+                if possible_syns and tfidf_vectorizer is not None:
                     best_idx, best_score = cal_similarity_tfidf(
                         possible_syns, entity_text, tfidf_vectorizer
                     )
                     annotation = possible_syns[best_idx]
                 else:
-                    # Default to Levenshtein matching (previous behavior)
-                    text = entity_text
-                    dists = [nltk.edit_distance(text, syn) for syn in possible_syns]
-                    best_syn = possible_syns[int(np.argmin(dists))]
-                    annotation = best_syn
+                    logging.warning(
+                        f"TF-IDF selection requested but no synonyms or vectorizer available for CUI {normalized_id} (entity '{entity_text}');"
+                    )
+            elif selection_method == "levenshtein" and possible_syns:
+                # Default to Levenshtein matching (previous behavior)
+                text = entity_text
+                dists = [nltk.edit_distance(text, syn) for syn in possible_syns]
+                best_syn = possible_syns[int(np.argmin(dists))]
+                annotation = best_syn
             if annotation is None:
                 # If no synonyms mapping, fall back to the normalized id
+                logging.warning(
+                    f"No synonyms found for CUI {normalized_id} (entity '{entity_text}'); using CUI as annotation."
+                )
                 annotation = normalized_id
 
             if natural and isinstance(annotation, str):
