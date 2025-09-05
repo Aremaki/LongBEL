@@ -48,7 +48,7 @@ You can choose how the script selects the best synonym for the target sequence:
 | `--end-entity` | `]` | Closing marker for entity mentions in the source text. |
 | `--selection-method` | `embedding` | How to pick the best annotation: `levenshtein`, `embedding`, or `tfidf`. |
 | `--encoder-name` | `encoder/coder-all` | Sentence Transformer model for embedding-based selection. |
-| `--tfidf-vectorizer-path` | `encoder/umls_tfidf_vectorizer.joblib` | Path to the pre-trained TF-IDF vectorizer model. |
+| `--tfidf-vectorizer-path` | `models/encoder/umls_tfidf_vectorizer.joblib` | Path to the pre-trained TF-IDF vectorizer model. |
 | `--synth-mm-path` | `data/synthetic_data/SynthMM/SynthMM_bigbio.json` | Path to synthetic MedMentions-style data. |
 | `--synth-quaero-path`| `data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio.json` | Path to synthetic QUAERO-style data. |
 | `--umls-mm-parquet` | `data/UMLS_processed/MM/all_disambiguated.parquet` | Path to UMLS concepts for MedMentions. |

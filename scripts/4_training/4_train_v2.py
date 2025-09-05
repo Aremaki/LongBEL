@@ -9,7 +9,6 @@ from pathlib import Path
 import numpy as np
 import torch.distributed as dist
 from datasets import Dataset, concatenate_datasets
-from tqdm import tqdm
 from transformers import (
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
@@ -27,93 +26,6 @@ from syncabel.utils import (
     get_micro_precision,
     get_micro_recall,
 )
-
-
-# Preprocessing function
-def get_pointer_end(target_passage, source, start_entity, end_entity):
-    i = 0
-    j = 0
-    len_s_entity = len(start_entity)
-    len_e_entity = len(end_entity)
-    while i < len(target_passage):
-        if target_passage[i : i + len_s_entity] == start_entity:
-            i += len_s_entity
-            while target_passage[i : i + len_e_entity] != end_entity:
-                i += 1
-            i += len_e_entity
-        elif target_passage[i] == source[j]:
-            i += 1
-            j += 1
-        else:
-            print(target_passage[:])
-            print(source[:])
-            raise RuntimeError("Source and Target misaligned")
-    return j
-
-
-# Preprocessing function
-def load_data(
-    source_data,
-    target_data,
-    nlp,
-    tokenizer,
-    start_mention,
-    end_mention,
-    start_entity,
-    end_entity,
-    max_length=512,
-):
-    data = {"source": [], "target": []}
-    for source, target in tqdm(
-        zip(source_data, target_data), total=len(source_data), desc="Processing Data"
-    ):
-        new_example = True
-        tokens = 0
-        start_source = 0
-        end_source = 0
-        start_target = 0
-        end_target = 0
-        target_sentences = nlp.tokenize(target)
-        for sent in target_sentences:
-            sent_end = 0
-            sent_tokens = len(tokenizer.encode(sent))
-            tokens += sent_tokens
-            if (
-                start_target != end_target
-                and tokens > max_length
-                and target[start_target:end_target].count(start_mention)
-                == target[start_target:end_target].count(end_mention)
-                and target[start_target:end_target].count(start_entity)
-                == target[start_target:end_target].count(end_entity)
-            ):
-                tokens = sent_tokens
-                data["target"].append(target[start_target:end_target].rstrip())
-                end_source = start_source + get_pointer_end(
-                    target[start_target:end_target],
-                    source[start_source:],
-                    start_entity,
-                    end_entity,
-                )
-                data["source"].append(source[start_source:end_source].rstrip())
-                start_target = end_target
-                start_source = end_source
-                new_example = False
-            while sent_end < len(sent):
-                if target[end_target] == sent[sent_end]:
-                    end_target += 1
-                    sent_end += 1
-                elif sent[sent_end] == " ":
-                    sent_end += 1
-                elif target[end_target] == " ":
-                    end_target += 1
-        if tokens > 50 or new_example:
-            data["target"].append(target[start_target:].rstrip())
-            data["source"].append(source[start_source:].rstrip())
-        elif data["target"]:
-            data["target"][-1] = (data["target"][-1] + target[start_target:]).rstrip()
-            data["source"][-1] = (data["source"][-1] + source[start_source:]).rstrip()
-
-    return data
 
 
 # Preprocess function for tokenization
@@ -200,8 +112,16 @@ def compute_metrics(eval_preds, tokenizer, start_entity, start_tag, end_tag):
     }
 
 
-def main(model_name: str, lr: float, dataset_name: str, augmented_data: bool):
-    print(f"The model {model_name} will start training")
+def main(
+    model_name: str,
+    lr: float,
+    dataset_name: str,
+    augmented_data: bool,
+    selection_method: str = "embedding",
+):
+    print(
+        f"The model {model_name} will start training with learning rate {lr} on dataset {dataset_name} {'with' if augmented_data else 'without'} augmented data and selection method {selection_method}."
+    )
 
     if model_name == "mt5-xl":
         # Remove the DDP initialization completely

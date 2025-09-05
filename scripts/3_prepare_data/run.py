@@ -256,7 +256,7 @@ def run(
         "encoder/coder-all", help="Text encoder model for embeddings"
     ),
     tfidf_vectorizer_path: Path = typer.Option(
-        Path("encoder/umls_tfidf_vectorizer.joblib"),
+        Path("models/encoder/umls_tfidf_vectorizer.joblib"),
         help="TF-IDF vectorizer model path",
     ),
     synth_mm_path: Path = typer.Option(
