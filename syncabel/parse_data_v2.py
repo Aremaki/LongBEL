@@ -255,7 +255,6 @@ def compute_best_synonym_df(
     encoder_name: str = "encoder/coder-all",
     batch_size: int = 4096,
     corrected_cui: Optional[dict[str, str]] = None,
-    language: str = "english",
 ) -> "pl.DataFrame":
     """Precompute best synonyms per unique (CUI, entity) using batched embeddings.
 

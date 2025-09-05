@@ -88,6 +88,7 @@ def _compute_or_load_best_syn(
     encoder_name: str,
     cache_path: Path,
     batch_size: int = 4096,
+    corrected_cui: Optional[dict] = None,
 ):
     """Return best_syn DataFrame and mapping, using a parquet cache if present."""
     if cache_path.exists():
@@ -100,6 +101,7 @@ def _compute_or_load_best_syn(
             CUI_to_Syn=CUI_to_Syn,
             encoder_name=encoder_name,
             batch_size=batch_size,
+            corrected_cui=corrected_cui,
         )
         best_syn_df.write_parquet(cache_path)
     # Use polars DataFrame -> list of dicts
@@ -137,14 +139,6 @@ def _process_hf_dataset(
             if split_key in ds:
                 yield from ds[split_key]
 
-    best_syn_path = data_folder / "best_synonyms.parquet"
-    _, best_syn_map = _compute_or_load_best_syn(
-        cast(Iterable[dict], list(_iter_pages_all())),
-        CUI_to_Syn=cui_to_syn,
-        encoder_name=encoder_name,
-        cache_path=best_syn_path,
-    )
-
     # Optional: corrected CUI mapping for QUAERO (from manual review)
     corrected_cui = None
     if name in ("EMEA", "MEDLINE"):
@@ -152,6 +146,15 @@ def _process_hf_dataset(
         if corrected_cui_path.exists():
             typer.echo("Using corrected CUI mapping...")
             corrected_cui = dict(pl.read_csv(corrected_cui_path).iter_rows())
+
+    best_syn_path = data_folder / "best_synonyms.parquet"
+    _, best_syn_map = _compute_or_load_best_syn(
+        cast(Iterable[dict], list(_iter_pages_all())),
+        CUI_to_Syn=cui_to_syn,
+        encoder_name=encoder_name,
+        cache_path=best_syn_path,
+        corrected_cui=corrected_cui,
+    )
     typer.echo(f"Processing dataset {name} ...")
     # Build splits dict only for existing keys
     splits = {"train": ds["train"]}
