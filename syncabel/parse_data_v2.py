@@ -88,7 +88,7 @@ def parse_text(
             # rel_end isn't strictly required for sentence selection, but computed for completeness
             # rel_end = global_end - start_offset_passage
 
-            entity_text = entity["text"][0]
+            entity_text = " ".join([entity["text"]])
             if natural:
                 entity_text = clean_natural(entity_text)
 
@@ -141,9 +141,9 @@ def parse_text(
             if annotation is None:
                 # If no synonyms mapping, fall back to the normalized id
                 logging.warning(
-                    f"No synonyms found for CUI {normalized_id} (entity '{entity_text}'); using CUI as annotation."
+                    f"No synonyms found for CUI {normalized_id} (entity '{entity_text}'); skipping entity."
                 )
-                annotation = normalized_id
+                continue
 
             if natural and isinstance(annotation, str):
                 annotation = clean_natural(annotation)
@@ -157,20 +157,37 @@ def parse_text(
                     sent_start_offset = s_start
                     break
 
-            # Add entity markers around the specific entity occurrence
-            global_end = entity["offsets"][0][1]
-            rel_end = global_end - start_offset_passage
+            # Add entity markers around all occurrences of the entity
+            marked_sent_text = sent_text
+            # Get all offsets, convert to relative, and filter for this sentence
+            all_spans_in_sent = []
+            for off in entity["offsets"]:
+                global_start_off, global_end_off = off
+                if not (start_offset_passage <= global_start_off < end_offset_passage):
+                    continue
 
-            start_in_sent = rel_start - sent_start_offset
-            end_in_sent = rel_end - sent_start_offset
+                rel_start_off = global_start_off - start_offset_passage
+                rel_end_off = global_end_off - start_offset_passage
 
-            marked_sent_text = (
-                sent_text[:start_in_sent]
-                + start_entity
-                + sent_text[start_in_sent:end_in_sent]
-                + end_entity
-                + sent_text[end_in_sent:]
-            )
+                start_in_sent = rel_start_off - sent_start_offset
+                end_in_sent = rel_end_off - sent_start_offset
+
+                if 0 <= start_in_sent < len(sent_text) and 0 < end_in_sent <= len(
+                    sent_text
+                ):
+                    all_spans_in_sent.append((start_in_sent, end_in_sent))
+
+            # Sort spans in reverse to mark from the end, preventing offset shifts
+            all_spans_in_sent.sort(key=lambda x: x[0], reverse=True)
+
+            for start_in_sent, end_in_sent in all_spans_in_sent:
+                marked_sent_text = (
+                    marked_sent_text[:start_in_sent]
+                    + start_entity
+                    + marked_sent_text[start_in_sent:end_in_sent]
+                    + end_entity
+                    + marked_sent_text[end_in_sent:]
+                )
 
             # Emit the pair
             source_sentences.append(marked_sent_text)
@@ -275,7 +292,7 @@ def compute_best_synonym_df(
             cui = ent["normalized"][0]["db_id"]
             if corrected_cui and cui in corrected_cui:
                 cui = corrected_cui[cui]
-            mention = clean_natural(ent["text"][0])
+            mention = clean_natural(" ".join([ent["text"]]))
             unique_pairs.add((cui, mention))
             present_cuis.add(cui)
 

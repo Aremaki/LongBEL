@@ -147,14 +147,16 @@ def _process_hf_dataset(
             typer.echo("Using corrected CUI mapping...")
             corrected_cui = dict(pl.read_csv(corrected_cui_path).iter_rows())
 
-    best_syn_path = data_folder / "best_synonyms.parquet"
-    _, best_syn_map = _compute_or_load_best_syn(
-        cast(Iterable[dict], list(_iter_pages_all())),
-        CUI_to_Syn=cui_to_syn,
-        encoder_name=encoder_name,
-        cache_path=best_syn_path,
-        corrected_cui=corrected_cui,
-    )
+    best_syn_map = None
+    if selection_method == "embedding":
+        best_syn_path = data_folder / "best_synonyms.parquet"
+        _, best_syn_map = _compute_or_load_best_syn(
+            cast(Iterable[dict], list(_iter_pages_all())),
+            CUI_to_Syn=cui_to_syn,
+            encoder_name=encoder_name,
+            cache_path=best_syn_path,
+            corrected_cui=corrected_cui,
+        )
     typer.echo(f"Processing dataset {name} ...")
     # Build splits dict only for existing keys
     splits = {"train": ds["train"]}
@@ -216,13 +218,15 @@ def _process_synth_dataset(
     # Language: assume English for SynthMM, French for SynthQUAERO
     language = "english" if "MM" in name or "MedMentions" in name else "french"
 
-    best_syn_path = data_folder / "best_synonyms.parquet"
-    _, best_syn_map = _compute_or_load_best_syn(
-        cast(Iterable[dict], synth_pages),
-        CUI_to_Syn=cui_to_syn,
-        encoder_name=encoder_name,
-        cache_path=best_syn_path,
-    )
+    best_syn_map = None
+    if selection_method == "embedding":
+        best_syn_path = data_folder / "best_synonyms.parquet"
+        _, best_syn_map = _compute_or_load_best_syn(
+            cast(Iterable[dict], synth_pages),
+            CUI_to_Syn=cui_to_syn,
+            encoder_name=encoder_name,
+            cache_path=best_syn_path,
+        )
 
     typer.echo(f"  • Processing synthetic dataset {name} ...")
     src, tgt = process_bigbio_dataset(
