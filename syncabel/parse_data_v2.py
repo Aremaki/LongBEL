@@ -35,9 +35,11 @@ def parse_text(
     data,
     start_entity,
     end_entity,
+    start_group,
+    end_group,
     nlp,
-    CUI_to_Syn=None,
-    Syn_to_annotation=None,
+    CUI_to_Syn,
+    CUI_to_GROUP,
     natural=False,
     corrected_cui=None,
     selection_method: str = "levenshtein",
@@ -76,6 +78,9 @@ def parse_text(
         # Iterate over entities and emit one pair per entity found in this passage
         for entity in data.get("entities", []):
             if not entity.get("normalized"):
+                logging.warning(
+                    f"Entity '{' '.join(entity['text'])}' has no CUI; skipping."
+                )
                 # No normalized id -> skip (no annotation)
                 continue
 
@@ -93,6 +98,11 @@ def parse_text(
                 entity_text = clean_natural(entity_text)
 
             normalized_id = entity["normalized"][0]["db_id"]
+            if not normalized_id:
+                logging.warning(
+                    f"Entity '{entity_text}' has empty CUI; skipping entity."
+                )
+                continue
             if corrected_cui and normalized_id in corrected_cui:
                 normalized_id = corrected_cui[normalized_id]
                 logging.info(
@@ -148,6 +158,9 @@ def parse_text(
             if natural and isinstance(annotation, str):
                 annotation = clean_natural(annotation)
 
+            # Define CUI group
+            group = CUI_to_GROUP.get(normalized_id)
+
             # Find the sentence that contains the entity start
             sent_text = passage_text
             sent_start_offset = 0
@@ -180,14 +193,26 @@ def parse_text(
             # Sort spans in reverse to mark from the end, preventing offset shifts
             all_spans_in_sent.sort(key=lambda x: x[0], reverse=True)
 
-            for start_in_sent, end_in_sent in all_spans_in_sent:
-                marked_sent_text = (
-                    marked_sent_text[:start_in_sent]
-                    + start_entity
-                    + marked_sent_text[start_in_sent:end_in_sent]
-                    + end_entity
-                    + marked_sent_text[end_in_sent:]
-                )
+            for i, (start_in_sent, end_in_sent) in enumerate(all_spans_in_sent):
+                if i == len(all_spans_in_sent) - 1:
+                    marked_sent_text = (
+                        marked_sent_text[:start_in_sent]
+                        + start_entity
+                        + marked_sent_text[start_in_sent:end_in_sent]
+                        + end_entity
+                        + start_group
+                        + group
+                        + end_group
+                        + marked_sent_text[end_in_sent:]
+                    )
+                else:
+                    marked_sent_text = (
+                        marked_sent_text[:start_in_sent]
+                        + start_entity
+                        + marked_sent_text[start_in_sent:end_in_sent]
+                        + end_entity
+                        + marked_sent_text[end_in_sent:]
+                    )
 
             # Emit the pair
             source_sentences.append(marked_sent_text)
@@ -200,8 +225,10 @@ def process_bigbio_dataset(
     bigbio_dataset,
     start_entity,
     end_entity,
-    CUI_to_Syn=None,
-    Syn_to_annotation=None,
+    start_group,
+    end_group,
+    CUI_to_Syn,
+    CUI_to_GROUP,
     natural=False,
     encoder_name=None,
     tfidf_vectorizer_path: Optional[Path] = None,
@@ -250,9 +277,11 @@ def process_bigbio_dataset(
             page,
             start_entity,
             end_entity,
+            start_group,
+            end_group,
             nlp,
             CUI_to_Syn,
-            Syn_to_annotation,
+            CUI_to_GROUP,
             natural,
             corrected_cui,
             selection_method,

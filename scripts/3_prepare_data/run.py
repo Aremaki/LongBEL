@@ -60,11 +60,9 @@ def _load_json_if_exists(path: Path):
 
 def _build_mappings(umls_parquet: Path):
     df = pl.read_parquet(umls_parquet)
-    syn_df = df.with_columns(Syn=pl.col("Entity"))
-    cui_to_syn = dict(
-        syn_df.group_by("CUI").agg([pl.col("Entity").unique()]).iter_rows()
-    )
-    return syn_df, cui_to_syn
+    cui_to_syn = dict(df.group_by("CUI").agg([pl.col("Entity").unique()]).iter_rows())
+    cui_to_group = dict(df.group_by("CUI").agg([pl.col("GROUP").first()]).iter_rows())
+    return cui_to_group, cui_to_syn
 
 
 def _ensure_dir(path: Path):
@@ -116,12 +114,14 @@ def _process_hf_dataset(
     name: str,
     hf_id: str,
     hf_config: str,
-    syn_df,
     cui_to_syn,
+    cui_to_group,
     encoder_name: str,
     tfidf_vectorizer_path: Path,
     start_entity: str,
     end_entity: str,
+    start_group: str,
+    end_group: str,
     out_root: Path,
     selection_method: str,
 ):
@@ -172,9 +172,11 @@ def _process_hf_dataset(
             split_data,
             start_entity,
             end_entity,
+            start_group,
+            end_group,
             natural=True,
             CUI_to_Syn=cui_to_syn,
-            Syn_to_annotation=syn_df,
+            CUI_to_GROUP=cui_to_group,
             encoder_name=encoder_name,
             tfidf_vectorizer_path=tfidf_vectorizer_path,
             corrected_cui=corrected_cui,
@@ -199,12 +201,14 @@ def _process_hf_dataset(
 def _process_synth_dataset(
     name: str,
     synth_pages: Optional[list[dict]],
-    syn_df,
     cui_to_syn,
+    cui_to_group,
     encoder_name: str,
     tfidf_vectorizer_path: Path,
     start_entity: str,
     end_entity: str,
+    start_group: str,
+    end_group: str,
     out_root: Path,
     selection_method: str,
 ):
@@ -233,9 +237,11 @@ def _process_synth_dataset(
         synth_pages,
         start_entity,
         end_entity,
+        start_group,
+        end_group,
         natural=True,
         CUI_to_Syn=cui_to_syn,
-        Syn_to_annotation=syn_df,
+        CUI_to_GROUP=cui_to_group,
         encoder_name=encoder_name,
         tfidf_vectorizer_path=tfidf_vectorizer_path,
         language=language,
@@ -255,6 +261,8 @@ def run(
     ),
     start_entity: str = typer.Option("[", help="Start entity marker"),
     end_entity: str = typer.Option("]", help="End entity marker"),
+    start_group: str = typer.Option("{", help="Start group marker"),
+    end_group: str = typer.Option("}", help="End group marker"),
     selection_method: str = typer.Option(
         "embedding",
         help="Annotation selection: 'levenshtein' or 'embedding' or 'tfidf'",
@@ -287,8 +295,8 @@ def run(
 ) -> None:
     """Run preprocessing pipeline for selected datasets and models."""
     # Load UMLS mapping resources
-    syn_mm_df, cui_to_syn_mm = _build_mappings(umls_mm_parquet)
-    syn_quaero_df, cui_to_syn_quaero = _build_mappings(umls_quaero_parquet)
+    cui_to_group_mm, cui_to_syn_mm = _build_mappings(umls_mm_parquet)
+    cui_to_group_quaero, cui_to_syn_quaero = _build_mappings(umls_quaero_parquet)
 
     # Synthetic data (optional)
     synth_mm = _load_json_if_exists(synth_mm_path)
@@ -309,12 +317,14 @@ def run(
             "MedMentions",
             "bigbio/medmentions",
             "medmentions_st21pv_bigbio_kb",
-            syn_mm_df,
             cui_to_syn_mm,
+            cui_to_group_mm,
             encoder_name,
             tfidf_vectorizer_path,
             start_entity,
             end_entity,
+            start_group,
+            end_group,
             out_root,
             selection_method,
         )
@@ -323,12 +333,14 @@ def run(
             _process_synth_dataset(
                 "SynthMM",
                 synth_mm,
-                syn_mm_df,
                 cui_to_syn_mm,
+                cui_to_group_mm,
                 encoder_name,
                 tfidf_vectorizer_path,
                 start_entity,
                 end_entity,
+                start_group,
+                end_group,
                 out_root,
                 selection_method,
             )
@@ -338,12 +350,14 @@ def run(
             "EMEA",
             "bigbio/quaero",
             "quaero_emea_bigbio_kb",
-            syn_quaero_df,
             cui_to_syn_quaero,
+            cui_to_group_quaero,
             encoder_name,
             tfidf_vectorizer_path,
             start_entity,
             end_entity,
+            start_group,
+            end_group,
             out_root,
             selection_method,
         )
@@ -351,12 +365,14 @@ def run(
             _process_synth_dataset(
                 "SynthQUAERO",
                 synth_quaero,
-                syn_quaero_df,
                 cui_to_syn_quaero,
+                cui_to_group_quaero,
                 encoder_name,
                 tfidf_vectorizer_path,
                 start_entity,
                 end_entity,
+                start_group,
+                end_group,
                 out_root,
                 selection_method,
             )
@@ -366,12 +382,14 @@ def run(
             "MEDLINE",
             "bigbio/quaero",
             "quaero_medline_bigbio_kb",
-            syn_quaero_df,
             cui_to_syn_quaero,
+            cui_to_group_quaero,
             encoder_name,
             tfidf_vectorizer_path,
             start_entity,
             end_entity,
+            start_group,
+            end_group,
             out_root,
             selection_method,
         )
@@ -379,12 +397,14 @@ def run(
             _process_synth_dataset(
                 "SynthQUAERO",
                 synth_quaero,
-                syn_quaero_df,
                 cui_to_syn_quaero,
+                cui_to_group_quaero,
                 encoder_name,
                 tfidf_vectorizer_path,
                 start_entity,
                 end_entity,
+                start_group,
+                end_group,
                 out_root,
                 selection_method,
             )
