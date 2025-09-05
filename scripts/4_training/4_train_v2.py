@@ -138,19 +138,22 @@ def main(
     with open(
         data_folder
         / dataset_name
-        / f"dev_{selection_method}_source{with_group_extension}.pkl",
+        / f"validation_{selection_method}_source{with_group_extension}.pkl",
         "rb",
     ) as file:
-        dev_source_data = pickle.load(file)
+        validation_source_data = pickle.load(file)
     with open(
-        data_folder / dataset_name / f"dev_{selection_method}_target.pkl",
+        data_folder / dataset_name / f"validation_{selection_method}_target.pkl",
         "rb",
     ) as file:
-        dev_target_data = pickle.load(file)
+        validation_target_data = pickle.load(file)
 
     train_data = {"source": train_source_data, "target": train_target_data}
 
-    validation_data = {"source": dev_source_data, "target": dev_target_data}
+    validation_data = {
+        "source": validation_source_data,
+        "target": validation_target_data,
+    }
 
     validation_dataset = Dataset.from_dict(validation_data)
     indexes = list(range(len(validation_dataset)))
