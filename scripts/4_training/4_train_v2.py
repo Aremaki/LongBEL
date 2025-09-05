@@ -5,7 +5,7 @@ import shutil
 from functools import partial
 from pathlib import Path
 
-import idr_torch
+import idr_torch  # type: ignore
 import numpy as np
 import torch.distributed as dist
 from datasets import Dataset, concatenate_datasets
@@ -89,11 +89,19 @@ def main(
     selection_method: str = "embedding",
 ):
     # Initialize Distributed Training if available
+    if idr_torch.rank == 0:
+        print(
+            ">>> Training on ",
+            len(idr_torch.nodelist),
+            " nodes and ",
+            idr_torch.world_size,
+            " processes",
+        )
     if dist.is_available() and not dist.is_initialized():
         dist.init_process_group(
             backend="nccl",
             init_method="env://",
-            world_size=idr_torch.size,
+            world_size=idr_torch.world_size,
             rank=idr_torch.rank,
         )
 
