@@ -18,6 +18,8 @@ module load arch/h100
 module load pytorch-gpu/py3/2.3.1
 
 # Run script
-python scripts/3_prepare_data/run.py
+python scripts/3_prepare_data/run.py --selection-method embedding
+python scripts/3_prepare_data/run.py --selection-method levenshtein
+python scripts/3_prepare_data/run.py --selection-method tfidf
 
 echo SCRIPT FINISHED

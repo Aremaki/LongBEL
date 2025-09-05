@@ -18,7 +18,7 @@ def _mean_pooling(token_embeddings: torch.Tensor, mask: torch.Tensor) -> torch.T
 
 @dataclass
 class TextEncoder:
-    model_name: str = "GanjinZero/coder-all"
+    model_name: str = "encoder/coder-all"
     device = None
 
     def __post_init__(self):

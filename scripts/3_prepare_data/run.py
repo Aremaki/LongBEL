@@ -117,6 +117,7 @@ def _process_hf_dataset(
     syn_df,
     cui_to_syn,
     encoder_name: str,
+    tfidf_vectorizer_path: Path,
     start_entity: str,
     end_entity: str,
     out_root: Path,
@@ -170,6 +171,7 @@ def _process_hf_dataset(
             CUI_to_Syn=cui_to_syn,
             Syn_to_annotation=syn_df,
             encoder_name=encoder_name,
+            tfidf_vectorizer_path=tfidf_vectorizer_path,
             corrected_cui=corrected_cui,
             language=language,
             selection_method=selection_method,
@@ -181,11 +183,11 @@ def _process_hf_dataset(
     for split_name, (src, tgt) in processed.items():
         _dump(
             src,
-            data_folder / f"{split_name}_source.pkl",
+            data_folder / f"{split_name}_{selection_method}_source.pkl",
         )
         _dump(
             tgt,
-            data_folder / f"{split_name}_target.pkl",
+            data_folder / f"{split_name}_{selection_method}_target.pkl",
         )
 
 
@@ -195,6 +197,7 @@ def _process_synth_dataset(
     syn_df,
     cui_to_syn,
     encoder_name: str,
+    tfidf_vectorizer_path: Path,
     start_entity: str,
     end_entity: str,
     out_root: Path,
@@ -227,13 +230,14 @@ def _process_synth_dataset(
         CUI_to_Syn=cui_to_syn,
         Syn_to_annotation=syn_df,
         encoder_name=encoder_name,
+        tfidf_vectorizer_path=tfidf_vectorizer_path,
         language=language,
         selection_method=selection_method,
         best_syn_map=best_syn_map,
     )
     # Treat as train split for the synthetic dataset
-    _dump(src, data_folder / "train_source.pkl")
-    _dump(tgt, data_folder / "train_target.pkl")
+    _dump(src, data_folder / f"train_{selection_method}_source.pkl")
+    _dump(tgt, data_folder / f"train_{selection_method}_target.pkl")
 
 
 @app.command()
@@ -245,10 +249,15 @@ def run(
     start_entity: str = typer.Option("[", help="Start entity marker"),
     end_entity: str = typer.Option("]", help="End entity marker"),
     selection_method: str = typer.Option(
-        "embedding", help="Annotation selection: 'levenshtein' or 'embedding'"
+        "embedding",
+        help="Annotation selection: 'levenshtein' or 'embedding' or 'tfidf'",
     ),
     encoder_name: str = typer.Option(
-        "GanjinZero/coder-all", help="Text encoder model for embeddings"
+        "encoder/coder-all", help="Text encoder model for embeddings"
+    ),
+    tfidf_vectorizer_path: Path = typer.Option(
+        Path("encoder/umls_tfidf_vectorizer.joblib"),
+        help="TF-IDF vectorizer model path",
     ),
     synth_mm_path: Path = typer.Option(
         Path("data/synthetic_data/SynthMM/SynthMM_bigbio.json"),
@@ -296,6 +305,7 @@ def run(
             syn_mm_df,
             cui_to_syn_mm,
             encoder_name,
+            tfidf_vectorizer_path,
             start_entity,
             end_entity,
             out_root,
@@ -309,6 +319,7 @@ def run(
                 syn_mm_df,
                 cui_to_syn_mm,
                 encoder_name,
+                tfidf_vectorizer_path,
                 start_entity,
                 end_entity,
                 out_root,
@@ -323,6 +334,7 @@ def run(
             syn_quaero_df,
             cui_to_syn_quaero,
             encoder_name,
+            tfidf_vectorizer_path,
             start_entity,
             end_entity,
             out_root,
@@ -335,6 +347,7 @@ def run(
                 syn_quaero_df,
                 cui_to_syn_quaero,
                 encoder_name,
+                tfidf_vectorizer_path,
                 start_entity,
                 end_entity,
                 out_root,
@@ -349,6 +362,7 @@ def run(
             syn_quaero_df,
             cui_to_syn_quaero,
             encoder_name,
+            tfidf_vectorizer_path,
             start_entity,
             end_entity,
             out_root,
@@ -361,6 +375,7 @@ def run(
                 syn_quaero_df,
                 cui_to_syn_quaero,
                 encoder_name,
+                tfidf_vectorizer_path,
                 start_entity,
                 end_entity,
                 out_root,

@@ -1,16 +1,24 @@
-import re
+import logging
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Optional
 
+import joblib
 import nltk
 import nltk.data
 import numpy as np
 import polars as pl
 from tqdm import tqdm
-from transformers import AutoTokenizer
 
 from syncabel.embeddings import TextEncoder, best_by_cosine
+
+
+def cal_similarity_tfidf(a: list, b: str, vectorizer):
+    features_a = vectorizer.transform(a)
+    features_b = vectorizer.transform([b])
+    features_T = features_a.T
+    sim = np.array(features_b.dot(features_T).todense())[0]
+    return sim.argmax(), np.max(np.array(sim))
 
 
 def clean_natural(text):
@@ -34,6 +42,7 @@ def parse_text(
     corrected_cui=None,
     selection_method: str = "levenshtein",
     encoder: Optional[TextEncoder] = None,
+    tfidf_vectorizer=None,
     best_syn_map: Optional[dict[tuple[str, str], str]] = None,
 ):
     """Create simple (source, target) pairs per entity.
@@ -86,7 +95,7 @@ def parse_text(
             normalized_id = entity["normalized"][0]["db_id"]
             if corrected_cui and normalized_id in corrected_cui:
                 normalized_id = corrected_cui[normalized_id]
-                print(
+                logging.info(
                     f"Corrected CUI {entity['normalized'][0]['db_id']} -> {normalized_id} for entity '{entity_text}'"
                 )
 
@@ -110,6 +119,11 @@ def parse_text(
                         candidates=list(possible_syns),
                     )  # type: ignore
                     annotation = best_syn if best_syn is not None else normalized_id
+                elif selection_method == "tfidf" and tfidf_vectorizer is not None:
+                    best_idx, best_score = cal_similarity_tfidf(
+                        possible_syns, entity_text, tfidf_vectorizer
+                    )
+                    annotation = possible_syns[best_idx]
                 else:
                     # Default to Levenshtein matching (previous behavior)
                     text = entity_text
@@ -162,6 +176,7 @@ def process_bigbio_dataset(
     Syn_to_annotation=None,
     natural=False,
     encoder_name=None,
+    tfidf_vectorizer_path: Optional[Path] = None,
     corrected_cui=None,
     language: str = "english",
     selection_method: str = "levenshtein",
@@ -188,6 +203,19 @@ def process_bigbio_dataset(
         print(f"Using embedding-based selection with encoder '{encoder_name}'.")
     else:
         encoder = None
+    if selection_method == "tfidf" and tfidf_vectorizer_path:
+        try:
+            tfidf_vectorizer = joblib.load(tfidf_vectorizer_path)
+            print(
+                f"Using TF-IDF-based selection with vectorizer at '{tfidf_vectorizer_path}'."
+            )
+        except Exception as e:
+            print(
+                f"⚠️ Failed to load TF-IDF vectorizer from '{tfidf_vectorizer_path}': {e}"
+            )
+            tfidf_vectorizer = None
+    else:
+        tfidf_vectorizer = None
 
     for page in tqdm(bigbio_dataset, total=len(bigbio_dataset)):
         source_texts, target_texts = parse_text(
@@ -201,6 +229,7 @@ def process_bigbio_dataset(
             corrected_cui,
             selection_method,
             encoder,
+            tfidf_vectorizer,
             best_syn_map,
         )
         # Each entity yields one pair; extend the global lists accordingly.
@@ -212,7 +241,7 @@ def process_bigbio_dataset(
 def compute_best_synonym_df(
     bigbio_dataset: Iterable[dict],
     CUI_to_Syn: dict[str, Iterable[str]],
-    encoder_name: str = "GanjinZero/coder-all",
+    encoder_name: str = "encoder/coder-all",
     batch_size: int = 4096,
     corrected_cui: Optional[dict[str, str]] = None,
     language: str = "english",
