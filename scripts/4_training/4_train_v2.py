@@ -5,6 +5,7 @@ import shutil
 from functools import partial
 from pathlib import Path
 
+import idr_torch
 import numpy as np
 import torch.distributed as dist
 from datasets import Dataset, concatenate_datasets
@@ -87,11 +88,19 @@ def main(
     with_group: bool = False,
     selection_method: str = "embedding",
 ):
+    # Initialize Distributed Training if available
+    if dist.is_available() and not dist.is_initialized():
+        dist.init_process_group(
+            backend="nccl",
+            init_method="env://",
+            world_size=idr_torch.size,
+            rank=idr_torch.rank,
+        )
+
     print(
         f"The model {model_name} will start training with learning rate {lr} on dataset {dataset_name} {'with' if augmented_data else 'without'} augmented data and selection method {selection_method}."
     )
     model_short_name = model_name.split("/")[-1]
-    # Initialize Distributed Training
     # The Trainer will handle the distributed training setup automatically.
     # No need to manually initialize the process group.
     if model_short_name == "mt5-xl":
@@ -234,11 +243,21 @@ def main(
         eval_accumulation_steps = (
             int(len(validation_dataset) / (eval_max_batch * 2)) + 2
         )
-    output_dir = f"/models/NED/{dataset_name}_{'augmented' if augmented_data else 'original'}_{selection_method}{with_group_extension}/{model_short_name}"
+    output_dir = (
+        Path("models")
+        / "NED"
+        / f"{dataset_name}_{'augmented' if augmented_data else 'original'}_{selection_method}{'_with_group' if with_group else ''}"
+        / model_short_name
+    )
+    logging_dir = (
+        Path("logs")
+        / f"{dataset_name}_{'augmented' if augmented_data else 'original'}_{selection_method}{'_with_group' if with_group else ''}"
+        / model_short_name
+    )
     print(f"BATCH SIZE : {train_max_batch}")
     training_args = Seq2SeqTrainingArguments(
-        output_dir=output_dir,
-        logging_dir=f"data/logs/{dataset_name}_{'augmented' if augmented_data else 'original'}_{selection_method}{with_group_extension}/{model_short_name}",
+        output_dir=str(output_dir),
+        logging_dir=str(logging_dir),
         logging_strategy="epoch",
         report_to="tensorboard",
         eval_strategy="epoch",
