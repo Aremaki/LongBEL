@@ -2,11 +2,13 @@ import argparse
 import glob
 import pickle
 import shutil
+import time
 from functools import partial
 from pathlib import Path
 
 import idr_torch  # type: ignore
 import numpy as np
+import pynvml
 import torch.distributed as dist
 from datasets import Dataset, concatenate_datasets
 from transformers import (
@@ -15,7 +17,53 @@ from transformers import (
     DataCollatorForSeq2Seq,  # type: ignore
     Seq2SeqTrainer,  # type: ignore
     Seq2SeqTrainingArguments,  # type: ignore
+    TrainerCallback,  # type: ignore
 )
+
+
+# Custom Callback for GPU and performance metrics
+class GpuUsageCallback(TrainerCallback):
+    def __init__(self):
+        super().__init__()
+        try:
+            pynvml.nvmlInit()
+            self.device_count = pynvml.nvmlDeviceGetCount()
+        except pynvml.NVMLError:
+            self.device_count = 0
+        self.log_history = {}
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if logs is None:
+            logs = {}
+
+        # Log GPU utilization
+        if self.device_count > 0:
+            for i in range(self.device_count):
+                handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                logs[f"gpu_{i}_utilization_percent"] = utilization.gpu
+
+        # Calculate and log samples per second
+        if "loss" in logs and "learning_rate" in logs:  # Training step
+            current_time = time.time()
+            if "time" in self.log_history and "step" in self.log_history:
+                delta_time = current_time - self.log_history["time"]
+                delta_steps = state.global_step - self.log_history["step"]
+                if delta_time > 0 and delta_steps > 0:
+                    samples_processed = (
+                        delta_steps
+                        * args.per_device_train_batch_size
+                        * args.gradient_accumulation_steps
+                        * args.world_size
+                    )
+                    logs["samples_per_second"] = samples_processed / delta_time
+
+            self.log_history["time"] = current_time
+            self.log_history["step"] = state.global_step
+
+    def on_train_end(self, args, state, control, **kwargs):
+        if self.device_count > 0:
+            pynvml.nvmlShutdown()
 
 
 # Preprocess function for tokenization
@@ -306,6 +354,7 @@ def main(
             compute_metrics,
             tokenizer=tokenizer,
         ),
+        callbacks=[GpuUsageCallback()],
     )
 
     resume_from_checkpoint = len(glob.glob(rf"{output_dir}/checkpoint-*")) > 0
