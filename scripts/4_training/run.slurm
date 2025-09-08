@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=prepare_data       # name of job
+#SBATCH --job-name=training       # name of job
 #SBATCH -C h100                     # uncomment for gpu_p6 partition (80GB H100 GPU)
-#SBATCH --ntasks=1                   # nombre total de tache MPI (= nombre total de GPU)
-#SBATCH --ntasks-per-node=1          # nombre de tache MPI par noeud (= nombre de GPU par noeud)
-#SBATCH --gres=gpu:1                 # nombre de GPU par nœud (max 8 avec gpu_p2, gpu_p5)
+#SBATCH --ntasks=4                   # nombre total de tache MPI (= nombre total de GPU)
+#SBATCH --ntasks-per-node=4          # nombre de tache MPI par noeud (= nombre de GPU par noeud)
+#SBATCH --gres=gpu:4                 # nombre de GPU par nœud (max 8 avec gpu_p2, gpu_p5)
 #SBATCH --cpus-per-task=24          # number of cores per task for gpu_p6 (1/4 of 4-GPUs H100 node)
 #SBATCH --hint=nomultithread         # hyperthreading is deactivated
 #SBATCH --time=20:00:00              # maximum execution time requested (HH:MM:SS)
