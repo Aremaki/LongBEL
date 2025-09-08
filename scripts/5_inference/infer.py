@@ -1,6 +1,7 @@
 import argparse
 import os
 import pickle
+from pathlib import Path
 
 import nltk.data
 import polars as pl
@@ -80,97 +81,32 @@ def get_pointer_end_ner(target_passage, target_ner, start_entity, end_entity):
     return j
 
 
-def load_data(
-    source_data,
-    target_data,
-    target_data_ner,
-    tokenizer,
-    start_mention,
-    end_mention,
-    start_entity,
-    end_entity,
-    max_length=512,
+def main(
+    model_name,
+    model_path,
+    max_length,
+    num_beams,
+    best,
+    dataset_name,
+    selection_method,
+    with_group=False,
+    augmented_data=False,
 ):
-    data = {"source": [], "target": [], "target_ner": []}
-    for source, target, target_ner in tqdm(
-        zip(source_data, target_data, target_data_ner),
-        total=len(source_data),
-        desc="Processing Data",
-    ):
-        tokens = 0
-        start_source = 0
-        end_source = 0
-        start_target = 0
-        end_target = 0
-        start_target_ner = 0
-        end_target_ner = 0
-        target_sentences = custom_sentence_tokenize(target)
-        for sent in target_sentences:
-            sent_end = 0
-            sent_tokens = len(tokenizer.encode(sent))
-            tokens += sent_tokens
-            if (
-                start_target != end_target
-                and tokens > max_length
-                and target[start_target:end_target].count(start_mention)
-                == target[start_target:end_target].count(end_mention)
-                and target[start_target:end_target].count(start_entity)
-                == target[start_target:end_target].count(end_entity)
-            ):
-                tokens = sent_tokens
-                data["target"].append(target[start_target:end_target].rstrip())
-                end_source = start_source + get_pointer_end(
-                    target[start_target:end_target],
-                    source[start_source:],
-                    start_entity,
-                    end_entity,
-                )
-                data["source"].append(source[start_source:end_source].rstrip())
-                end_target_ner = start_target_ner + get_pointer_end_ner(
-                    target[start_target:end_target],
-                    target_ner[start_target_ner:],
-                    start_entity,
-                    end_entity,
-                )
-                data["target_ner"].append(
-                    target_ner[start_target_ner:end_target_ner].rstrip()
-                )
-                start_target = end_target
-                start_source = end_source
-                start_target_ner = end_target_ner
-            while sent_end < len(sent):
-                if target[end_target] == sent[sent_end]:
-                    end_target += 1
-                    sent_end += 1
-                elif sent[sent_end] in [" ", "\n"]:
-                    sent_end += 1
-                elif target[end_target] in [" ", "\n"]:
-                    end_target += 1
-        if tokens > 50:
-            data["target"].append(target[start_target:].rstrip())
-            data["source"].append(source[start_source:].rstrip())
-            data["target_ner"].append(target_ner[start_target_ner:].rstrip())
-        elif data["target"]:
-            data["target"][-1] = (data["target"][-1] + target[start_target:]).rstrip()
-            data["source"][-1] = (data["source"][-1] + source[start_source:]).rstrip()
-            data["target_ner"][-1] = (
-                data["target_ner"][-1] + target_ner[start_target_ner:]
-            ).rstrip()
-
-    return data
-
-
-def main(model_name, model_path, max_length, num_beams, best):
     # Set device
     torch.cuda.empty_cache()
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     start_mention, end_mention, start_entity, end_entity = "[", "]", "{", "}"
-    root_path = f"/models/{model_path}_{max_length}/{model_name}"
+    model_path = (
+        Path("models")
+        / "NED"
+        / f"{dataset_name}_{'augmented' if augmented_data else 'original'}_{selection_method}{'_with_group' if with_group else ''}"
+        / model_name
+    )
     if best:
-        full_path = root_path + "/model_best"
+        full_path = model_path / "model_best"
     else:
-        full_path = root_path + "/model_last"
+        full_path = model_path / "model_last"
 
     if "mt5" in model_name:
         model = MT5_GENRE.from_pretrained(full_path).eval().to(device)  # type: ignore
@@ -200,48 +136,36 @@ def main(model_name, model_path, max_length, num_beams, best):
         )
 
     # Load data
-    data_folder = "/data/preprocessed_dataset"
-    test_source_data = load_pickle(f"{data_folder}/test_source_{model_name}.pkl")
-    test_target_data = load_pickle(f"{data_folder}/test_target_{model_name}.pkl")
-
-    ner_data_folder = "/data/preprocessed_dataset_ner"
-    test_target_data_ner = load_pickle(
-        f"{ner_data_folder}/test_target_{model_name}.pkl"
-    )
-
     # Load and preprocess data
-    tokenizer = model.tokenizer
-    test_data = load_data(
-        test_source_data,
-        test_target_data,
-        test_target_data_ner,
-        tokenizer,
-        start_mention,
-        end_mention,
-        start_entity,
-        end_entity,
-        max_length=max_length,
+    with_group_extension = "_with_group" if with_group else ""
+    data_folder = Path("data/final_data")
+
+    test_source_data = load_pickle(
+        data_folder
+        / dataset_name
+        / f"test_{selection_method}_source{with_group_extension}.pkl"
     )
+    test_target_data = load_pickle(
+        data_folder / dataset_name / f"test_{selection_method}_target.pkl"
+    )
+
+    test_data = {"source": test_source_data, "target": test_target_data}
 
     # Load candidate Trie
-    trie_path = f"{data_folder}/trie_legal_tokens_typed_{model_name}.pkl"
+    trie_path = Path(f"data/UMLS_tries/trie_{dataset_name}_{model_name}.pkl")
     if os.path.exists(trie_path):  # Check if the file exists
         with open(trie_path, "rb") as file:
             trie_legal_tokens = pickle.load(file)
     else:
         # Compute candidate Trie
         start_idx = 1 if "bart" in model_name else 0
-        if "medmentions" in data_folder:
-            group_cat = "SEM_NAME_MM"
+        if dataset_name == "MedMentions":
             legal_umls_token = pl.read_parquet(
-                os.environ["WORK"]
-                + "/GENRE/data/legal_umls_token_2017_short_syn_all_main.parquet"
+                Path("data/UMLS_processed/MM/all_disambiguated.parquet")
             )
         else:
-            group_cat = "CATEGORY"
             legal_umls_token = pl.read_parquet(
-                os.environ["WORK"]
-                + "/GENRE/data/quaero_legal_umls_token_2014_short_syn_all_main.parquet"
+                Path("data/UMLS_processed/QUAERO/all_disambiguated.parquet")
             )
         legal_umls_token = legal_umls_token.with_columns(
             pl.col("Entity")
@@ -252,13 +176,11 @@ def main(model_name, model_path, max_length, num_beams, best):
             .str.replace_all("]", ")", literal=True)
         )
         trie_legal_tokens = {}
-        for category in legal_umls_token[group_cat].unique().to_list():
+        for category in legal_umls_token["GROUP"].unique().to_list():
             print(f"processing {category}")
-            cat_legal_umls_token = legal_umls_token.filter(
-                pl.col(group_cat) == category
-            )
+            cat_legal_umls_token = legal_umls_token.filter(pl.col("GROUP") == category)
             trie_legal_tokens[category] = Trie([
-                model.tokenizer.encode(f"{start_entity}{entity}{end_entity}")[  # type: ignore
+                model.tokenizer.encode(entity)[  # type: ignore
                     start_idx:-1
                 ]
                 for entity in cat_legal_umls_token["Entity"].to_list()
@@ -314,8 +236,42 @@ if __name__ == "__main__":
     parser.add_argument(
         "--best", default=False, action="store_true", help="Use best if True else last"
     )
+    parser.add_argument(
+        "--dataset-name",
+        type=str,
+        default="MedMentions",
+        help="The dataset name",
+    )
+    parser.add_argument(
+        "--selection-method",
+        type=str,
+        default="random",
+        help="The selection method for training data",
+    )
+    parser.add_argument(
+        "--with-group",
+        default=False,
+        action="store_true",
+        help="Use group information if True",
+    )
+    parser.add_argument(
+        "--augmented-data",
+        default=False,
+        action="store_true",
+        help="Use augmented data if True",
+    )
     # Parse the command-line arguments
     args = parser.parse_args()
 
     # Pass the parsed argument to the main function
-    main(args.model_name, args.model_path, args.max_length, args.num_beams, args.best)
+    main(
+        args.model_name,
+        args.model_path,
+        args.max_length,
+        args.num_beams,
+        args.best,
+        args.dataset_name,
+        args.selection_method,
+        args.with_group,
+        args.augmented_data,
+    )

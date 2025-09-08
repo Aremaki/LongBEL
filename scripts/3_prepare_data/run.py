@@ -15,7 +15,7 @@ import polars as pl
 import typer
 from datasets import load_dataset
 
-from syncabel.parse_data_v2 import compute_best_synonym_df, process_bigbio_dataset
+from syncabel.parse_data import compute_best_synonym_df, process_bigbio_dataset
 
 app = typer.Typer(
     help="Preprocess BigBio datasets into model-specific train/dev/test pickles."

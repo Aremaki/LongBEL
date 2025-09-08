@@ -1,11 +1,24 @@
-import re
+import logging
+from collections.abc import Iterable
 from pathlib import Path
+from typing import Optional
 
+import joblib
 import nltk
 import nltk.data
 import numpy as np
+import polars as pl
 from tqdm import tqdm
-from transformers import AutoTokenizer
+
+from syncabel.embeddings import TextEncoder, best_by_cosine
+
+
+def cal_similarity_tfidf(a: list, b: str, vectorizer):
+    features_a = vectorizer.transform(a)
+    features_b = vectorizer.transform([b])
+    features_T = features_a.T
+    sim = np.array(features_b.dot(features_T).todense())[0]
+    return sim.argmax(), np.max(np.array(sim))
 
 
 def clean_natural(text):
@@ -22,212 +35,217 @@ def parse_text(
     data,
     start_entity,
     end_entity,
-    start_tag,
-    end_tag,
+    start_group,
+    end_group,
     nlp,
-    CUI_to_Syn=None,
-    Syn_to_annotation=None,
+    CUI_to_Syn,
+    CUI_to_GROUP,
     natural=False,
-    tokenizer=None,
     corrected_cui=None,
+    selection_method: str = "levenshtein",
+    encoder: Optional[TextEncoder] = None,
+    tfidf_vectorizer=None,
+    best_syn_map: Optional[dict[tuple[str, str], str]] = None,
 ):
-    targets_tokens = []
-    sources_tokens = []
+    """Create simple (source, target) pairs per entity.
 
-    for idx, passage in enumerate(data["passages"]):
+    For each entity in the BigBio page, returns one pair where:
+      - source: the sentence text that contains the entity mention
+      - target: "<entity> is <annotation>" where <annotation> is the best synonym
+        if available (or the normalized id otherwise).
+    """
+    source_sentences: list[str] = []
+    source_with_group_sentences: list[str] = []
+    target_sentences: list[str] = []
+
+    # Build a fast lookup of sentence spans per passage
+    for passage in data.get("passages", []):
         passage_text = passage["text"][0]
         start_offset_passage = passage["offsets"][0][0]
         end_offset_passage = passage["offsets"][0][1]
-        if idx > 0:
-            passage_text = "\n" + passage_text
 
-        # Apply natural cleaning if needed
         if natural:
             passage_text = clean_natural(passage_text)
 
-        # Tokenize the passage text
-        source_tokens = tokenizer.tokenize(passage_text)  # type: ignore
+        # Compute sentence spans within the passage text
+        sent_spans = list(nlp.span_tokenize(passage_text))  # type: ignore[attr-defined]
 
-        stack = []  # Stack to track currently open entities
-        target_offsets = []
-        source_offsets = []
+        # Pre-extract sentences with text for quick access
+        sentences = [
+            (s_start, s_end, passage_text[s_start:s_end])
+            for s_start, s_end in sent_spans
+        ]
 
-        # Sort by (start_offset, -end_offset) to ensure inner entities come first
-        sorted_entities = sorted(
-            data["entities"], key=lambda e: (e["offsets"][0][0], -e["offsets"][0][1])
-        )
-
-        prev_end_offset = -1  # Track previous entity's end
-        prev_start_offset = 100  # Track previous entity's start
-        prev_normalized_id = ""  # Track previous entity's CUI
-
-        # if not sorted_entities:
-        #     print(f"⚠️ No entity found")
-        #     continue
-
-        for entity in sorted_entities:
-            if not entity["normalized"]:
-                print("⚠️ No CUI found")
-                continue
-
-            entity_id = entity["id"]
-            start_offset = entity["offsets"][0][0]
-            end_offset = entity["offsets"][0][1]
-
-            if start_offset > end_offset_passage or start_offset < start_offset_passage:
-                continue
-
-            end_offset -= start_offset_passage
-            start_offset -= start_offset_passage
-
-            # Check for overlapping entities
-            if (
-                start_offset < prev_end_offset
-                and start_offset > prev_start_offset
-                and end_offset > prev_end_offset
-            ):
-                print(
-                    f"⚠️ Warning: Overlapping but not nested entity detected: {entity['text'][0]}"
+        # Iterate over entities and emit one pair per entity found in this passage
+        for entity in data.get("entities", []):
+            if not entity.get("normalized"):
+                logging.warning(
+                    f"Entity '{' '.join(entity['text'])}' has no CUI; skipping."
                 )
-                continue  # Ignore overlapping but not nested entity
+                # No normalized id -> skip (no annotation)
+                continue
 
-            if start_offset == prev_start_offset and end_offset == prev_end_offset:
-                print(f"⚠️ Warning: Duplicated entity detected: {entity['text'][0]}")
-                continue  # Ignore Duplicated
+            global_start = entity["offsets"][0][0]
+            # Keep only entities whose start falls inside this passage
+            if not (start_offset_passage <= global_start < end_offset_passage):
+                continue
+
+            rel_start = global_start - start_offset_passage
+            # rel_end isn't strictly required for sentence selection, but computed for completeness
+            # rel_end = global_end - start_offset_passage
+
+            entity_text = " ".join(entity["text"])
+            if natural:
+                entity_text = clean_natural(entity_text)
 
             normalized_id = entity["normalized"][0]["db_id"]
-
-            if corrected_cui and normalized_id in corrected_cui.keys():
-                print(
-                    f"✅ Convert: No synonym found for the code {normalized_id} : {entity['text'][0]} it has been converted to {corrected_cui[normalized_id]}"
+            if not normalized_id:
+                logging.warning(
+                    f"Entity '{entity_text}' has empty CUI; skipping entity."
                 )
+                continue
+            if corrected_cui and normalized_id in corrected_cui:
                 normalized_id = corrected_cui[normalized_id]
-
-            if (
-                start_offset >= prev_start_offset
-                and end_offset <= prev_end_offset
-                and normalized_id == prev_normalized_id
-            ):
-                print(
-                    f"⚠️ Warning: Overlapping and nested entities with same CUI: {entity['text'][0]}"
+                logging.info(
+                    f"Corrected CUI {entity['normalized'][0]['db_id']} -> {normalized_id} for entity '{entity_text}'"
                 )
-                continue  # Ignore overlapping with same CUI
 
-            possible_syns = CUI_to_Syn.get(normalized_id)  # type: ignore
-            if possible_syns is not None:
-                if Syn_to_annotation is not None:
-                    lev_similarities = []
-                    text = entity["text"][0]
-                    for syn in possible_syns:
-                        lev_similarities.append(nltk.edit_distance(text, syn))
-                    best_syn = possible_syns[np.argmin(lev_similarities)]
-                    annotation = best_syn
-                    # annotation = Syn_to_annotation.filter(
-                    #     (pl.col("CUI") == normalized_id) & (pl.col("Syn") == best_syn)
-                    # )[0, 1]
-                    if natural:
-                        annotation = clean_natural(annotation)
-                else:
-                    annotation = normalized_id
+            annotation = None
+            if CUI_to_Syn is not None:
+                possible_syns = CUI_to_Syn.get(normalized_id)
             else:
-                print(
-                    f"⚠️ Warning: No synonym found for the code {normalized_id} : {entity['text'][0]}"
+                possible_syns = None
+
+            # Prefer precomputed best synonyms if provided
+            if selection_method == "embedding":
+                if best_syn_map is not None:
+                    pre_key = (normalized_id, entity_text)
+                    if pre_key in best_syn_map:
+                        annotation = best_syn_map[pre_key]
+                # Otherwise select from possible synonyms
+                if annotation is None and possible_syns and encoder is not None:
+                    logging.warning(
+                        f"No precomputed best synonym map provided; Selecting best synonym by embedding for CUI {normalized_id} (entity '{entity_text}')"
+                    )
+                    best_syn, _ = best_by_cosine(
+                        encoder=encoder,
+                        mention=entity_text,
+                        candidates=list(possible_syns),
+                    )  # type: ignore
+                    annotation = best_syn
+            elif selection_method == "tfidf":
+                if possible_syns and tfidf_vectorizer is not None:
+                    best_idx, best_score = cal_similarity_tfidf(
+                        possible_syns, entity_text, tfidf_vectorizer
+                    )
+                    annotation = possible_syns[best_idx]
+                else:
+                    logging.warning(
+                        f"TF-IDF selection requested but no synonyms or vectorizer available for CUI {normalized_id} (entity '{entity_text}');"
+                    )
+            elif selection_method == "levenshtein" and possible_syns:
+                # Default to Levenshtein matching (previous behavior)
+                text = entity_text
+                dists = [nltk.edit_distance(text, syn) for syn in possible_syns]
+                best_syn = possible_syns[int(np.argmin(dists))]
+                annotation = best_syn
+            if annotation is None:
+                # If no synonyms mapping, skip entity
+                logging.warning(
+                    f"No synonyms found for CUI {normalized_id} (entity '{entity_text}'); skipping entity."
                 )
                 continue
 
-            while stack:
-                first_id, first_start, first_end, first_tag = stack.pop(0)
-                target_offsets.append((
-                    first_end,
-                    first_id,
-                    first_start,
-                    f"{end_entity}{start_tag}{first_tag}{end_tag}",
-                ))
-                source_offsets.append((
-                    first_end,
-                    first_id,
-                    first_start,
-                    f"{end_entity}",
-                ))
+            if natural and isinstance(annotation, str):
+                annotation = clean_natural(annotation)
 
-            if idx > 0:
-                start_token = len(
-                    tokenizer.tokenize(passage_text[: start_offset + 1].rstrip())  # type: ignore
+            # Define CUI group
+            group = CUI_to_GROUP.get(normalized_id)
+
+            # Find the sentence that contains the entity start
+            sent_text = passage_text
+            sent_start_offset = 0
+            for s_start, s_end, s_text in sentences:
+                if s_start <= rel_start < s_end:
+                    sent_text = s_text
+                    sent_start_offset = s_start
+                    break
+
+            # Add entity markers around all occurrences of the entity
+            marked_sent_text = sent_text
+            # Get all offsets, convert to relative, and filter for this sentence
+            all_spans_in_sent = []
+            for off in entity["offsets"]:
+                global_start_off, global_end_off = off
+                if not (start_offset_passage <= global_start_off < end_offset_passage):
+                    continue
+
+                rel_start_off = global_start_off - start_offset_passage
+                rel_end_off = global_end_off - start_offset_passage
+
+                start_in_sent = rel_start_off - sent_start_offset
+                end_in_sent = rel_end_off - sent_start_offset
+
+                if 0 <= start_in_sent < len(sent_text) and 0 < end_in_sent <= len(
+                    sent_text
+                ):
+                    all_spans_in_sent.append((start_in_sent, end_in_sent))
+
+            # Sort spans in reverse to mark from the end, preventing offset shifts
+            all_spans_in_sent.sort(key=lambda x: x[0], reverse=True)
+
+            marked_with_group_text = marked_sent_text
+            for i, (start_in_sent, end_in_sent) in enumerate(all_spans_in_sent):
+                if i == 0:
+                    marked_with_group_text = (
+                        marked_with_group_text[:start_in_sent]
+                        + start_entity
+                        + marked_with_group_text[start_in_sent:end_in_sent]
+                        + end_entity
+                        + start_group
+                        + group
+                        + end_group
+                        + marked_with_group_text[end_in_sent:]
+                    )
+                else:
+                    marked_with_group_text = (
+                        marked_with_group_text[:start_in_sent]
+                        + start_entity
+                        + marked_with_group_text[start_in_sent:end_in_sent]
+                        + end_entity
+                        + marked_with_group_text[end_in_sent:]
+                    )
+                marked_sent_text = (
+                    marked_sent_text[:start_in_sent]
+                    + start_entity
+                    + marked_sent_text[start_in_sent:end_in_sent]
+                    + end_entity
+                    + marked_sent_text[end_in_sent:]
                 )
-                end_token = len(
-                    tokenizer.tokenize(passage_text[: end_offset + 1].rstrip())  # type: ignore
-                )
-            else:
-                start_token = len(
-                    tokenizer.tokenize(passage_text[:start_offset].rstrip())  # type: ignore
-                )
-                end_token = len(tokenizer.tokenize(passage_text[:end_offset].rstrip()))  # type: ignore
-            if start_token == end_token:
-                start_token -= 1
-            target_offsets.append((start_token, entity_id, -1, f"{start_entity}"))
-            source_offsets.append((start_token, entity_id, -1, f"{start_entity}"))
-            stack.append((entity_id, start_token, end_token, annotation))
 
-            prev_end_offset = max(prev_end_offset, end_offset)
-            prev_start_offset = min(prev_start_offset, start_offset)
-            prev_normalized_id = normalized_id
+            # Emit the pair
+            source_sentences.append(marked_sent_text)
+            source_with_group_sentences.append(marked_with_group_text)
+            target_sentences.append(f"{entity_text} is {annotation}")
 
-        # Close remaining open entities
-        while stack:
-            first_id, first_start, first_end, first_tag = stack.pop(0)
-            target_offsets.append((
-                first_end,
-                first_id,
-                first_start,
-                f"{end_entity}{start_tag}{first_tag}{end_tag}",
-            ))
-            source_offsets.append((first_end, first_id, first_start, f"{end_entity}"))
-
-        # Sort offsets in reverse order to avoid index shifting issues
-        target_offsets.sort(
-            reverse=True, key=lambda x: (x[0], -x[2], [-ord(c) for c in x[1]])
-        )
-        source_offsets.sort(
-            reverse=True, key=lambda x: (x[0], -x[2], [-ord(c) for c in x[1]])
-        )
-
-        # Apply offsets to tokens instead of characters
-        target_tokens = source_tokens.copy()
-        for index, _, _, insert_text in target_offsets:
-            for token in reversed(tokenizer.tokenize(insert_text)):  # type: ignore
-                # Insert the separator or synonym token at the right place
-                target_tokens.insert(index, token)
-
-        for index, _, _, insert_text in source_offsets:
-            for token in reversed(tokenizer.tokenize(insert_text)):  # type: ignore
-                # Insert the separator or synonym token at the right place
-                source_tokens.insert(index, token)
-        # Detokenize back to text
-        targets_tokens.append(target_tokens)
-        sources_tokens.append(source_tokens)
-
-    # Join all processed passages into one text
-    sources_tokens = tokenizer.convert_tokens_to_string([  # type: ignore
-        token for source_tokens in sources_tokens for token in source_tokens
-    ])
-    targets_tokens = tokenizer.convert_tokens_to_string([  # type: ignore
-        token for target_tokens in targets_tokens for token in target_tokens
-    ])
-    return sources_tokens, targets_tokens
+    return source_sentences, source_with_group_sentences, target_sentences
 
 
 def process_bigbio_dataset(
     bigbio_dataset,
     start_entity,
     end_entity,
-    start_tag,
-    end_tag,
-    CUI_to_Syn=None,
-    Syn_to_annotation=None,
+    start_group,
+    end_group,
+    CUI_to_Syn,
+    CUI_to_GROUP,
     natural=False,
-    model_name=None,
+    encoder_name=None,
+    tfidf_vectorizer_path: Optional[Path] = None,
     corrected_cui=None,
     language: str = "english",
+    selection_method: str = "levenshtein",
+    best_syn_map: Optional[dict[tuple[str, str], str]] = None,
 ):
     """Process a BigBio KB dataset into source/target sequences.
 
@@ -243,96 +261,129 @@ def process_bigbio_dataset(
     except LookupError:
         print(f"⚠️ Punkt model for '{language}' not found; falling back to English.")
         nlp = nltk.data.load("tokenizers/punkt/english.pickle")
-    # Load tokenizer: prefer HuggingFace hub (model_name as repo id). If that fails,
-    # fall back to a local directory models/<model_name> if it exists. This removes
-    # the previous hard dependency on a /models mount.
-    try:
-        tokenizer = AutoTokenizer.from_pretrained(model_name, add_prefix_space=False)
-    except Exception as hub_err:  # pragma: no cover - network / availability branch
-        local_dir = Path("models") / str(model_name)
-        if local_dir.exists():
-            print(
-                f"⚠️ Hub load failed for '{model_name}' ({hub_err}); falling back to local path {local_dir}."
-            )
-            tokenizer = AutoTokenizer.from_pretrained(
-                str(local_dir), add_prefix_space=False
-            )
-        else:
-            raise RuntimeError(
-                f"Failed to load tokenizer for '{model_name}' from hub and no local fallback at {local_dir}."
-            ) from hub_err
-    tokenizer.add_special_tokens(
-        {"additional_special_tokens": [start_entity, end_entity, start_tag, end_tag]},
-        replace_additional_special_tokens=False,
-    )
     target_data = []
     source_data = []
+    source_with_group_data = []
+    if selection_method == "embedding" and encoder_name and best_syn_map is None:
+        encoder = TextEncoder(model_name=encoder_name)
+        print(f"Using embedding-based selection with encoder '{encoder_name}'.")
+    else:
+        encoder = None
+    if selection_method == "tfidf" and tfidf_vectorizer_path:
+        try:
+            tfidf_vectorizer = joblib.load(tfidf_vectorizer_path)
+            print(
+                f"Using TF-IDF-based selection with vectorizer at '{tfidf_vectorizer_path}'."
+            )
+        except Exception as e:
+            print(
+                f"⚠️ Failed to load TF-IDF vectorizer from '{tfidf_vectorizer_path}': {e}"
+            )
+            tfidf_vectorizer = None
+    else:
+        tfidf_vectorizer = None
+
     for page in tqdm(bigbio_dataset, total=len(bigbio_dataset)):
-        source_texts, target_texts = parse_text(
+        source_texts, source_with_group_texts, target_texts = parse_text(
             page,
             start_entity,
             end_entity,
-            start_tag,
-            end_tag,
+            start_group,
+            end_group,
             nlp,
             CUI_to_Syn,
-            Syn_to_annotation,
+            CUI_to_GROUP,
             natural,
-            tokenizer,
             corrected_cui,
+            selection_method,
+            encoder,
+            tfidf_vectorizer,
+            best_syn_map,
         )
-        target_data.append(target_texts)
-        source_data.append(source_texts)
-    return source_data, target_data
+        # Each entity yields one pair; extend the global lists accordingly.
+        target_data.extend(target_texts)
+        source_data.extend(source_texts)
+        source_with_group_data.extend(source_with_group_texts)
+
+    return source_data, source_with_group_data, target_data
 
 
-def load_data(source_data, target_data, nlp, tokenizer, max_length=512):
+def compute_best_synonym_df(
+    bigbio_dataset: Iterable[dict],
+    CUI_to_Syn: dict[str, Iterable[str]],
+    encoder_name: str = "encoder/coder-all",
+    batch_size: int = 4096,
+    corrected_cui: Optional[dict[str, str]] = None,
+) -> "pl.DataFrame":
+    """Precompute best synonyms per unique (CUI, entity) using batched embeddings.
+
+    Returns a DataFrame with columns: [CUI, entity, best_synonym].
+
+    Notes
+    -----
+    - Deduplicates pairs by (CUI, entity) for efficiency.
+    - Uses cosine similarity via best_by_cosine with precomputed vectors.
     """
-    Load and preprocess source and target data, ensuring that the target text is split into passages
-    while maintaining token limit constraints and balanced entity markers.
+    # Gather unique (CUI, entity) pairs and the set of CUIs present in dataset
+    unique_pairs: set[tuple[str, str]] = set()
+    present_cuis: set[str] = set()
+    for page in bigbio_dataset:
+        for ent in page.get("entities", []):
+            if not ent.get("normalized"):
+                continue
+            cui = ent["normalized"][0]["db_id"]
+            if corrected_cui and cui in corrected_cui:
+                cui = corrected_cui[cui]
+            mention = clean_natural(" ".join(ent["text"]))
+            unique_pairs.add((cui, mention))
+            present_cuis.add(cui)
 
-    Args:
-        source_data (list of str): List of source texts.
-        target_data (list of str): List of target texts with annotated entities.
-        nlp (nltk.tokenize): NLTK tokenizer with a `.tokenize()` method (e.g., nltk.sent_tokenize).
-        tokenizer (transformers.PreTrainedTokenizer): Tokenizer for computing token lengths.
-        max_length (int, optional): Maximum allowed token length for each target passage. Default is 512.
+    # Build per-CUI synonym lists (ensure non-empty)
+    cui_to_syns: dict[str, list[str]] = {}
+    for cui in present_cuis:
+        syns = list(CUI_to_Syn.get(cui, []))
+        cui_to_syns[cui] = [clean_natural(s) for s in syns]
 
-    Returns:
-        dict: A dictionary containing:
-            - "source" (list of str): Source passages with entity annotations removed.
-            - "target" (list of str): Target passages containing entity annotations.
-    """
-    data = {"source": [], "target": []}
-    for _, target in zip(source_data, target_data):
-        tokens = 0
-        target_passage = ""
-        target_doc = nlp.tokenize(target)
-        for sent in target_doc:
-            sent_tokens = len(tokenizer.encode(sent))
-            tokens += sent_tokens
-            if (
-                tokens < max_length
-                or (target_passage.count("<s_e>") != target_passage.count("<e_e>"))
-                or (target_passage.count("<s_m>") != target_passage.count("<e_e>"))
-            ):
-                target_passage += sent + " "
-            else:
-                target_passage = target_passage[:-1]
-                data["target"].append(target_passage)
-                source_passage = re.sub(r"<s_m>\s|\s<s_e>.*?<e_e>", "", target_passage)
-                data["source"].append(source_passage)
-                target_passage = sent + " "
-                tokens = sent_tokens
-        if tokens > 20:
-            target_passage = target_passage[:-1]
-            data["target"].append(target_passage)
-            source_passage = re.sub(r"<s_m>\s|\s<s_e>.*?<e_e>", "", target_passage)
-            data["source"].append(source_passage)
-        elif tokens < 20:
-            target_passage = data["target"][-1] + " " + target_passage[:-1]
-            data["target"][-1] = target_passage
-            source_passage = re.sub(r"<s_m>\s|\s<s_e>.*?<e_e>", "", target_passage)
-            data["source"][-1] = source_passage
+    # Initialize encoder
+    encoder = TextEncoder(model_name=encoder_name)
 
-    return data
+    # Prepare batched encoding for all unique mentions
+    pairs_list = sorted(unique_pairs)  # deterministic order
+    mentions = [m for _, m in pairs_list]
+    mention_vecs = encoder.encode(mentions, batch_size=batch_size, tqdm_bar=True)
+
+    # Precompute embeddings for all CUIs' synonyms at once for efficiency
+    all_syns = []
+    cui_syn_indices = {}
+    idx = 0
+    for cui, syns in cui_to_syns.items():
+        cui_syn_indices[cui] = (idx, idx + len(syns))
+        all_syns.extend(syns)
+        idx += len(syns)
+    all_syn_vecs = encoder.encode(all_syns, batch_size=batch_size, tqdm_bar=True)
+    cui_to_cvecs: dict[str, np.ndarray] = {
+        cui: all_syn_vecs[start:end] for cui, (start, end) in cui_syn_indices.items()
+    }
+
+    # Compute best synonym for each pair using precomputed vectors
+    rows = []
+    for (cui, mention), m_vec in tqdm(
+        zip(pairs_list, mention_vecs), total=len(pairs_list), desc="Match best syn"
+    ):
+        syns = cui_to_syns[cui]
+        syn_vecs = cui_to_cvecs[cui]
+        best_syn, best_score = best_by_cosine(
+            encoder=encoder,
+            mention=mention,
+            candidates=syns,
+            mention_vec=m_vec,
+            candidates_vecs=syn_vecs,
+        )
+        rows.append({
+            "CUI": cui,
+            "entity": mention,
+            "best_synonym": best_syn,
+            "score": best_score,
+        })
+
+    return pl.DataFrame(rows)

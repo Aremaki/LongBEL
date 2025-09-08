@@ -21,6 +21,11 @@ from transformers import (
 )
 
 
+def load_pickle(file_path):
+    with open(file_path, "rb") as file:
+        return pickle.load(file)
+
+
 # Custom Callback for GPU and performance metrics
 class GpuUsageCallback(TrainerCallback):
     def __init__(self):
@@ -188,30 +193,22 @@ def main(
     # Load and preprocess data
     with_group_extension = "_with_group" if with_group else ""
     data_folder = Path("data/final_data")
-    with open(
+    train_source_data = load_pickle(
         data_folder
         / dataset_name
-        / f"train_{selection_method}_source{with_group_extension}.pkl",
-        "rb",
-    ) as file:
-        train_source_data = pickle.load(file)
-    with open(
-        data_folder / dataset_name / f"train_{selection_method}_target.pkl",
-        "rb",
-    ) as file:
-        train_target_data = pickle.load(file)
-    with open(
+        / f"train_{selection_method}_source{with_group_extension}.pkl"
+    )
+    train_target_data = load_pickle(
+        data_folder / dataset_name / f"train_{selection_method}_target.pkl"
+    )
+    validation_source_data = load_pickle(
         data_folder
         / dataset_name
-        / f"validation_{selection_method}_source{with_group_extension}.pkl",
-        "rb",
-    ) as file:
-        validation_source_data = pickle.load(file)
-    with open(
-        data_folder / dataset_name / f"validation_{selection_method}_target.pkl",
-        "rb",
-    ) as file:
-        validation_target_data = pickle.load(file)
+        / f"validation_{selection_method}_source{with_group_extension}.pkl"
+    )
+    validation_target_data = load_pickle(
+        data_folder / dataset_name / f"validation_{selection_method}_target.pkl"
+    )
 
     train_data = {"source": train_source_data, "target": train_target_data}
 
@@ -233,31 +230,23 @@ def main(
 
     if augmented_data:
         if dataset_name == "MedMentions":
-            with open(
+            train_generated_source_data = load_pickle(
                 data_folder
                 / "SynthMM"
-                / f"train_{selection_method}_source{with_group_extension}.pkl",
-                "rb",
-            ) as file:
-                train_generated_source_data = pickle.load(file)
-            with open(
-                data_folder / "SynthMM" / f"train_{selection_method}_target.pkl",
-                "rb",
-            ) as file:
-                train_generated_target_data = pickle.load(file)
+                / f"train_{selection_method}_source{with_group_extension}.pkl"
+            )
+            train_generated_target_data = load_pickle(
+                data_folder / "SynthMM" / f"train_{selection_method}_target.pkl"
+            )
         else:
-            with open(
+            train_generated_source_data = load_pickle(
                 data_folder
                 / "SynthQUAERO"
-                / f"train_{selection_method}_source{with_group_extension}.pkl",
-                "rb",
-            ) as file:
-                train_generated_source_data = pickle.load(file)
-            with open(
-                data_folder / "SynthQUAERO" / f"train_{selection_method}_target.pkl",
-                "rb",
-            ) as file:
-                train_generated_target_data = pickle.load(file)
+                / f"train_{selection_method}_source{with_group_extension}.pkl"
+            )
+            train_generated_target_data = load_pickle(
+                data_folder / "SynthQUAERO" / f"train_{selection_method}_target.pkl"
+            )
         train_generated_data = {
             "source": train_generated_source_data,
             "target": train_generated_target_data,

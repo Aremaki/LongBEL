@@ -5,7 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 
 import re
-from typing import Dict, List
 
 import torch
 
@@ -24,12 +23,12 @@ def remove_types_and_store(text):
 
 def get_prefix_allowed_tokens_fn(
     model,
-    sentences: List[str],
+    sentences: list[str],
     start_mention_token="[",
     end_mention_token="]",
     start_entity_token="{",
     end_entity_token="}",
-    candidates_trie: Dict[str, Trie] = None,  # type: ignore
+    candidates_trie: dict[str, Trie] = None,  # type: ignore
 ):
     return _get_end_to_end_prefix_allowed_tokens_fn(
         lambda x: model.tokenizer.encode(x),
@@ -53,12 +52,12 @@ def _get_end_to_end_prefix_allowed_tokens_fn(
     bos_token_id,
     pad_token_id,
     eos_token_id,
-    sentences: List[str],
+    sentences: list[str],
     start_mention_token="{",
     end_mention_token="}",
     start_entity_token="[",
     end_entity_token="]",
-    candidates_trie: Dict[str, Trie] = None,  # type: ignore
+    candidates_trie: dict[str, Trie] = None,  # type: ignore
     model_name: str = "",
 ):
     is_bart = "bart" in model_name

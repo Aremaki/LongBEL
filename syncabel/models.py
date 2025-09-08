@@ -8,7 +8,6 @@ Core models for SynCABEL
 # LICENSE file in the root directory of this source tree.
 
 import logging
-from typing import Dict, List
 
 from transformers import (
     AutoTokenizer,
@@ -41,13 +40,13 @@ def skip_undesired_tokens(outputs, tokenizer):
 class _GENREHubInterface:
     def sample(
         self,
-        sentences: List[str],
+        sentences: list[str],
         num_beams: int = 5,
         num_return_sequences=5,
-        text_to_id: Dict[str, str] = None,  # type: ignore
+        text_to_id: dict[str, str] = None,  # type: ignore
         marginalize: bool = False,
         **kwargs,
-    ) -> List[str]:
+    ) -> list[str]:
         input_args = {
             k: v.to(self.device)  # type: ignore
             for k, v in self.tokenizer.batch_encode_plus(  # type: ignore
