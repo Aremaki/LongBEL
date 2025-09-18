@@ -8,7 +8,7 @@ from pathlib import Path
 
 import idr_torch  # type: ignore
 import numpy as np
-import pynvml
+import nvidia_smi as pynvml
 import torch.distributed as dist
 from datasets import Dataset, concatenate_datasets
 from transformers import (
@@ -323,7 +323,7 @@ def main(
         load_best_model_at_end=True,
         metric_for_best_model="eval_recall",
         greater_is_better=True,
-        # eval_on_start=True,
+        eval_on_start=True,
         seed=42,
         warmup_steps=500,
         learning_rate=lr,

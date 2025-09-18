@@ -43,7 +43,7 @@ dependencies = [
     "altair>=5.5.0",
     "scispacy>=0.5.5",
     "unidecode>=1.4.0",
-    "pynvml>=13.0.1",
+    "nvidia-ml-py>=13.580.65",
 ]
 
 [project.optional-dependencies]

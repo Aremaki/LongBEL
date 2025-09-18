@@ -17,6 +17,8 @@ module purge
 module load arch/h100
 module load pytorch-gpu/py3/2.3.1
 
+export OMP_NUM_THREADS=4
+
 # Train models
-python scripts/4_training/train.py $SCRIPT_ARGS
+torchrun --nproc_per_node=4 scripts/4_training/train.py $SCRIPT_ARGS
 echo SCRIPT FINISHED
