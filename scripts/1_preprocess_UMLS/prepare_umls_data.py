@@ -111,25 +111,27 @@ def _disambiguate(df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
         df.filter(pl.col("lang") == "fr")
         .select([
             "CUI",
+            "Title",
             "SEM_NAME",
             "GROUP",
             "CATEGORY",
             "Syn",
             "Entity_full",
             "is_main",
-            "is_preferred",
+            "is_title",
         ])
         .unique()
     )
     df_all = df.select([
         "CUI",
+        "Title",
         "SEM_NAME",
         "GROUP",
         "CATEGORY",
         "Syn",
         "Entity_full",
         "is_main",
-        "is_preferred",
+        "is_title",
     ]).unique()
     return df_all, df_fr
 
@@ -146,12 +148,13 @@ def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
         .with_columns(Entity=pl.col("Syn"), ambiguous_level=pl.lit(0))
         .select([
             "CUI",
+            "Title",
             "Entity",
             "SEM_NAME",
             "CATEGORY",
             "GROUP",
             "is_main",
-            "is_preferred",
+            "is_title",
             "ambiguous_level",
         ])
     )
@@ -173,12 +176,13 @@ def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
         .with_columns(Entity=pl.col("Syn"), ambiguous_level=pl.lit(1))
         .select([
             "CUI",
+            "Title",
             "Entity",
             "SEM_NAME",
             "CATEGORY",
             "GROUP",
             "is_main",
-            "is_preferred",
+            "is_title",
             "ambiguous_level",
         ])
     )
@@ -199,12 +203,13 @@ def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
         Entity=pl.col("Syn"), ambiguous_level=pl.lit(2)
     ).select([
         "CUI",
+        "Title",
         "Entity",
         "SEM_NAME",
         "CATEGORY",
         "GROUP",
         "is_main",
-        "is_preferred",
+        "is_title",
         "ambiguous_level",
     ])
 
@@ -232,24 +237,17 @@ def _explode_language_frames(base: pl.DataFrame) -> pl.DataFrame:
         "SEM_NAME",
         "CATEGORY",
         "GROUP",
-        "UMLS_Title_preferred",
+        "Title",
         "UMLS_Title_main",
         "UMLS_Title_en",
         "UMLS_alias_en",
     ]).with_columns(pl.lit("en").alias("lang"))
-    en = (
-        en.explode("UMLS_Title_main")
-        .explode("UMLS_Title_preferred")
-        .explode("UMLS_Title_en")
-        .explode("UMLS_alias_en")
-    )
+    en = en.explode("UMLS_Title_main").explode("UMLS_Title_en").explode("UMLS_alias_en")
 
     # Build unified rows for each type source (mark main True appropriately)
     parts = []
 
-    def _mk(
-        df: pl.DataFrame, col: str, is_main: bool, is_preferred: bool
-    ) -> pl.DataFrame:
+    def _mk(df: pl.DataFrame, col: str, is_main: bool, is_title: bool) -> pl.DataFrame:
         return (
             df.select([
                 "CUI",
@@ -261,29 +259,22 @@ def _explode_language_frames(base: pl.DataFrame) -> pl.DataFrame:
             ])
             .filter((pl.col("Syn") != "") & (pl.col("Syn").is_not_null()))
             .with_columns(is_main=pl.lit(is_main))
-            .with_columns(is_preferred=pl.lit(is_preferred))
+            .with_columns(is_title=pl.lit(is_title))
         )
 
     # Titles and aliases
-    if "UMLS_Title_preferred" in en.columns:
-        parts.append(
-            _mk(
-                en,
-                "UMLS_Title_preferred",
-                is_main=False,
-                is_preferred=True,
-            )
-        )
+    if "Title" in en.columns:  # from previous cleaning step
+        parts.append(_mk(en, "Title", is_main=True, is_title=True))
     if "UMLS_Title_main" in en.columns:  # main (English main title)
-        parts.append(_mk(en, "UMLS_Title_main", is_main=True, is_preferred=False))
+        parts.append(_mk(en, "UMLS_Title_main", is_main=True, is_title=False))
     if "UMLS_Title_fr" in fr.columns:
-        parts.append(_mk(fr, "UMLS_Title_fr", is_main=False, is_preferred=False))
+        parts.append(_mk(fr, "UMLS_Title_fr", is_main=False, is_title=False))
     if "UMLS_Title_en" in en.columns:
-        parts.append(_mk(en, "UMLS_Title_en", is_main=False, is_preferred=False))
+        parts.append(_mk(en, "UMLS_Title_en", is_main=False, is_title=False))
     if "UMLS_alias_fr" in fr.columns:
-        parts.append(_mk(fr, "UMLS_alias_fr", is_main=False, is_preferred=False))
+        parts.append(_mk(fr, "UMLS_alias_fr", is_main=False, is_title=False))
     if "UMLS_alias_en" in en.columns:
-        parts.append(_mk(en, "UMLS_alias_en", is_main=False, is_preferred=False))
+        parts.append(_mk(en, "UMLS_alias_en", is_main=False, is_title=False))
 
     return pl.concat(parts)
 

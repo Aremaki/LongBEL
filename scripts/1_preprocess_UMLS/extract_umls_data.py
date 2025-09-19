@@ -324,6 +324,49 @@ def synonyms(
         ])
     )
     title_syn_df = title_df.join(syn_df, how="full", on="CUI", coalesce=True)
+
+    # Process best title
+    title_syn_df = title_syn_df.with_columns(
+        min_idx=pl.col("UMLS_Title_main")
+        .list.eval(pl.element().str.len_chars())
+        .list.arg_min()
+    )
+    title_syn_df = title_syn_df.with_columns(
+        shortest_title_main=pl.col("UMLS_Title_main").list.get(pl.col("min_idx"))
+    ).drop("min_idx")
+    title_syn_df = title_syn_df.with_columns(
+        min_idx=pl.col("UMLS_Title_en")
+        .list.eval(pl.element().str.len_chars())
+        .list.arg_min()
+    )
+    title_syn_df = title_syn_df.with_columns(
+        shortest_title=pl.col("UMLS_Title_en").list.get(pl.col("min_idx"))
+    ).drop("min_idx")
+    title_syn_df = title_syn_df.with_columns(
+        pl.when(pl.col("UMLS_Title_preferred").list.get(0).is_not_null())
+        .then(pl.col("UMLS_Title_preferred").list.get(0))
+        .when(
+            (pl.col("UMLS_Title_main").list.len() == 1)
+            & (pl.col("UMLS_Title_main").list.get(0).is_not_null())
+        )
+        .then(pl.col("UMLS_Title_main").list.get(0))
+        .when(pl.col("shortest_title_main").is_not_null())
+        .then(pl.col("shortest_title_main"))
+        .when(
+            (pl.col("UMLS_Title_en").list.len() == 1)
+            & (pl.col("UMLS_Title_en").list.get(0).is_not_null())
+        )
+        .then(pl.col("UMLS_Title_en").list.get(0))
+        .when(pl.col("shortest_title").is_not_null())
+        .then(pl.col("shortest_title"))
+        .when(
+            (pl.col("UMLS_Title_fr").list.len() == 1)
+            & (pl.col("UMLS_Title_fr").list.get(0).is_not_null())
+        )
+        .then(pl.col("UMLS_Title_fr").list.get(0))
+        .otherwise(None)
+        .alias("Title")
+    ).drop("shortest_title_main", "shortest_title", "UMLS_Title_preferred")
     out_file = out_dir / "umls_title_syn.parquet"
     title_syn_df.write_parquet(out_file)
     typer.echo(f"Saved {out_file}")
