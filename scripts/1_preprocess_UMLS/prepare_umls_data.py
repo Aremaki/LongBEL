@@ -118,7 +118,6 @@ def _disambiguate(df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
             "Syn",
             "Entity_full",
             "is_main",
-            "is_title",
         ])
         .unique()
     )
@@ -131,7 +130,6 @@ def _disambiguate(df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
         "Syn",
         "Entity_full",
         "is_main",
-        "is_title",
     ]).unique()
     return df_all, df_fr
 
@@ -154,7 +152,6 @@ def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
             "CATEGORY",
             "GROUP",
             "is_main",
-            "is_title",
             "ambiguous_level",
         ])
     )
@@ -182,7 +179,6 @@ def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
             "CATEGORY",
             "GROUP",
             "is_main",
-            "is_title",
             "ambiguous_level",
         ])
     )
@@ -209,7 +205,6 @@ def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
         "CATEGORY",
         "GROUP",
         "is_main",
-        "is_title",
         "ambiguous_level",
     ])
 
