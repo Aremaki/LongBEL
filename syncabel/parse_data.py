@@ -222,8 +222,8 @@ def parse_text(
                     + end_entity
                     + marked_sent_text[end_in_sent:]
                 )
-            marked_sent_text += f"</s>{entity_text} is "
-            marked_with_group_text += f"</s>{entity_text} is "
+            marked_sent_text += f"</s>{entity_text} is"
+            marked_with_group_text += f"</s>{entity_text} is"
 
             # Emit the pair
             source_sentences.append(marked_sent_text)
