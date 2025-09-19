@@ -11,7 +11,6 @@ import numpy as np
 import pynvml
 import torch.distributed as dist
 from datasets import Dataset, concatenate_datasets
-from evaluate import load as load_metric
 from transformers import (
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
@@ -20,9 +19,6 @@ from transformers import (
     Seq2SeqTrainingArguments,  # type: ignore
     TrainerCallback,  # type: ignore
 )
-
-rouge = load_metric("rouge")
-bleu = load_metric("sacrebleu")
 
 
 def load_pickle(file_path):
@@ -147,19 +143,6 @@ def compute_metrics(eval_preds, tokenizer):
     decoded_preds = skip_undesired_tokens(decoded_preds, tokenizer)
     decoded_labels = skip_undesired_tokens(decoded_labels, tokenizer)
 
-    # Rouge expects newline-separated sentences
-    result_rouge = rouge.compute(
-        predictions=[pred.strip() for pred in decoded_preds],
-        references=[gold.strip() for gold in decoded_labels],
-        use_stemmer=True,
-    )
-
-    # SacreBLEU expects list of list of references
-    result_bleu = bleu.compute(
-        predictions=[pred.strip() for pred in decoded_preds],
-        references=[[gold.strip()] for gold in decoded_labels],
-    )
-
     # Compute recall
     recall = np.mean([
         pred.strip() == gold.strip()
@@ -170,8 +153,6 @@ def compute_metrics(eval_preds, tokenizer):
         "recall": round(recall, 4),
         "num_gold": len(decoded_labels),
         "num_guess": len(decoded_preds),
-        "rougeL": round(result_rouge["rougeL"].mid.fmeasure, 4),  # type: ignore
-        "bleu": round(result_bleu["score"], 4),  # type: ignore
     }
 
 
