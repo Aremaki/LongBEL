@@ -72,17 +72,13 @@ class GpuUsageCallback(TrainerCallback):
 
 
 # Preprocess function for tokenization
-def preprocess_function(
-    examples, tokenizer, max_source_length=1024, max_target_length=1024
-):
+def preprocess_function(examples, tokenizer):
     """
     Tokenizes the source and target texts for seq2seq training.
 
     Args:
         examples (dict): Dictionary with 'source' and 'target' keys.
         tokenizer (PreTrainedTokenizer): Tokenizer instance.
-        max_source_length (int): Max length for source sequences.
-        max_target_length (int): Max length for target sequences.
 
     Returns:
         dict: Encoded inputs with labels (labels = target ids, padded and masked with -100).
@@ -90,15 +86,11 @@ def preprocess_function(
     # Encode source
     model_inputs = tokenizer(
         examples["source"],
-        max_length=max_source_length,
-        truncation=True,
     )
 
     # Encode targets
     labels = tokenizer(
         text_target=examples["target"],
-        max_length=max_target_length,
-        truncation=True,
     )["input_ids"]
 
     # Replace padding token id's in labels with -100
