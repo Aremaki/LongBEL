@@ -290,10 +290,10 @@ def main(
     data_collator = DataCollatorForSeq2Seq(tokenizer, model=model, padding="longest")
 
     # Training params
-    train_max_batch = 16
-    eval_max_batch = 16
+    train_max_batch = 32
+    eval_max_batch = 32
     eval_accumulation_steps = None
-    gradient_accumulation_steps = 2
+    gradient_accumulation_steps = 1
     ddp_backend = "nccl"  # Enable Distributed Data Parallel with NCCL backend
     auto_find_batch_size = False
     fsdp = ""
