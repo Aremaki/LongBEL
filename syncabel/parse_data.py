@@ -1,4 +1,5 @@
 import logging
+import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Optional
@@ -11,6 +12,70 @@ import polars as pl
 from tqdm import tqdm
 
 from syncabel.embeddings import TextEncoder, best_by_cosine
+
+
+def span_tokenize_with_trailing_newlines(text, nlp):
+    """
+    Tokenize text into sentence spans, treating punctuation and line breaks as sentence boundaries.
+
+    Newlines are NOT included in the resulting spans, and leading/trailing
+    whitespace is trimmed so each span covers the sentence content only
+    (no space before or after).
+
+    Args:
+        text (str): The input passage.
+        nlp (PunktSentenceTokenizer): Pre-trained NLTK sentence tokenizer.
+
+    Returns:
+        List[Tuple[int, int]]: List of (start, end) indices for each sentence
+        within the original text, without surrounding whitespace/newlines.
+    """
+    sent_spans = []
+    offset = 0
+
+    # Split text by lines, but keep \n in the chunks
+    # Use regex to keep trailing newlines
+    chunks = re.split(r"(\n+)", text)
+
+    current_chunk = ""
+    for part in chunks:
+        if part == "":
+            continue
+        if re.fullmatch(r"\n+", part):
+            # Newline sequence: treat as a boundary, but DO NOT include it in spans.
+            if current_chunk:
+                for start, end in nlp.span_tokenize(current_chunk):
+                    abs_start = offset + start
+                    abs_end = offset + end
+                    # Trim leading/trailing whitespace from the original text
+                    while abs_start < abs_end and text[abs_start].isspace():
+                        abs_start += 1
+                    while abs_end > abs_start and text[abs_end - 1].isspace():
+                        abs_end -= 1
+                    if abs_start < abs_end:
+                        sent_spans.append((abs_start, abs_end))
+            # Advance offset over both the chunk and the newline(s)
+            offset += len(current_chunk) + len(part)
+            current_chunk = ""
+        else:
+            # Non-newline text: accumulate until a newline or the end
+            current_chunk += part
+
+    # Handle any remaining chunk
+    if current_chunk:
+        for start, end in nlp.span_tokenize(current_chunk):
+            abs_start = offset + start
+            abs_end = offset + end
+            # Trim leading/trailing whitespace from the original text
+            while abs_start < abs_end and text[abs_start].isspace():
+                abs_start += 1
+            while abs_end > abs_start and text[abs_end - 1].isspace():
+                abs_end -= 1
+            if abs_start < abs_end:
+                sent_spans.append((abs_start, abs_end))
+        offset += len(current_chunk)
+
+    return sent_spans
 
 
 def cal_similarity_tfidf(a: list, b: str, vectorizer):
@@ -68,7 +133,7 @@ def parse_text(
             passage_text = clean_natural(passage_text)
 
         # Compute sentence spans within the passage text
-        sent_spans = list(nlp.span_tokenize(passage_text))  # type: ignore[attr-defined]
+        sent_spans = span_tokenize_with_trailing_newlines(passage_text, nlp)
 
         # Pre-extract sentences with text for quick access
         sentences = [
