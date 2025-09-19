@@ -39,14 +39,12 @@ def clean_natural(text: str) -> str:
 
 def build_templates(df: pl.DataFrame) -> pl.DataFrame:
     # First extract and process all mentions
-    processed_df = (
-        df.with_columns(Syn=pl.col("Entity").str.split(" of type ").list.first())
-        .group_by("CUI")
-        .agg(
-            pl.col("Syn").unique().alias("mentions"),
-            pl.col("DEF").first().alias("definitions"),
-            pl.col("Syn").n_unique().alias("mention_count"),
-        )
+    processed_df = df.group_by("CUI").agg(
+        pl.col("Entity").unique().alias("mentions"),
+        pl.col("DEF").first().alias("definitions"),
+        pl.col("GROUP").first().alias("semantic_group"),
+        pl.col("SEM_NAME").first().alias("semantic_type"),
+        pl.col("Syn").n_unique().alias("mention_count"),
     )
 
     # Define functions with explicit return types
@@ -71,6 +69,10 @@ def build_templates(df: pl.DataFrame) -> pl.DataFrame:
             user_prompt=pl.concat_str([
                 pl.lit("- **CUI**:\n"),
                 pl.col("CUI"),
+                pl.lit("- **Semantic group**:\n"),
+                pl.col("semantic_group"),
+                pl.lit("- **Semantic Type**:\n"),
+                pl.col("semantic_type"),
                 pl.lit("\n- **Definitions**:\n"),
                 pl.col("definitions_processed"),
                 pl.lit("- **Mentions**:\n"),
@@ -96,11 +98,20 @@ def run(
     mm_def: Path = typer.Option(None, help="Path to MM definitions parquet"),
     quaero_path: Path = typer.Option(None, help="Path to QUAERO concepts parquet"),
     quaero_def: Path = typer.Option(None, help="Path to QUAERO definitions parquet"),
-    out_mm: Path = typer.Option(
-        Path("data/user_prompts_MM"), help="Output dir for MM prompts"
+    out_mm_def: Path = typer.Option(
+        Path("data/user_prompts_MM"), help="Output dir for MM prompts with definitions"
     ),
-    out_quaero: Path = typer.Option(
-        Path("data/user_prompts_quaero"), help="Output dir for QUAERO prompts"
+    out_mm_no_def: Path = typer.Option(
+        Path("data/user_prompts_MM"),
+        help="Output dir for MM prompts without definitions",
+    ),
+    out_quaero_def: Path = typer.Option(
+        Path("data/user_prompts_quaero"),
+        help="Output dir for QUAERO prompts with definitions",
+    ),
+    out_quaero_no_def: Path = typer.Option(
+        Path("data/user_prompts_quaero"),
+        help="Output dir for QUAERO prompts without definitions",
     ),
     shuffle: bool = typer.Option(True, help="Shuffle concepts (sample fraction=1)"),
     chunk_size: int = typer.Option(2500, help="Chunk size for output parquet files"),
@@ -115,12 +126,20 @@ def run(
         mm_joined = _load_join(mm_path, mm_def)
         # If only definitions file is desired (original logic sampled from defs directly)
         if "DEF" in mm_joined.columns:
+            # Filter out concepts without definitions
             mm_filtered = mm_joined.filter(pl.col("DEF").is_not_null())
             if shuffle:
                 mm_filtered = mm_filtered.sample(fraction=1)
             user_prompt_mm = build_templates(mm_filtered)
-            _write_chunks(user_prompt_mm, out_mm, chunk_size)
-            typer.echo(f"MM concepts written to {out_mm}")
+            _write_chunks(user_prompt_mm, out_mm_def, chunk_size)
+            typer.echo(f"MM concepts written to {out_mm_def}")
+            # Filter out concepts with definitions for no-def file
+            mm_no_def = mm_joined.filter(pl.col("DEF").is_null())
+            if shuffle:
+                mm_no_def = mm_no_def.sample(fraction=1)
+            user_prompt_mm_no_def = build_templates(mm_no_def)
+            _write_chunks(user_prompt_mm_no_def, out_mm_no_def, chunk_size)
+            typer.echo(f"MM concepts without definitions written to {out_mm_no_def}")
 
     if quaero_path and quaero_def:
         q_joined = _load_join(quaero_path, quaero_def)
@@ -129,8 +148,17 @@ def run(
             if shuffle:
                 q_filtered = q_filtered.sample(fraction=1)
             user_prompt_q = build_templates(q_filtered)
-            _write_chunks(user_prompt_q, out_quaero, chunk_size)
-            typer.echo(f"QUAERO concepts written to {out_quaero}")
+            _write_chunks(user_prompt_q, out_quaero_def, chunk_size)
+            typer.echo(f"QUAERO concepts written to {out_quaero_def}")
+            # Filter out concepts with definitions for no-def file
+            q_no_def = q_joined.filter(pl.col("DEF").is_null())
+            if shuffle:
+                q_no_def = q_no_def.sample(fraction=1)
+            user_prompt_q_no_def = build_templates(q_no_def)
+            _write_chunks(user_prompt_q_no_def, out_quaero_no_def, chunk_size)
+            typer.echo(
+                f"QUAERO concepts without definitions written to {out_quaero_no_def}"
+            )
 
 
 if __name__ == "__main__":

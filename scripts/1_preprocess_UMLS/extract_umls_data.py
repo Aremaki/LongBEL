@@ -260,6 +260,8 @@ def synonyms(
 ) -> None:
     """Extract preferred titles (EN/FR/Main) and synonyms into umls_title_syn.parquet."""
     _ensure_out_dir(out_dir)
+    good_title = {"CUI": [], "UMLS_Title_good": []}
+    preferred_title = {"CUI": [], "UMLS_Title_preferred": []}
     main_title = {"CUI": [], "UMLS_Title_main": []}
     fr_title = {"CUI": [], "UMLS_Title_fr": []}
     en_title = {"CUI": [], "UMLS_Title_en": []}
@@ -271,8 +273,16 @@ def synonyms(
         cui = parts[0]
         lat = parts[1]
         ts = parts[2]
+        ispref = parts[6]
         sab = parts[11]
+        tty = parts[12]
         term = _decode_term(parts[14])
+        if ispref == "Y":
+            good_title["CUI"].append(cui)
+            good_title["UMLS_Title_good"].append(term)
+        if tty == "PN":
+            preferred_title["CUI"].append(cui)
+            preferred_title["UMLS_Title_preferred"].append(term)
         if sab == "MTH":
             main_title["CUI"].append(cui)
             main_title["UMLS_Title_main"].append(term)
@@ -296,15 +306,21 @@ def synonyms(
     fr_title_df = pl.DataFrame(fr_title).unique()
     en_title_df = pl.DataFrame(en_title).unique()
     main_title_df = pl.DataFrame(main_title).unique()
+    preferred_title_df = pl.DataFrame(preferred_title).unique()
+    good_title_df = pl.DataFrame(good_title).unique()
 
     title_df = (
         fr_title_df.join(en_title_df, how="full", on="CUI", coalesce=True)
         .join(main_title_df, how="full", on="CUI", coalesce=True)
+        .join(preferred_title_df, how="full", on="CUI", coalesce=True)
+        .join(good_title_df, how="full", on="CUI", coalesce=True)
         .group_by("CUI")
         .agg([
             pl.col("UMLS_Title_main").unique(),
             pl.col("UMLS_Title_fr").unique(),
             pl.col("UMLS_Title_en").unique(),
+            pl.col("UMLS_Title_preferred").unique(),
+            pl.col("UMLS_Title_good").unique(),
         ])
     )
     syn_df = (
