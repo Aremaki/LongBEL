@@ -224,6 +224,7 @@ def _explode_language_frames(base: pl.DataFrame) -> pl.DataFrame:
             "SEM_NAME",
             "CATEGORY",
             "GROUP",
+            "Title",
             "UMLS_Title_fr",
             "UMLS_alias_fr",
         ])
@@ -247,7 +248,7 @@ def _explode_language_frames(base: pl.DataFrame) -> pl.DataFrame:
     # Build unified rows for each type source (mark main True appropriately)
     parts = []
 
-    def _mk(df: pl.DataFrame, col: str, is_main: bool, is_title: bool) -> pl.DataFrame:
+    def _mk(df: pl.DataFrame, col: str, is_main: bool) -> pl.DataFrame:
         return (
             df.select([
                 "CUI",
@@ -255,26 +256,24 @@ def _explode_language_frames(base: pl.DataFrame) -> pl.DataFrame:
                 "SEM_NAME",
                 "CATEGORY",
                 "GROUP",
+                "Title",
                 pl.col(col).alias("Syn"),
             ])
             .filter((pl.col("Syn") != "") & (pl.col("Syn").is_not_null()))
             .with_columns(is_main=pl.lit(is_main))
-            .with_columns(is_title=pl.lit(is_title))
         )
 
     # Titles and aliases
-    if "Title" in en.columns:  # from previous cleaning step
-        parts.append(_mk(en, "Title", is_main=True, is_title=True))
     if "UMLS_Title_main" in en.columns:  # main (English main title)
-        parts.append(_mk(en, "UMLS_Title_main", is_main=True, is_title=False))
+        parts.append(_mk(en, "UMLS_Title_main", is_main=True))
     if "UMLS_Title_fr" in fr.columns:
-        parts.append(_mk(fr, "UMLS_Title_fr", is_main=False, is_title=False))
+        parts.append(_mk(fr, "UMLS_Title_fr", is_main=False))
     if "UMLS_Title_en" in en.columns:
-        parts.append(_mk(en, "UMLS_Title_en", is_main=False, is_title=False))
+        parts.append(_mk(en, "UMLS_Title_en", is_main=False))
     if "UMLS_alias_fr" in fr.columns:
-        parts.append(_mk(fr, "UMLS_alias_fr", is_main=False, is_title=False))
+        parts.append(_mk(fr, "UMLS_alias_fr", is_main=False))
     if "UMLS_alias_en" in en.columns:
-        parts.append(_mk(en, "UMLS_alias_en", is_main=False, is_title=False))
+        parts.append(_mk(en, "UMLS_alias_en", is_main=False))
 
     return pl.concat(parts)
 
