@@ -117,6 +117,8 @@ def _disambiguate(df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
             "Syn",
             "Entity_full",
             "is_main",
+            "is_good",
+            "is_preferred",
         ])
         .unique()
     )
@@ -128,6 +130,8 @@ def _disambiguate(df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
         "Syn",
         "Entity_full",
         "is_main",
+        "is_good",
+        "is_preferred",
     ]).unique()
     return df_all, df_fr
 
@@ -149,6 +153,8 @@ def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
             "CATEGORY",
             "GROUP",
             "is_main",
+            "is_good",
+            "is_preferred",
             "ambiguous_level",
         ])
     )
@@ -175,6 +181,8 @@ def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
             "CATEGORY",
             "GROUP",
             "is_main",
+            "is_good",
+            "is_preferred",
             "ambiguous_level",
         ])
     )
@@ -200,6 +208,8 @@ def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
         "CATEGORY",
         "GROUP",
         "is_main",
+        "is_good",
+        "is_preferred",
         "ambiguous_level",
     ])
 
@@ -227,16 +237,26 @@ def _explode_language_frames(base: pl.DataFrame) -> pl.DataFrame:
         "SEM_NAME",
         "CATEGORY",
         "GROUP",
+        "UMLS_Title_good",
+        "UMLS_Title_preferred",
         "UMLS_Title_main",
         "UMLS_Title_en",
         "UMLS_alias_en",
     ]).with_columns(pl.lit("en").alias("lang"))
-    en = en.explode("UMLS_Title_main").explode("UMLS_Title_en").explode("UMLS_alias_en")
+    en = (
+        en.explode("UMLS_Title_main")
+        .explode("UMLS_Title_good")
+        .explode("UMLS_Title_preferred")
+        .explode("UMLS_Title_en")
+        .explode("UMLS_alias_en")
+    )
 
     # Build unified rows for each type source (mark main True appropriately)
     parts = []
 
-    def _mk(df: pl.DataFrame, col: str, is_main: bool) -> pl.DataFrame:
+    def _mk(
+        df: pl.DataFrame, col: str, is_main: bool, is_preferred: bool, is_good: bool
+    ) -> pl.DataFrame:
         return (
             df.select([
                 "CUI",
@@ -248,19 +268,45 @@ def _explode_language_frames(base: pl.DataFrame) -> pl.DataFrame:
             ])
             .filter((pl.col("Syn") != "") & (pl.col("Syn").is_not_null()))
             .with_columns(is_main=pl.lit(is_main))
+            .with_columns(is_preferred=pl.lit(is_preferred))
+            .with_columns(is_good=pl.lit(is_good))
         )
 
     # Titles and aliases
+    if "UMLS_Title_good" in en.columns:
+        parts.append(
+            _mk(en, "UMLS_Title_good", is_main=False, is_preferred=False, is_good=True)
+        )
+    if "UMLS_Title_preferred" in en.columns:
+        parts.append(
+            _mk(
+                en,
+                "UMLS_Title_preferred",
+                is_main=False,
+                is_preferred=True,
+                is_good=False,
+            )
+        )
     if "UMLS_Title_main" in en.columns:  # main (English main title)
-        parts.append(_mk(en, "UMLS_Title_main", is_main=True))
+        parts.append(
+            _mk(en, "UMLS_Title_main", is_main=True, is_preferred=False, is_good=False)
+        )
     if "UMLS_Title_fr" in fr.columns:
-        parts.append(_mk(fr, "UMLS_Title_fr", is_main=False))
+        parts.append(
+            _mk(fr, "UMLS_Title_fr", is_main=False, is_preferred=False, is_good=False)
+        )
     if "UMLS_Title_en" in en.columns:
-        parts.append(_mk(en, "UMLS_Title_en", is_main=False))
+        parts.append(
+            _mk(en, "UMLS_Title_en", is_main=False, is_preferred=False, is_good=False)
+        )
     if "UMLS_alias_fr" in fr.columns:
-        parts.append(_mk(fr, "UMLS_alias_fr", is_main=False))
+        parts.append(
+            _mk(fr, "UMLS_alias_fr", is_main=False, is_preferred=False, is_good=False)
+        )
     if "UMLS_alias_en" in en.columns:
-        parts.append(_mk(en, "UMLS_alias_en", is_main=False))
+        parts.append(
+            _mk(en, "UMLS_alias_en", is_main=False, is_preferred=False, is_good=False)
+        )
 
     return pl.concat(parts)
 
