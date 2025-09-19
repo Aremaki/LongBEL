@@ -44,6 +44,7 @@ dependencies = [
     "scispacy>=0.5.5",
     "unidecode>=1.4.0",
     "nvidia-ml-py>=13.580.65",
+    "evaluate>=0.4.6",
 ]
 
 [project.optional-dependencies]

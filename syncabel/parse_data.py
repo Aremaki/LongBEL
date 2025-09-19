@@ -206,6 +206,7 @@ def parse_text(
                         + group
                         + end_group
                         + marked_with_group_text[end_in_sent:]
+                        + f" {marked_with_group_text[start_in_sent:end_in_sent]} is "
                     )
                 else:
                     marked_with_group_text = (
@@ -214,6 +215,7 @@ def parse_text(
                         + marked_with_group_text[start_in_sent:end_in_sent]
                         + end_entity
                         + marked_with_group_text[end_in_sent:]
+                        + f" {marked_with_group_text[start_in_sent:end_in_sent]} is "
                     )
                 marked_sent_text = (
                     marked_sent_text[:start_in_sent]
@@ -221,12 +223,13 @@ def parse_text(
                     + marked_sent_text[start_in_sent:end_in_sent]
                     + end_entity
                     + marked_sent_text[end_in_sent:]
+                    + f" {marked_sent_text[start_in_sent:end_in_sent]} is "
                 )
 
             # Emit the pair
             source_sentences.append(marked_sent_text)
             source_with_group_sentences.append(marked_with_group_text)
-            target_sentences.append(f"{entity_text} is {annotation}")
+            target_sentences.append(annotation)
 
     return source_sentences, source_with_group_sentences, target_sentences
 

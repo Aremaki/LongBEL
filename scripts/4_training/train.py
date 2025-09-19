@@ -11,6 +11,7 @@ import numpy as np
 import pynvml
 import torch.distributed as dist
 from datasets import Dataset, concatenate_datasets
+from evaluate import load as load_metric
 from transformers import (
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
@@ -19,6 +20,9 @@ from transformers import (
     Seq2SeqTrainingArguments,  # type: ignore
     TrainerCallback,  # type: ignore
 )
+
+rouge = load_metric("rouge")
+bleu = load_metric("sacrebleu")
 
 
 def load_pickle(file_path):
@@ -72,24 +76,46 @@ class GpuUsageCallback(TrainerCallback):
 
 
 # Preprocess function for tokenization
-def preprocess_function(examples, tokenizer):
+def preprocess_function(
+    examples, tokenizer, max_source_length=512, max_target_length=128
+):
     """
-    Tokenizes the source and target texts in the examples dictionary using the provided tokenizer.
+    Tokenizes the source and target texts for seq2seq training.
 
     Args:
-        examples (dict): A dictionary containing 'source' and 'target' keys with lists of texts.
-        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for encoding the texts.
+        examples (dict): Dictionary with 'source' and 'target' keys.
+        tokenizer (PreTrainedTokenizer): Tokenizer instance.
+        max_source_length (int): Max length for source sequences.
+        max_target_length (int): Max length for target sequences.
 
     Returns:
-        dict: A dictionary containing tokenized inputs and labels suitable for seq2seq training.
+        dict: Encoded inputs with labels (labels = target ids, padded and masked with -100).
     """
-    inputs = tokenizer(examples["source"], padding="longest", return_tensors="pt")
-    targets = tokenizer(examples["target"], padding="longest", return_tensors="pt")
+    # Encode source
+    model_inputs = tokenizer(
+        examples["source"],
+        max_length=max_source_length,
+        padding="max_length",
+        truncation=True,
+    )
 
-    labels = targets["input_ids"]
-    labels[labels == tokenizer.pad_token_id] = -100
-    inputs["labels"] = labels
-    return inputs
+    # Encode targets
+    with tokenizer.as_target_tokenizer():
+        labels = tokenizer(
+            examples["target"],
+            max_length=max_target_length,
+            padding="max_length",
+            truncation=True,
+        )["input_ids"]
+
+    # Replace padding token id's in labels with -100
+    labels = [
+        [(token if token != tokenizer.pad_token_id else -100) for token in label]
+        for label in labels
+    ]
+    model_inputs["labels"] = labels
+
+    return model_inputs
 
 
 # Define evaluation metrics
@@ -121,15 +147,31 @@ def compute_metrics(eval_preds, tokenizer):
     decoded_preds = skip_undesired_tokens(decoded_preds, tokenizer)
     decoded_labels = skip_undesired_tokens(decoded_labels, tokenizer)
 
+    # Rouge expects newline-separated sentences
+    result_rouge = rouge.compute(
+        predictions=[pred.strip() for pred in decoded_preds],
+        references=[gold.strip() for gold in decoded_labels],
+        use_stemmer=True,
+    )
+
+    # SacreBLEU expects list of list of references
+    result_bleu = bleu.compute(
+        predictions=[pred.strip() for pred in decoded_preds],
+        references=[[gold.strip()] for gold in decoded_labels],
+    )
+
     # Compute recall
-    recall = sum(
-        pred == gold for pred, gold in zip(decoded_preds, decoded_labels)
-    ) / len(decoded_labels)
+    recall = np.mean([
+        pred.strip() == gold.strip()
+        for pred, gold in zip(decoded_preds, decoded_labels)
+    ])
 
     return {
         "recall": round(recall, 4),
         "num_gold": len(decoded_labels),
         "num_guess": len(decoded_preds),
+        "rougeL": round(result_rouge["rougeL"].mid.fmeasure, 4),  # type: ignore
+        "bleu": round(result_bleu["score"], 4),  # type: ignore
     }
 
 
@@ -258,20 +300,23 @@ def main(
 
     tokenized_datasets = {
         "train": train_dataset.map(
-            lambda x: preprocess_function(x, tokenizer), batched=True
+            lambda x: preprocess_function(x, tokenizer),
+            batched=True,
+            remove_columns=["source", "target"],
         ),
         "validation": validation_dataset.map(
-            lambda x: preprocess_function(x, tokenizer), batched=True
+            lambda x: preprocess_function(x, tokenizer),
+            batched=True,
+            remove_columns=["source", "target"],
         ),
     }
-
     data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
 
     # Training params
-    train_max_batch = 32
-    eval_max_batch = 32
+    train_max_batch = 16
+    eval_max_batch = 16
     eval_accumulation_steps = None
-    gradient_accumulation_steps = 1
+    gradient_accumulation_steps = 2
     ddp_backend = "nccl"  # Enable Distributed Data Parallel with NCCL backend
     auto_find_batch_size = False
     fsdp = ""
