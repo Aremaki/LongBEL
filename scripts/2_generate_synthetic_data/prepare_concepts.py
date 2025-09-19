@@ -40,6 +40,7 @@ def clean_natural(text: str) -> str:
 def build_templates(df: pl.DataFrame) -> pl.DataFrame:
     # First extract and process all mentions
     processed_df = df.group_by("CUI").agg(
+        pl.col("Title").first().alias("title"),
         pl.col("Entity").unique().alias("mentions"),
         pl.col("DEF").first().alias("definitions"),
         pl.col("GROUP").first().alias("semantic_group"),
@@ -69,13 +70,15 @@ def build_templates(df: pl.DataFrame) -> pl.DataFrame:
             user_prompt=pl.concat_str([
                 pl.lit("- **CUI**:\n"),
                 pl.col("CUI"),
-                pl.lit("- **Semantic group**:\n"),
+                pl.lit("\n- **Title**:\n"),
+                pl.col("title"),
+                pl.lit("\n- **Semantic group**:\n"),
                 pl.col("semantic_group"),
-                pl.lit("- **Semantic Type**:\n"),
+                pl.lit("\n- **Semantic Type**:\n"),
                 pl.col("semantic_type"),
                 pl.lit("\n- **Definitions**:\n"),
                 pl.col("definitions_processed"),
-                pl.lit("- **Mentions**:\n"),
+                pl.lit("\n- **Mentions**:\n"),
                 pl.col("mentions_processed"),
                 pl.lit("\n"),
             ])
