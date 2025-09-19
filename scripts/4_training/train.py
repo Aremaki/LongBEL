@@ -73,7 +73,7 @@ class GpuUsageCallback(TrainerCallback):
 
 # Preprocess function for tokenization
 def preprocess_function(
-    examples, tokenizer, max_source_length=512, max_target_length=128
+    examples, tokenizer, max_source_length=1024, max_target_length=1024
 ):
     """
     Tokenizes the source and target texts for seq2seq training.
@@ -91,18 +91,15 @@ def preprocess_function(
     model_inputs = tokenizer(
         examples["source"],
         max_length=max_source_length,
-        padding="max_length",
         truncation=True,
     )
 
     # Encode targets
-    with tokenizer.as_target_tokenizer():
-        labels = tokenizer(
-            examples["target"],
-            max_length=max_target_length,
-            padding="max_length",
-            truncation=True,
-        )["input_ids"]
+    labels = tokenizer(
+        text_target=examples["target"],
+        max_length=max_target_length,
+        truncation=True,
+    )["input_ids"]
 
     # Replace padding token id's in labels with -100
     labels = [
@@ -110,6 +107,13 @@ def preprocess_function(
         for label in labels
     ]
     model_inputs["labels"] = labels
+
+    # --- Debug: print max tokenized length for this batch ---
+    source_lengths = [len(ids) for ids in model_inputs["input_ids"]]
+    target_lengths = [len(ids) for ids in labels]
+    print(
+        f"Longest source: {max(source_lengths)} tokens | Longest target: {max(target_lengths)} tokens"
+    )
 
     return model_inputs
 
@@ -291,7 +295,7 @@ def main(
             remove_columns=["source", "target"],
         ),
     }
-    data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
+    data_collator = DataCollatorForSeq2Seq(tokenizer, model=model, padding="longest")
 
     # Training params
     train_max_batch = 16
