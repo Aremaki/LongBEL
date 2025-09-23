@@ -14,8 +14,6 @@ from transformers import (
     BitsAndBytesConfig,  # type: ignore
 )
 
-from .convert_to_bigbio import write_bigbio_json  # type: ignore
-
 app = typer.Typer(help="Generate synthetic sentences for MM prompts.")
 
 
@@ -179,9 +177,6 @@ def run(
     out_dir: Path = typer.Option(
         Path("data/SynthMM"), help="Directory to write synthesized parquet"
     ),
-    bigbio_out: Path = typer.Option(
-        Path("data/bigbio_datasets/SynthMM.json"), help="BigBio JSON output path"
-    ),
     model_path: Path = typer.Option(
         Path("models/Llama-3.3-70B-Instruct"), help="Model path"
     ),
@@ -216,12 +211,6 @@ def run(
     result_path = out_dir / f"sample_{chunk}.parquet"
     result_df.write_parquet(result_path)
     typer.echo(f"✅ Parquet written: {result_path}")
-
-    # Convert to BigBio via shared helper
-    n = write_bigbio_json(result_df, bigbio_out)
-    typer.echo(
-        f"✅ BigBio JSON written: {bigbio_out} ({n} records)\nChunk {chunk} complete."
-    )
 
 
 if __name__ == "__main__":

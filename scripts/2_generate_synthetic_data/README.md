@@ -28,62 +28,20 @@ Outputs: `data/user_prompts_MM/sample_0.parquet`, `sample_2500.parquet`, ...
 
 ---
 ## 2. Generate Synthetic Sentences
-Generates a parquet (`CUI`, `llm_output`) and a BigBio JSON for one chunk.
+Generates a parquet (`CUI`, `llm_output`) per‑chunk parquets into separate subfolders.
 
 ```bash
-python scripts/2_generate_synthetic_data/generate.py run \
-    --chunk 0 \
-    --user-prompts-dir data/synthetic_data/SynthMM/user_prompts \
-    --out-dir data/synthetic_data/SynthMM \
-    --bigbio-out data/bigbio_datasets/SynthMM.json \
-    --model-path models/Llama-3.3-70B-Instruct \
-    --system-prompt-path scripts/2_generate_synthetic_data/prompts/system_prompt_mm.txt \
-    --batch-size 4 \
-    --max-new-tokens 1024 \
-    --max-retries 5
+bash scripts/2_generate_synthetic_data/run_generate.sh
 ```
 
-Key parameters:
-- `--chunk`: Start offset that matches `sample_{chunk}.parquet`.
-- `--out-dir`: Directory to store per‑chunk generation parquet.
-- `--bigbio-out`: Final JSON (will be overwritten each run—use per‑chunk paths if aggregating later).
-- `--batch-size`, `--max-new-tokens`, `--max-retries`: control generation throughput & robustness.
-
-### Generate All MM Concepts
-Loop over all MM user prompt chunks:
+Optional overrides when submitting:
 ```bash
-for chunk_file in data/synthetic_data/SynthMM/user_prompts/sample_*.parquet; do
-    chunk=$(basename "$chunk_file" .parquet | sed 's/sample_//')
-    python scripts/2_generate_synthetic_data/generate.py run \
-        --chunk "$chunk" \
-        --user-prompts-dir data/synthetic_data/SynthMM/user_prompts \
-        --out-dir data/synthetic_data/SynthMM \
-        --bigbio-out data/bigbio_datasets/SynthMM_chunk${chunk}.json \
-        --model-path models/Llama-3.3-70B-Instruct \
-        --system-prompt-path scripts/2_generate_synthetic_data/prompts/system_prompt_mm.txt \
-        --batch-size 4 \
-        --max-new-tokens 1024 \
-        --max-retries 5
-done
+BATCH_SIZE=2 MAX_NEW_TOKENS=768 MAX_RETRIES=4 bash scripts/2_generate_synthetic_data/generate.sh
 ```
 
-### Generate All QUAERO Concepts  
-Loop over all QUAERO user prompt chunks:
-```bash
-for chunk_file in data/synthetic_data/SynthQUAERO/user_prompts/sample_*.parquet; do
-    chunk=$(basename "$chunk_file" .parquet | sed 's/sample_//')
-    python scripts/2_generate_synthetic_data/generate.py run \
-        --chunk "$chunk" \
-        --user-prompts-dir data/synthetic_data/SynthQUAERO/user_prompts \
-        --out-dir data/synthetic_data/SynthQUAERO \
-        --bigbio-out data/bigbio_datasets/SynthQUAERO_chunk${chunk}.json \
-        --model-path models/Llama-3.3-70B-Instruct \
-        --system-prompt-path scripts/2_generate_synthetic_data/prompts/system_prompt_quaero.txt \
-        --batch-size 4 \
-        --max-new-tokens 1024 \
-        --max-retries 5
-done
-```
+Prompts used:
+- MM: `scripts/2_generate_synthetic_data/prompts/system_prompt_mm.txt`
+- QUAERO (FR): `scripts/2_generate_synthetic_data/prompts/system_prompt_quaero_fr.txt`
 
 ---
 ## 3. Convert Parquet(s) to BigBio JSON
@@ -92,13 +50,13 @@ done
 ### a. Directory of parquets
 ```bash
 python scripts/2_generate_synthetic_data/convert_to_bigbio.py convert \
-  --parquet data/SynthMM \
-  --json-out data/synthetic_data/SynthMM/SynthMM_bigbio.json
+  --parquet data/SynthMM/generated_def \
+  --json-out data/synthetic_data/SynthMM/SynthMM_bigbio_def.json
 ```
 ```bash
 python scripts/2_generate_synthetic_data/convert_to_bigbio.py convert \
-  --parquet data/SynthQUAERO \
-  --json-out data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio.json
+  --parquet data/SynthQUAERO/generated_no_def \
+  --json-out data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio_no_def.json
 ```
 Options: `--limit` (row cap), `--fail-pattern` (default FAIL).
 
