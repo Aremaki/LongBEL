@@ -326,22 +326,60 @@ def synonyms(
     title_syn_df = title_df.join(syn_df, how="full", on="CUI", coalesce=True)
 
     # Process best title
+    # Prefer the shortest title; if lengths are equal, prefer one starting with uppercase.
+    # Implement tie-breaker by adding +1 penalty when first char is lowercase.
     title_syn_df = title_syn_df.with_columns(
-        min_idx=pl.col("UMLS_Title_main")
-        .list.eval(pl.element().str.len_chars())
+        min_idx_main=pl.col("UMLS_Title_main")
+        .list.eval(
+            pl.when(pl.element().is_null())
+            .then(1_000_000_000)
+            .otherwise(
+                pl.element().str.len_chars()
+                + pl.when(
+                    (
+                        pl.element().str.slice(0, 1).str.to_uppercase()
+                        == pl.element().str.slice(0, 1)
+                    )  # first letter uppercase
+                    & (
+                        pl.element().str.slice(1).str.to_lowercase()
+                        == pl.element().str.slice(1)
+                    )  # rest all lowercase
+                )
+                .then(1)
+                .otherwise(0)
+            )
+        )
         .list.arg_min()
     )
     title_syn_df = title_syn_df.with_columns(
-        shortest_title_main=pl.col("UMLS_Title_main").list.get(pl.col("min_idx"))
-    ).drop("min_idx")
+        shortest_title_main=pl.col("UMLS_Title_main").list.get(pl.col("min_idx_main"))
+    ).drop("min_idx_main")
     title_syn_df = title_syn_df.with_columns(
-        min_idx=pl.col("UMLS_Title_en")
-        .list.eval(pl.element().str.len_chars())
+        min_idx_en=pl.col("UMLS_Title_en")
+        .list.eval(
+            pl.when(pl.element().is_null())
+            .then(1_000_000_000)
+            .otherwise(
+                pl.element().str.len_chars()
+                + pl.when(
+                    (
+                        pl.element().str.slice(0, 1).str.to_uppercase()
+                        == pl.element().str.slice(0, 1)
+                    )  # first letter uppercase
+                    & (
+                        pl.element().str.slice(1).str.to_lowercase()
+                        == pl.element().str.slice(1)
+                    )  # rest all lowercase
+                )
+                .then(1)
+                .otherwise(0)
+            )
+        )
         .list.arg_min()
     )
     title_syn_df = title_syn_df.with_columns(
-        shortest_title=pl.col("UMLS_Title_en").list.get(pl.col("min_idx"))
-    ).drop("min_idx")
+        shortest_title=pl.col("UMLS_Title_en").list.get(pl.col("min_idx_en"))
+    ).drop("min_idx_en")
     title_syn_df = title_syn_df.with_columns(
         pl.when(pl.col("UMLS_Title_preferred").list.get(0).is_not_null())
         .then(pl.col("UMLS_Title_preferred").list.get(0))

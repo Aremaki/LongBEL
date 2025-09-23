@@ -74,42 +74,27 @@ def _build_mm_semantic_expr():
     return expr.otherwise(None).alias("SEM_NAME_MM")
 
 
-def _clean_syn_title(df: pl.DataFrame) -> pl.DataFrame:
-    return (
-        df.with_columns(
-            pl.col("Syn")
-            .str.replace_all("\xa0", " ", literal=True)
-            .str.replace_all(r"\s*\(NOS\)\s*$", "")
-            .str.replace_all(r",\sNOS\s*$", "")
-            .str.replace_all(r"\sNOS\s*$", "")
-            .str.replace_all(r"\s*\(SAI\)\s*$", "")
-            .str.replace_all(r",\sSAI\s*$", "")
-            .str.replace_all(r"\sSAI\s*$", "")
+def _clean_syn(df: pl.DataFrame) -> pl.DataFrame:
+    return df.with_columns(
+        pl.col("Syn")
+        .str.replace_all("\xa0", " ", literal=True)
+        .str.replace_all(r"\s*\(NOS\)\s*$", "")
+        .str.replace_all(r",\sNOS\s*$", "")
+        .str.replace_all(r"\sNOS\s*$", "")
+        .str.replace_all(r"\s*\(SAI\)\s*$", "")
+        .str.replace_all(r",\sSAI\s*$", "")
+        .str.replace_all(r"\sSAI\s*$", "")
+    ).with_columns(
+        pl.when(
+            pl.col("Syn").str.slice(0, 1).str.to_lowercase()
+            == pl.col("Syn").str.slice(0, 1)
         )
-        .with_columns(
-            pl.when(
-                pl.col("Syn").str.slice(0, 1).str.to_lowercase()
-                == pl.col("Syn").str.slice(0, 1)
-            )
-            .then(
-                pl.col("Syn").str.slice(0, 1).str.to_uppercase()
-                + pl.col("Syn").str.slice(1)
-            )
-            .otherwise(pl.col("Syn"))
-            .alias("Syn")
+        .then(
+            pl.col("Syn").str.slice(0, 1).str.to_uppercase()
+            + pl.col("Syn").str.slice(1)
         )
-        .with_columns(
-            pl.when(
-                pl.col("Title").str.slice(0, 1).str.to_lowercase()
-                == pl.col("Title").str.slice(0, 1)
-            )
-            .then(
-                pl.col("Title").str.slice(0, 1).str.to_uppercase()
-                + pl.col("Title").str.slice(1)
-            )
-            .otherwise(pl.col("Title"))
-            .alias("Title")
-        )
+        .otherwise(pl.col("Syn"))
+        .alias("Syn")
     )
 
 
@@ -299,7 +284,7 @@ def _prepare_mm(
     ).with_columns(_build_mm_semantic_expr())
     base = codes.join(semantic_filtered, on="CUI").join(titles, on="CUI", how="left")
     exploded = _explode_language_frames(base)
-    exploded = _clean_syn_title(exploded).unique(subset=["CUI", "Syn", "CATEGORY"])
+    exploded = _clean_syn(exploded).unique(subset=["CUI", "Syn", "CATEGORY"])
     all_df, fr_df = _disambiguate(exploded)
     return _filter_non_ambiguous(all_df), _filter_non_ambiguous(fr_df)
 
@@ -310,7 +295,7 @@ def _prepare_quaero(
     semantic_filtered = semantic.filter(pl.col("CATEGORY").is_in(QUAERO_CATEGORIES))
     base = codes.join(semantic_filtered, on="CUI").join(titles, on="CUI", how="left")
     exploded = _explode_language_frames(base)
-    exploded = _clean_syn_title(exploded).unique(subset=["CUI", "Syn", "CATEGORY"])
+    exploded = _clean_syn(exploded).unique(subset=["CUI", "Syn", "CATEGORY"])
     all_df, fr_df = _disambiguate(exploded)
     return _filter_non_ambiguous(all_df), _filter_non_ambiguous(fr_df)
 
