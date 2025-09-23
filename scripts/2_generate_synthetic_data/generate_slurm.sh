@@ -39,9 +39,9 @@ module load arch/h100
 module load pytorch-gpu/py3/2.3.1
 
 # Common args (allow env overrides)
-MODEL_PATH=${MODEL_PATH:-models/Llama-3.3-70B-Instruct}
-BATCH_SIZE=${BATCH_SIZE:-4}
-MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-1024}
+MODEL_PATH=${MODEL_PATH:-models/meta-llama/Llama-3.3-70B-Instruct}
+BATCH_SIZE=${BATCH_SIZE:-16}
+MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-512}
 MAX_RETRIES=${MAX_RETRIES:-5}
 
 if [[ "${DATASET}" == "MM" ]]; then
@@ -65,7 +65,7 @@ fi
 mkdir -p "${OUT_DIR}"
 
 echo "[INFO] Launching generation for ${DATASET} ${VARIANT} chunk=${CHUNK}"
-python scripts/2_generate_synthetic_data/generate.py run \
+python scripts/2_generate_synthetic_data/generate.py \
   --chunk "${CHUNK}" \
   --user-prompts-dir "${USER_PROMPTS_DIR}" \
   --out-dir "${OUT_DIR}" \
