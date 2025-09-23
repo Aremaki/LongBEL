@@ -76,7 +76,7 @@ def generate_batches(
     user_prompts_df: pl.DataFrame,
     system_prompt: str,
     max_new_tokens: int = 512,
-    batch_size: int = 32,
+    batch_size: int = 16,
     max_retries: int = 5,
     pattern: str = r"\[([^]]+)\]",
 ):
@@ -223,7 +223,7 @@ def run(
         help="System prompt text file",
     ),
     max_new_tokens: int = 512,
-    batch_size: int = 32,
+    batch_size: int = 16,
     max_retries: int = 5,
 ) -> None:
     """Generate synthetic sentences for a chunk of user prompts."""
