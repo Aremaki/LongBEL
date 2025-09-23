@@ -57,8 +57,7 @@ def build_templates(df: pl.DataFrame) -> pl.DataFrame:
 
     # Process with explicit return types to avoid warnings
     return (
-        processed_df.filter(pl.col("definitions").is_not_null())
-        .with_columns(
+        processed_df.with_columns(
             definitions_processed=pl.col("definitions")
             .map_elements(format_definitions, return_dtype=pl.String)
             .fill_null("No definition found\n"),
