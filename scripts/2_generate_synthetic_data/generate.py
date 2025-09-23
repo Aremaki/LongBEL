@@ -23,10 +23,11 @@ def load_system_prompt(path: Path) -> str:
 
 def load_model_and_tokenizer(model_path):
     torch.backends.cuda.enable_flash_sdp(True)
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
     tokenizer = AutoTokenizer.from_pretrained(
         model_path, use_fast=True, padding_side="left"
     )
-    tokenizer.pad_token_id = tokenizer.eos_token_id  # Set a padding token
 
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -42,18 +43,31 @@ def load_model_and_tokenizer(model_path):
         attn_implementation="flash_attention_2",
         quantization_config=bnb_config,
     )
+    if tokenizer.pad_token is None:
+        tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
+        model.resize_token_embeddings(len(tokenizer))
+    model.eval()
+    # Align generation config with tokenizer defaults
+    try:
+        model.generation_config.pad_token_id = tokenizer.pad_token_id
+        model.generation_config.eos_token_id = tokenizer.eos_token_id
+    except Exception:
+        pass
     return model, tokenizer
 
 
-def apply_chat_template(tokenizer, batch_user_prompts, system_prompt, instruct=True):
+def apply_chat_template(tokenizer, batch_user_prompts, system_prompt):
+    """Apply chat template in batch and return a list of serialized prompts."""
     batch_chat = []
     for user_prompt in batch_user_prompts:
         batch_chat.append([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ])
-    prompt = tokenizer.apply_chat_template(batch_chat, tokenize=False)
-    return prompt
+    prompts = tokenizer.apply_chat_template(
+        batch_chat, tokenize=False, add_generation_prompt=True
+    )
+    return prompts
 
 
 def generate_batches(
@@ -62,7 +76,7 @@ def generate_batches(
     user_prompts_df: pl.DataFrame,
     system_prompt: str,
     max_new_tokens: int = 512,
-    batch_size: int = 4,
+    batch_size: int = 32,
     max_retries: int = 5,
     pattern: str = r"\[([^]]+)\]",
 ):
@@ -71,6 +85,14 @@ def generate_batches(
     all_outputs = []
     timing_data = []
 
+    # Pre-compute constants
+    device = getattr(model, "device", torch.device("cuda"))
+    compiled_regex = re.compile(pattern)
+
+    # Keep prompts within context window when adding new tokens
+    context_len = getattr(model.config, "max_position_embeddings", 8192)
+    safe_input_max_len = max(256, context_len - max_new_tokens - 32)
+
     for batch_start in tqdm(
         range(0, len(user_prompts), batch_size), desc="Generating in batches"
     ):
@@ -78,74 +100,90 @@ def generate_batches(
         batch_cui_codes = cui_codes[batch_start : batch_start + batch_size]
 
         # Apply chat template and prepare batch prompts
-        batch_inputs = apply_chat_template(
-            tokenizer, batch_user_prompts, system_prompt, instruct=True
-        )
+        batch_inputs = apply_chat_template(tokenizer, batch_user_prompts, system_prompt)
 
-        # Tokenize as batch
-        inputs = tokenizer(batch_inputs, padding="longest", return_tensors="pt")
-        inputs = {key: val.cuda() for key, val in inputs.items()}
-        terminators = [
-            tokenizer.eos_token_id,
-            tokenizer.convert_tokens_to_ids("<|eot_id|>"),
-        ]
+        # Tokenize as batch (truncate to fit context window to avoid kv-cache bloat)
+        inputs = tokenizer(
+            batch_inputs,
+            padding=True,
+            truncation=True,
+            max_length=safe_input_max_len,
+            return_tensors="pt",
+        )
+        # Move to device efficiently
+        inputs = {key: val.to(device, non_blocking=True) for key, val in inputs.items()}
 
         success_mask = [False] * len(batch_user_prompts)
         batch_final_text = [None] * len(batch_user_prompts)
 
-        for _ in range(1, max_retries + 1):
+        for attempt in range(1, max_retries + 1):
             if all(success_mask):
                 break
+
+            # Build a sub-batch of only the failed items
+            failed_indices = [i for i, ok in enumerate(success_mask) if not ok]
+            sub_inputs = {
+                k: v[failed_indices] if hasattr(v, "__getitem__") else v
+                for k, v in inputs.items()
+            }
 
             with torch.inference_mode():
                 gen_start_time = time.time()
                 output_tokens = model.generate(
-                    **inputs,
+                    **sub_inputs,
                     max_new_tokens=max_new_tokens,
                     do_sample=True,
                     temperature=0.6,
                     top_p=0.9,
-                    eos_token_id=terminators,
-                    pad_token_id=tokenizer.eos_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                    pad_token_id=tokenizer.pad_token_id,
                     use_cache=True,
                 )
                 gen_time = time.time() - gen_start_time
 
-            # Decode and post-process outputs
+            # Decode only the newly generated tokens to reduce CPU work
+            input_lens = [
+                len(sub_inputs["input_ids"][i]) for i in range(len(failed_indices))
+            ]
+            # Slice the generated portion for each sequence
+            gen_only = [
+                output_tokens[i][input_lens[i] :] for i in range(len(failed_indices))
+            ]
+            # Use batch_decode on lists for better throughput
             decoded_outputs = tokenizer.batch_decode(
-                output_tokens, skip_special_tokens=True
+                [t.tolist() for t in gen_only], skip_special_tokens=True
             )
 
-            print(f"""Processed Batch {batch_start}: {gen_time:.2f} sec/batch""")
+            # Minimal batch-level log
+            print(
+                f"Batch {batch_start} attempt {attempt}: {gen_time:.2f}s, sub-batch {len(failed_indices)}"
+            )
 
-            for i, (_, decoded_output) in enumerate(
-                zip(batch_cui_codes, decoded_outputs)
-            ):
-                if success_mask[i]:
-                    continue
+            # Post-process each failed item
+            for sub_i, decoded_output in enumerate(decoded_outputs):
+                i = failed_indices[sub_i]
+                decoded_text = decoded_output.strip()
 
-                decoded_text = decoded_output.split("assistant\n\n")[-1].strip()
                 examples = [
-                    line.split("example: ")[1]
+                    line.split("example: ", 1)[1]
                     for line in decoded_text.split("\n")
-                    if "example: " in line and bool(re.search(pattern, line))
+                    if "example: " in line and bool(compiled_regex.search(line))
                 ]
 
-                if isinstance(examples, list) and len(examples) >= 5:
+                if isinstance(examples, list) and len(examples) >= 3:
                     success_mask[i] = True
-                    batch_final_text[i] = "\n".join(examples[:5])  # type: ignore
+                    batch_final_text[i] = "\n".join(examples[:3])  # type: ignore
                 else:
+                    # Keep best-effort text for debugging; will retry if attempts left
                     batch_final_text[i] = f"FAIL !!\n\n{decoded_text}"  # type: ignore
 
-                # Timing and metrics
-                input_len = len(inputs["input_ids"][i])
-                output_len = len(output_tokens[i])
-                new_tokens = output_len - input_len
-                tokens_per_second = new_tokens / gen_time
+                # Timing and metrics per sequence
+                new_tokens = len(gen_only[sub_i])
+                tokens_per_second = (new_tokens / gen_time) if gen_time > 0 else 0.0
                 timing_data.append({
-                    "total_new_tokens": new_tokens,
-                    "tokens_per_second": tokens_per_second,
-                    "time_per_cui": gen_time / len(batch_user_prompts),
+                    "total_new_tokens": int(new_tokens),
+                    "tokens_per_second": float(tokens_per_second),
+                    "time_per_cui": gen_time / max(1, len(failed_indices)),
                 })
 
         # Collect all outputs
@@ -184,8 +222,8 @@ def run(
         Path("scripts/2_generate_synthetic_data/prompts/system_prompt_mm.txt"),
         help="System prompt text file",
     ),
-    max_new_tokens: int = 1024,
-    batch_size: int = 4,
+    max_new_tokens: int = 512,
+    batch_size: int = 32,
     max_retries: int = 5,
 ) -> None:
     """Generate synthetic sentences for a chunk of user prompts."""
