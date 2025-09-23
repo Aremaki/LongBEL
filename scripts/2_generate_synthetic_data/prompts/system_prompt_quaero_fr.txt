@@ -14,7 +14,7 @@ Une liste de mentions (peut inclure des termes techniques ou artificiels)
        * Ajoutent des variations naturelles utilisées par les chercheurs.
        * Couvrent différentes conventions (acronymes, noms complets, noms fonctionnels).
        * Complètent les mentions existantes.
-   - Le total doit être de **5 mentions** (mélange de mentions conservées et nouvelles).
+   - Le total doit être de **3 mentions** (mélange de mentions conservées et nouvelles).
    - **À éviter** :
        - Les virgules (`,`), parenthèses.
        - Les termes en MAJUSCULES ou avec underscores (ex. `ALPHA_TOCOPHEROL`).
@@ -22,7 +22,7 @@ Une liste de mentions (peut inclure des termes techniques ou artificiels)
        - Les termes non français ou dans une autre langue.
 
 2. **Phrases contextuelles** :
-   Pour chacune des 5 mentions finales :
+   Pour chacune des 3 mentions finales :
    - Rédiger une phrase claire et scientifiquement précise (15-30 mots) avec la mention entre `[crochets]`.
    - Chaque phrase doit :
        - Inclure le concept dans `[crochets]`.
@@ -33,11 +33,62 @@ Une liste de mentions (peut inclure des termes techniques ou artificiels)
 ## Mentions finales
 1. Mention 1
 2. Mention 2
-...
-5. Mention 5
+3. Mention 3
 
 ## Phrases contextuelles
-exemple : "Phrase avec [mention 1] dans son contexte..."
-exemple : "Phrase avec [mention 2] dans son contexte..."
-...
-exemple : "Phrase avec [mention 5] dans son contexte..."
+exemple : Phrase avec [mention 1] dans son contexte...
+exemple : Phrase avec [mention 2] dans son contexte...
+exemple : Phrase avec [mention 3] dans son contexte...
+
+# Exemples
+## Exemple 1
+- **CUI**:
+C1142738
+- **Title**:
+anidulafungin
+- **Semantic group**:
+Chemicals & Drugs
+- **Semantic Type**:
+Pharmacologic Substance
+- **Definitions**:
+* 1. A cyclic lipopeptide echinocandin derivative with antifungal activity. Anidulafungin inhibits 1,3 beta-D-glucan synthase, an enzyme involved in fungal cell wall synthesis, resulting in cell lysis and death. This agent is active against Candida species and Aspergillus. (NCI04)
+* 2. A cyclic lipopeptide echinocandin derivative with antifungal activity. Anidulafungin inhibits 1,3 beta-D-glucan synthase, an enzyme involved in fungal cell wall synthesis, resulting in cell lysis and death. This agent is active against Candida species and Aspergillus. Check for "http://www.cancer.gov/Search/ClinicalTrialsLink.aspx?id=328242&idtype=1" active clinical trials or "http://www.cancer.gov/Search/ClinicalTrialsLink.aspx?id=328242&idtype=1&closed=1" closed clinical trials using this agent. ("http://nciterms.nci.nih.gov:80/NCIBrowser/ConceptReport.jsp?dictionary=NCI_Thesaurus&code=C38716" NCI Thesaurus)
+* 3. A drug that is used to treat infections caused by fungi. It belongs to the family of drugs called antifungals.
+- **Mentions**:
+'Anidulafungin (Chemical/Ingredient)', 'Anidulafungin (product)', 'V-echinocandin', 'ANIDULAFUNGIN', 'Anidulafungin', 'Anidulafungin (substance)', 'Anidulafungin (medication)'
+
+## Mentions finales
+1. anidulafungine
+2. antifongique anidulafungine
+3. échinocandine anidulafungine
+
+## Phrases contextuelles
+exemple : Au niveau de la paroi de Candida, [anidulafungine] inhibe la synthèse du 1 3 bêta D glucane, provoquant une fragilisation et la lyse des cellules fongiques.
+exemple : En candidémie invasive, l’[antifongique anidulafungine] obtient des taux de succès élevés chez les patients neutropéniques, avec une clairance sanguine rapide et une bonne tolérance globale.
+exemple : Dans l’aspergillose invasive réfractaire, l’[échinocandine anidulafungine] peut renforcer un azolé en altérant la paroi, favorisant la pénétration et la diminution des galactomannanes circulants.
+
+## Exemple 2
+- **CUI**:
+C0024137
+- **Title**:
+Cutaneous lupus erythematosus
+- **Semantic group**:
+Disorders
+- **Semantic Type**:
+Disease or Syndrome
+- **Definitions**:
+* 1. Disease of skin in someone with Lupus erythematosis, though not necessarily systemic or subacute
+* 2. A form of lupus erythematosus in which the skin may be the only organ involved or in which skin involvement precedes the spread into other body systems. It has been classified into three forms - acute (= LUPUS ERYTHEMATOSUS, SYSTEMIC with skin lesions), subacute, and chronic (= LUPUS ERYTHEMATOSUS, DISCOID).
+* 3. Enfermedad de la piel en un paciente con lupus eritematoso, aunque no necesariaqmente su curso es subagudo
+- **Mentions**:
+'Cutaneous lupus erythematosus', 'Lupus cutané érythémateux', 'Cutaneous lupus erythematosus (diagnosis)', 'Cutaneous Lupus Erythematosus', 'Lupus Erythematosus, Cutaneous', 'Lupus Erythematosus, Cutaneous (Disease/Finding)', 'Cutaneous lupus erythematosus (disorder)', 'Lupus érythémateux cutané'
+
+## Mentions finales
+1. Lupus érythémateux cutané
+2. Lupus cutané
+3. atteinte cutanée du lupus
+
+## Phrases contextuelles
+exemple : En dermatologie, le [Lupus érythémateux cutané] se manifeste par des lésions photosensibles avec dépôt d’immunoglobulines à la jonction dermoépidermique au test de la bande lupique.
+exemple : Chez l’adulte jeune, le [Lupus cutané] est traité en première intention par photoprotection et antipaludéens de synthèse, avec évaluation du risque d’atteinte systémique.
+exemple : En recherche translationnelle, l’[atteinte cutanée du lupus] est corrélée à une signature interféron élevée et à une infiltration de lymphocytes T résidents activés.

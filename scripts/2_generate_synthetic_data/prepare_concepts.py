@@ -10,7 +10,9 @@ Usage:
 Outputs: sample_{i}.parquet each containing columns: CUI, user_prompt.
 """
 
+import codecs
 from pathlib import Path
+from typing import Optional
 
 import polars as pl
 import typer
@@ -37,6 +39,31 @@ def clean_natural(text: str) -> str:
     )
 
 
+def _decode_escaped_utf8(text: Optional[str]) -> str:
+    """Decode strings that contain escaped UTF-8 byte sequences like '\\xc3\\xb8'.
+
+    This handles cases where UTF-8 bytes were accidentally serialized as escape sequences.
+    We safely no-op if decoding fails or the pattern isn't present.
+    """
+    if text is None:
+        return ""
+    s = text
+    # Fast path: only attempt if we see escaped hex bytes
+    if "\\x" in s:
+        try:
+            # 1) Interpret escape sequences to raw bytes in the Latin-1 range (Ã, ¸, etc.)
+            # 2) Convert those to bytes and decode as UTF-8 to recover original characters
+            s = (
+                codecs.decode(s, "unicode_escape")
+                .encode("latin1", errors="ignore")
+                .decode("utf-8", errors="ignore")
+            )
+        except Exception:
+            # If anything goes wrong, fall back to original text
+            pass
+    return s
+
+
 def build_templates(df: pl.DataFrame) -> pl.DataFrame:
     # First extract and process all mentions
     processed_df = df.group_by("CUI").agg(
@@ -50,14 +77,22 @@ def build_templates(df: pl.DataFrame) -> pl.DataFrame:
 
     # Define functions with explicit return types
     def format_definitions(defs: list[str]) -> str:  # type: ignore
-        return "\n".join(f"* {i + 1}. {d}" for i, d in enumerate(defs)) + "\n"  # type: ignore
+        # Normalize and clean each mention before joining
+        normalized = [clean_natural(_decode_escaped_utf8(d)) for d in defs]
+        return "\n".join(f"* {i + 1}. {d}" for i, d in enumerate(normalized)) + "\n"  # type: ignore
 
     def format_mentions(mentions: list[str]) -> str:
-        return clean_natural("'" + "', '".join(mentions) + "'")
+        # Normalize and clean each mention before joining
+        normalized = [clean_natural(_decode_escaped_utf8(m)) for m in mentions]
+        return "'" + "', '".join(normalized) + "'"
 
     # Process with explicit return types to avoid warnings
     return (
         processed_df.with_columns(
+            # Normalize scalar text fields
+            title_processed=pl.col("title").map_elements(
+                lambda s: clean_natural(_decode_escaped_utf8(s)), return_dtype=pl.String
+            ),
             definitions_processed=pl.col("definitions")
             .map_elements(format_definitions, return_dtype=pl.String)
             .fill_null("No definition found\n"),
@@ -70,14 +105,14 @@ def build_templates(df: pl.DataFrame) -> pl.DataFrame:
                 pl.lit("- **CUI**:\n"),
                 pl.col("CUI"),
                 pl.lit("\n- **Title**:\n"),
-                pl.col("title"),
+                pl.col("title_processed"),
                 pl.lit("\n- **Semantic group**:\n"),
                 pl.col("semantic_group"),
                 pl.lit("\n- **Semantic Type**:\n"),
                 pl.col("semantic_type"),
                 pl.lit("\n- **Definitions**:\n"),
                 pl.col("definitions_processed"),
-                pl.lit("\n- **Mentions**:\n"),
+                pl.lit("- **Mentions**:\n"),
                 pl.col("mentions_processed"),
                 pl.lit("\n"),
             ])

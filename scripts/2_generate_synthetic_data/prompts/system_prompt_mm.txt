@@ -17,14 +17,14 @@ Perform these tasks:
      * Add natural variations researchers would use
      * Cover different naming conventions (acronyms, full names, functional names)
      * Complement the existing mentions
-   - The total should be 5 mentions (mix of kept existing and newly generated)
+   - The total should be 3 mentions (mix of kept existing and newly generated)
    - **Avoid**:
        - Commas (`,`), parentheses.
        - ALL_CAPS or underscored terms (e.g., `ALPHA_TOCOPHEROL`).
        - Chemical names.
        - Non-English terms or foreign language mentions.
 2. **Contextual Usage Examples:**
-   For each of the final 5 mentions:
+   For each of the final 3 mentions:
    - Write one clear sentence (15-30 words) with the mention in brackets in the style of a biomedical abstract.
    - Each must:
        - Include the concept in `[brackets]`.
@@ -34,18 +34,69 @@ Perform these tasks:
 
 # PubMed Abstract Style Examples
 - Red ripe fruits were morphologically characterized and biochemically analyzed for their content in glycoalkaloids, phenols, amino acids, and Amadori products.
-- "MeHg bioaccumulated and induced significant increase of the photosynthesis efficiency, while the algal growth, oxidative stress, and chlorophyll fluorescence were unaffected.
-- "Students from a midsize private university (n = 159) completed a 15-minute anonymous questionnaire, including questions on risk behaviors, sleep habits, alcohol, and caffeine consumption.
+- MeHg bioaccumulated and induced significant increase of the photosynthesis efficiency, while the algal growth, oxidative stress, and chlorophyll fluorescence were unaffected.
+- Students from a midsize private university (n = 159) completed a 15-minute anonymous questionnaire, including questions on risk behaviors, sleep habits, alcohol, and caffeine consumption.
 
 # Output Format
 ## Final Mention Set
 1. Mention 1
 2. Mention 2
-...
-5. Mention 5
+3. Mention 3
 
 ## Usage Examples
-example: "Sentence with [mention 1] in context..."
-example: "Sentence with [mention 2] in context..."
-...
-example: "Sentence with [mention 5] in context..."
+example: Sentence with [mention 1] in context...
+example: Sentence with [mention 2] in context...
+example: Sentence with [mention 3] in context...
+
+# Examples
+## Example 1
+- **CUI**:
+C3539909
+- **Title**:
+Allergic disposition
+- **Semantic group**:
+Disorders
+- **Semantic Type**:
+Disease or Syndrome
+- **Definitions**:
+* 1. The disposition to develop an allergic reaction.
+- **Mentions**:
+'Allergic disposition', 'Allergic disposition (disorder)'
+
+## Final Mention Set
+1. Allergic disposition
+2. Allergic predisposition
+3. Allergy susceptibility
+
+## Usage Examples
+example: In a prospective birth cohort, maternal vitamin D status and neonatal epigenetic signatures were examined as predictors of [Allergic disposition] at school age.
+example: A genome-wide association study implicated type 2 cytokine signaling and epidermal barrier loci in [Allergic predisposition] across diverse ancestral cohorts.
+example: Among urban adolescents, early-life pet exposure and indoor microbial diversity were inversely associated with [Allergy susceptibility] after adjustment for socioeconomic and tobacco exposures.
+
+## Example 2
+- **CUI**:
+C0024307
+- **Title**:
+Lymphomatoid Granulomatosis
+- **Semantic group**:
+Disorders
+- **Semantic Type**:
+Neoplastic Process
+- **Definitions**:
+* 1. Destructive growth of lymph cells, usually involving the lungs, skin, kidneys, and central nervous system. Grades I and II are not considered cancerous, but grade III is considered a lymphoma.
+* 2. A neoplastic lymphoproliferative process characterized by an angiocentric arrangement of the tumor cells which is associated with angiodestruction. It includes lymphomatoid granulomatosis which is a lymphoproliferative lesion derived from mature B-lymphocytes and cases of extranodal NK/T-cell lymphomas of nasal type.
+* 3. An angiocentric and angiodestructive lymphoproliferative disorder primarily involving the lungs. It is caused by an Epstein-Barr virus-induced transformation of the B-cells, in a T-cell rich environment. Clinically and pathologically it resembles EXTRANODAL NK-T-CELL LYMPHOMA.
+* 4. An angiocentric and angiodestructive lymphoproliferative disease involving extranodal sites, comprised of Epstein-Barr virus (EBV)-positive B-cells admixed with reactive T-cells. Incidence is higher among adult males; patients with a history of immunodeficiency are at increased risk. The most common site of involvement is the lung; other common sites include brain, kidney, liver, and skin. Morphologically, three grades are recognized: grade I, II, and III. Grade III lymphomatoid granulomatosis should be approached clinically as a subtype of diffuse large B-cell lymphoma.
+* 5. Angiocentrický a angiodestruktivní lymfoproliferativní porucha primárně postihující plíce. Onemocnění je vyvoláno transformací B-buněk (indukovanou virem Epstein-Barrové) v prostředí bohatém na T-buňky. Klinicky a patologicky je nemoc podobná extranodálnímu lymfomu z NK/T-buněk.
+- **Mentions**:
+'(M)Angiocentric immunoproliferative lesion', 'Granulomatose lymphomatoïde', 'AIL', 'Angiocentric Immunoproliferative Lesion', 'LYG', 'Lymphomatoid granulomatosis', 'Lymphomatoid Granulomatosis (Disease/Finding)', 'LG - Lymphomatoid granulomatosis', 'Lymphomatoid Granulomatoses', 'Lymphomatoid granulomatosis (disorder) (Ambiguous)', 'Lymphomatoid Granulomatosis', 'Angiocentric immunoproliferative lesion', '(M) Angiocentric immunoproliferative lesion', 'Angiocentric immunoproliferative lesion (morphologic abnormality)', 'Lymphoid granulomatosis', 'Lymphomatoid granulomatosis (disorder)', 'Granulomatosis, Lymphomatoid', 'Lymphmatoid granulomatosis', 'Granulomatoses, Lymphomatoid'
+
+## Final Mention Set
+1. Lymphomatoid granulomatosis  
+2. LYG  
+3. Angiocentric immunoproliferative lesion
+
+## Usage Examples
+example: Recent studies have shown that [lymphomatoid granulomatosis] frequently manifests with pulmonary nodules, with histopathological examination revealing an angiocentric lymphoproliferative process.  
+example: Patients with [LYG] often present with respiratory symptoms and radiologic findings that may mimic infectious etiologies, complicating early diagnosis and management of the condition.  
+example: Biopsy specimens from central nervous system lesions demonstrated the angiocentric and angiodestructive features characteristic of [angiocentric immunoproliferative lesion] in affected individuals.
