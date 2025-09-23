@@ -12,6 +12,7 @@ Outputs: sample_{i}.parquet each containing columns: CUI, user_prompt.
 
 import codecs
 from pathlib import Path
+import shutil
 from typing import Optional
 
 import polars as pl
@@ -122,6 +123,9 @@ def build_templates(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def _write_chunks(df: pl.DataFrame, out_dir: Path, chunk_size: int) -> None:
+    # delete output dir
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     for i in tqdm(range(0, len(df), chunk_size), desc=f"Writing {out_dir}"):
         chunk = df.slice(i, chunk_size)
