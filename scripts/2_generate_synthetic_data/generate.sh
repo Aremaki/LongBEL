@@ -70,7 +70,7 @@ echo "[INFO] Visible GPUs: ${CUDA_VISIBLE_DEVICES:-unset}"
 nvidia-smi -L || true
 nvidia-smi || true
 
-python scripts/2_generate_synthetic_data/generate.py run \
+python scripts/2_generate_synthetic_data/generate.py \
   --chunk "${CHUNK}" \
   --user-prompts-dir "${USER_PROMPTS_DIR}" \
   --out-dir "${OUT_DIR}" \

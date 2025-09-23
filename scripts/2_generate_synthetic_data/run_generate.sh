@@ -28,7 +28,7 @@ submit_for_dir() {
     local chunk
     chunk=$(basename "$chunk_file" .parquet | sed 's/sample_//')
     echo "  -> sbatch ${dataset} ${variant} chunk=${chunk}"
-    sbatch --export=ALL,MODEL_PATH,BATCH_SIZE,MAX_NEW_TOKENS,MAX_RETRIES \
+    sbatch --export=ALL,MODEL_PATH,BATCH_SIZE,MAX_NEW_TOKENS,MAX_RETRIES -A ssq@h100 \
       "${SLURM_SCRIPT}" "${dataset}" "${variant}" "${chunk}"
   done
 }
