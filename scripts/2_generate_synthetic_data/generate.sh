@@ -39,7 +39,7 @@ module load arch/h100
 module load pytorch-gpu/py3/2.3.1
 
 # Common args (allow env overrides)
-MODEL_PATH=${MODEL_PATH:-models/Llama-3.3-70B-Instruct}
+MODEL_PATH=${MODEL_PATH:-models/meta-llama/Llama-3.3-70B-Instruct}
 BATCH_SIZE=${BATCH_SIZE:-16}
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-512}
 MAX_RETRIES=${MAX_RETRIES:-5}
