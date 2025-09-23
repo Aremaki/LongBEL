@@ -45,7 +45,7 @@ def build_templates(df: pl.DataFrame) -> pl.DataFrame:
         pl.col("DEF").first().alias("definitions"),
         pl.col("GROUP").first().alias("semantic_group"),
         pl.col("SEM_NAME").first().alias("semantic_type"),
-        pl.col("Syn").n_unique().alias("mention_count"),
+        pl.col("Entity").n_unique().alias("mention_count"),
     )
 
     # Define functions with explicit return types
