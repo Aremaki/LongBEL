@@ -102,18 +102,19 @@ def run(
     quaero_path: Path = typer.Option(None, help="Path to QUAERO concepts parquet"),
     quaero_def: Path = typer.Option(None, help="Path to QUAERO definitions parquet"),
     out_mm_def: Path = typer.Option(
-        Path("data/user_prompts_MM"), help="Output dir for MM prompts with definitions"
+        Path("data/synthetic_data/SynthMM/user_prompts_def"),
+        help="Output dir for MM prompts with definitions",
     ),
     out_mm_no_def: Path = typer.Option(
-        Path("data/user_prompts_MM"),
+        Path("data/synthetic_data/SynthMM/user_prompts_no_def"),
         help="Output dir for MM prompts without definitions",
     ),
     out_quaero_def: Path = typer.Option(
-        Path("data/user_prompts_quaero"),
+        Path("data/synthetic_data/SynthQUAERO/user_prompts_def"),
         help="Output dir for QUAERO prompts with definitions",
     ),
     out_quaero_no_def: Path = typer.Option(
-        Path("data/user_prompts_quaero"),
+        Path("data/synthetic_data/SynthQUAERO/user_prompts_no_def"),
         help="Output dir for QUAERO prompts without definitions",
     ),
     shuffle: bool = typer.Option(True, help="Shuffle concepts (sample fraction=1)"),

@@ -19,8 +19,6 @@ python scripts/2_generate_synthetic_data/prepare_concepts.py \
   --quaero-path data/UMLS_processed/QUAERO/all_disambiguated.parquet \
   --mm-def data/UMLS_processed/MM/umls_def.parquet \
   --quaero-def data/UMLS_processed/QUAERO/umls_def.parquet \
-  --out-mm data/synthetic_data/SynthMM/user_prompts \
-  --out-quaero data/synthetic_data/SynthQUAERO/user_prompts \
   --chunk-size 2500
 ```
 Options:
