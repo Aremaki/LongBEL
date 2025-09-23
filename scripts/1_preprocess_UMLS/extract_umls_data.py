@@ -335,7 +335,7 @@ def synonyms(
             .then(1_000_000_000)
             .otherwise(
                 pl.element().str.len_chars()
-                + pl.when(
+                - pl.when(
                     (
                         pl.element().str.slice(0, 1).str.to_uppercase()
                         == pl.element().str.slice(0, 1)
@@ -345,7 +345,7 @@ def synonyms(
                         == pl.element().str.slice(1)
                     )  # rest all lowercase
                 )
-                .then(1)
+                .then(0.5)
                 .otherwise(0)
             )
         )
@@ -361,7 +361,7 @@ def synonyms(
             .then(1_000_000_000)
             .otherwise(
                 pl.element().str.len_chars()
-                + pl.when(
+                - pl.when(
                     (
                         pl.element().str.slice(0, 1).str.to_uppercase()
                         == pl.element().str.slice(0, 1)
@@ -371,7 +371,7 @@ def synonyms(
                         == pl.element().str.slice(1)
                     )  # rest all lowercase
                 )
-                .then(1)
+                .then(0.5)
                 .otherwise(0)
             )
         )
