@@ -103,6 +103,7 @@ def parse_text(
     start_group,
     end_group,
     nlp,
+    CUI_to_Title,
     CUI_to_Syn,
     CUI_to_GROUP,
     natural=False,
@@ -175,30 +176,38 @@ def parse_text(
                     f"Corrected CUI {entity['normalized'][0]['db_id']} -> {normalized_id} for entity '{entity_text}'"
                 )
 
+            possible_syns = None
             annotation = None
-            if CUI_to_Syn is not None:
-                possible_syns = CUI_to_Syn.get(normalized_id)
-            else:
-                possible_syns = None
+            if selection_method == "title":
+                if CUI_to_Title is not None:
+                    annotation = CUI_to_Title.get(normalized_id)
+                else:
+                    logging.warning(
+                        f"Title selection requested but no title mapping available for CUI {normalized_id} (entity '{entity_text}');"
+                    )
 
             # Prefer precomputed best synonyms if provided
-            if selection_method == "embedding":
+            elif selection_method == "embedding":
                 if best_syn_map is not None:
                     pre_key = (normalized_id, entity_text)
                     if pre_key in best_syn_map:
                         annotation = best_syn_map[pre_key]
                 # Otherwise select from possible synonyms
-                if annotation is None and possible_syns and encoder is not None:
-                    logging.warning(
-                        f"No precomputed best synonym map provided; Selecting best synonym by embedding for CUI {normalized_id} (entity '{entity_text}')"
-                    )
-                    best_syn, _ = best_by_cosine(
-                        encoder=encoder,
-                        mention=entity_text,
-                        candidates=list(possible_syns),
-                    )  # type: ignore
-                    annotation = best_syn
+                if annotation is None and CUI_to_Syn is not None:
+                    possible_syns = CUI_to_Syn.get(normalized_id)
+                    if possible_syns and encoder is not None:
+                        logging.warning(
+                            f"No precomputed best synonym map provided; Selecting best synonym by embedding for CUI {normalized_id} (entity '{entity_text}')"
+                        )
+                        best_syn, _ = best_by_cosine(
+                            encoder=encoder,
+                            mention=entity_text,
+                            candidates=list(possible_syns),
+                        )  # type: ignore
+                        annotation = best_syn
             elif selection_method == "tfidf":
+                if CUI_to_Syn is not None:
+                    possible_syns = CUI_to_Syn.get(normalized_id)
                 if possible_syns and tfidf_vectorizer is not None:
                     best_idx, best_score = cal_similarity_tfidf(
                         possible_syns, entity_text, tfidf_vectorizer
@@ -208,12 +217,15 @@ def parse_text(
                     logging.warning(
                         f"TF-IDF selection requested but no synonyms or vectorizer available for CUI {normalized_id} (entity '{entity_text}');"
                     )
-            elif selection_method == "levenshtein" and possible_syns:
-                # Default to Levenshtein matching (previous behavior)
-                text = entity_text
-                dists = [nltk.edit_distance(text, syn) for syn in possible_syns]
-                best_syn = possible_syns[int(np.argmin(dists))]
-                annotation = best_syn
+            elif selection_method == "levenshtein":
+                if CUI_to_Syn is not None:
+                    possible_syns = CUI_to_Syn.get(normalized_id)
+                if possible_syns:
+                    # Default to Levenshtein matching (previous behavior)
+                    text = entity_text
+                    dists = [nltk.edit_distance(text, syn) for syn in possible_syns]
+                    best_syn = possible_syns[int(np.argmin(dists))]
+                    annotation = best_syn
             if annotation is None:
                 # If no synonyms mapping, skip entity
                 logging.warning(
@@ -304,6 +316,7 @@ def process_bigbio_dataset(
     end_entity,
     start_group,
     end_group,
+    CUI_to_Title,
     CUI_to_Syn,
     CUI_to_GROUP,
     natural=False,
@@ -358,6 +371,7 @@ def process_bigbio_dataset(
             start_group,
             end_group,
             nlp,
+            CUI_to_Title,
             CUI_to_Syn,
             CUI_to_GROUP,
             natural,
