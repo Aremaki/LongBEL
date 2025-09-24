@@ -105,7 +105,7 @@ def parse_text(
     nlp,
     CUI_to_Title,
     CUI_to_Syn,
-    CUI_to_GROUP,
+    semantic_info: pl.DataFrame,
     natural=False,
     corrected_cui=None,
     selection_method: str = "levenshtein",
@@ -237,7 +237,18 @@ def parse_text(
                 annotation = clean_natural(annotation)
 
             # Define CUI group
-            group = CUI_to_GROUP.get(normalized_id)
+            entity_type = entity["type"]
+            if entity_type in semantic_info["CATEGORY"].unique():
+                group = semantic_info.filter(pl.col("CATEGORY") == entity_type)[
+                    "GROUP"
+                ].first()
+            elif entity_type in semantic_info["SEM_CODE"].unique():
+                group = semantic_info.filter(pl.col("SEM_CODE") == entity_type)[
+                    "GROUP"
+                ].first()
+            else:
+                group = "Unknown"
+                logging.info(f"No group found for entity type {entity_type}.")
 
             # Find the sentence that contains the entity start
             sent_text = passage_text
@@ -318,7 +329,7 @@ def process_bigbio_dataset(
     end_group,
     CUI_to_Title,
     CUI_to_Syn,
-    CUI_to_GROUP,
+    semantic_info: pl.DataFrame,
     natural=False,
     encoder_name=None,
     tfidf_vectorizer_path: Optional[Path] = None,
@@ -373,7 +384,7 @@ def process_bigbio_dataset(
             nlp,
             CUI_to_Title,
             CUI_to_Syn,
-            CUI_to_GROUP,
+            semantic_info,
             natural,
             corrected_cui,
             selection_method,

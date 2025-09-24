@@ -215,6 +215,9 @@ def semantic(
         schema=["CATEGORY", "GROUP", "SEM_CODE", "SEM_NAME"],
         orient="row",
     )
+    df_sem_info.write_parquet(
+        out_dir.parent / "semantic_info.parquet"
+    )  # save standalone mapping
     df = df.join(df_sem_info, on=["SEM_CODE", "SEM_NAME"], how="left")
     out_file = out_dir / "umls_semantic.parquet"
     df.write_parquet(out_file)

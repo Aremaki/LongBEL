@@ -11,8 +11,8 @@ Outputs: sample_{i}.parquet each containing columns: CUI, user_prompt.
 """
 
 import codecs
-from pathlib import Path
 import shutil
+from pathlib import Path
 from typing import Optional
 
 import polars as pl
