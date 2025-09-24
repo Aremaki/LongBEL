@@ -105,7 +105,8 @@ def parse_text(
     nlp,
     CUI_to_Title,
     CUI_to_Syn,
-    semantic_info: pl.DataFrame,
+    cat_to_group,
+    sem_to_group,
     natural=False,
     corrected_cui=None,
     selection_method: str = "levenshtein",
@@ -238,14 +239,10 @@ def parse_text(
 
             # Define CUI group
             entity_type = entity["type"]
-            if entity_type in semantic_info["CATEGORY"].unique():
-                group = semantic_info.filter(pl.col("CATEGORY") == entity_type)[
-                    "GROUP"
-                ].first()
-            elif entity_type in semantic_info["SEM_CODE"].unique():
-                group = semantic_info.filter(pl.col("SEM_CODE") == entity_type)[
-                    "GROUP"
-                ].first()
+            if entity_type in cat_to_group.keys():
+                group = cat_to_group[entity_type]
+            elif entity_type in sem_to_group.keys():
+                group = sem_to_group[entity_type]
             else:
                 group = "Unknown"
                 logging.info(f"No group found for entity type {entity_type}.")
@@ -345,6 +342,15 @@ def process_bigbio_dataset(
     language: str
         Punkt language model to use (e.g. 'english', 'french').
     """
+    # Build quick lookup of category/group and sem_code/group
+    cat_to_group = {
+        row["CATEGORY"]: row["GROUP"]
+        for row in semantic_info.select(["CATEGORY", "GROUP"]).to_dicts()
+    }
+    sem_to_group = {
+        row["SEM_CODE"]: row["GROUP"]
+        for row in semantic_info.select(["SEM_CODE", "GROUP"]).to_dicts()
+    }
     # Load sentence tokenizer for requested language (default english).
     # Falls back to english if the specified model is unavailable.
     try:
@@ -384,7 +390,8 @@ def process_bigbio_dataset(
             nlp,
             CUI_to_Title,
             CUI_to_Syn,
-            semantic_info,
+            cat_to_group,
+            sem_to_group,
             natural,
             corrected_cui,
             selection_method,
