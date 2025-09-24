@@ -122,33 +122,43 @@ def generate_batches(
 
             # Build a sub-batch of only the failed items
             failed_indices = [i for i, ok in enumerate(success_mask) if not ok]
-            sub_inputs = {
-                k: v[failed_indices] if hasattr(v, "__getitem__") else v
-                for k, v in inputs.items()
-            }
 
-            with torch.inference_mode():
-                gen_start_time = time.time()
-                output_tokens = model.generate(
-                    **sub_inputs,
-                    max_new_tokens=max_new_tokens,
-                    do_sample=True,
-                    temperature=0.6,
-                    top_p=0.9,
-                    eos_token_id=tokenizer.eos_token_id,
-                    pad_token_id=tokenizer.pad_token_id,
-                    use_cache=True,
-                )
-                gen_time = time.time() - gen_start_time
+            # Try generating; on OOM, halve the sub-batch and retry
+            current_indices = failed_indices
+            while True:
+                sub_inputs = {
+                    k: v[current_indices] if hasattr(v, "__getitem__") else v
+                    for k, v in inputs.items()
+                }
+                try:
+                    with torch.inference_mode():
+                        gen_start_time = time.time()
+                        output_tokens = model.generate(
+                            **sub_inputs,
+                            max_new_tokens=max_new_tokens,
+                            do_sample=True,
+                            temperature=0.6,
+                            top_p=0.9,
+                            eos_token_id=tokenizer.eos_token_id,
+                            pad_token_id=tokenizer.pad_token_id,
+                            use_cache=True,
+                        )
+                        gen_time = time.time() - gen_start_time
+                    break
+                except torch.cuda.OutOfMemoryError:
+                    torch.cuda.empty_cache()
+                    new_len = max(1, len(current_indices) // 2)
+                    print(f"OOM! Reducing sub-batch size to {new_len}")
+                    if new_len == len(current_indices):
+                        # Can't reduce further; re-raise to surface the issue
+                        raise
+                    current_indices = current_indices[:new_len]
 
             # Decode only the newly generated tokens to reduce CPU work
-            input_lens = [
-                len(sub_inputs["input_ids"][i]) for i in range(len(failed_indices))
-            ]
+            n_sub = int(sub_inputs["input_ids"].shape[0])
+            input_lens = [int(sub_inputs["input_ids"][i].size(0)) for i in range(n_sub)]
             # Slice the generated portion for each sequence
-            gen_only = [
-                output_tokens[i][input_lens[i] :] for i in range(len(failed_indices))
-            ]
+            gen_only = [output_tokens[i][input_lens[i] :] for i in range(n_sub)]
             # Use batch_decode on lists for better throughput
             decoded_outputs = tokenizer.batch_decode(
                 [t.tolist() for t in gen_only], skip_special_tokens=True
@@ -156,12 +166,12 @@ def generate_batches(
 
             # Minimal batch-level log
             print(
-                f"Batch {batch_start} attempt {attempt}: {gen_time:.2f}s, sub-batch {len(failed_indices)}"
+                f"Batch {batch_start} attempt {attempt}: {gen_time:.2f}s, sub-batch {n_sub}"
             )
 
             # Post-process each failed item
             for sub_i, decoded_output in enumerate(decoded_outputs):
-                i = failed_indices[sub_i]
+                i = current_indices[sub_i]
                 decoded_text = decoded_output.strip()
 
                 examples = [
