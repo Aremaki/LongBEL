@@ -337,7 +337,6 @@ def run(
             "medmentions_st21pv_bigbio_kb",
             medmentions_path,
             umls_mm_path,
-            corrected_cui,
         )
     if "EMEA" in datasets:
         typer.echo("→ Processing QUAERO EMEA (HF)…")
@@ -368,7 +367,6 @@ def run(
             umls_mm_path,
             dictionary_mm,
             out_root,
-            corrected_cui,
         )
     if "SynthQUAERO" in datasets and "EMEA" in datasets:
         typer.echo("→ Creating EMEA_augmented (EMEA + SynthQUAERO)…")
