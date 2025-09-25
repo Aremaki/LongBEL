@@ -67,7 +67,7 @@ def _decode_escaped_utf8(text: Optional[str]) -> str:
 
 def build_templates(df: pl.DataFrame) -> pl.DataFrame:
     # First extract and process all mentions
-    processed_df = df.group_by("CUI", "GROUP", "SEM_NAME").agg(
+    processed_df = df.group_by("CUI", "CATEGORY", "GROUP", "SEM_NAME").agg(
         pl.col("Title").first().alias("title"),
         pl.col("Entity").unique().alias("mentions"),
         pl.col("DEF").first().alias("definitions"),
@@ -116,7 +116,7 @@ def build_templates(df: pl.DataFrame) -> pl.DataFrame:
                 pl.lit("\n"),
             ])
         )
-        .select(["CUI", "GROUP", "SEM_NAME", "user_prompt"])
+        .select(["CUI", "CATEGORY", "SEM_NAME", "user_prompt"])
     )
 
 

@@ -84,7 +84,7 @@ def generate_batches(
     template_answer = "example: " if lang == "en" else "exemple : "
     user_prompts = user_prompts_df["user_prompt"].to_list()
     cui_codes = user_prompts_df["CUI"].to_list()
-    sem_groups = user_prompts_df["GROUP"].to_list()
+    sem_cats = user_prompts_df["CATEGORY"].to_list()
     sem_types = user_prompts_df["SEM_NAME"].to_list()
     all_outputs = []
     timing_data = []
@@ -102,7 +102,7 @@ def generate_batches(
     ):
         batch_user_prompts = user_prompts[batch_start : batch_start + batch_size]
         batch_cui_codes = cui_codes[batch_start : batch_start + batch_size]
-        batch_sem_groups = sem_groups[batch_start : batch_start + batch_size]
+        batch_sem_cats = sem_cats[batch_start : batch_start + batch_size]
         batch_sem_types = sem_types[batch_start : batch_start + batch_size]
 
         # Apply chat template and prepare batch prompts
@@ -203,10 +203,10 @@ def generate_batches(
                 })
 
         # Collect all outputs
-        for cui, sem_group, sem_type, out_text in zip(
-            batch_cui_codes, batch_sem_groups, batch_sem_types, batch_final_text
+        for cui, sem_cat, sem_type, out_text in zip(
+            batch_cui_codes, batch_sem_cats, batch_sem_types, batch_final_text
         ):
-            all_outputs.append((cui, sem_group, sem_type, out_text))
+            all_outputs.append((cui, sem_cat, sem_type, out_text))
 
     # Summary
     if timing_data:
@@ -222,7 +222,7 @@ def generate_batches(
         print(f"Total tokens generated: {total_tokens:,}")
 
     return pl.DataFrame(
-        all_outputs, schema=["CUI", "GROUP", "SEM_NAME", "llm_output"], orient="row"
+        all_outputs, schema=["CUI", "CATEGORY", "SEM_NAME", "llm_output"], orient="row"
     )
 
 
