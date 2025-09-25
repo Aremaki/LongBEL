@@ -308,14 +308,19 @@ def run(
     out_root: Path = typer.Option(
         Path("data/final_data"), help="Root output directory"
     ),
-    semantic_info_parquet: Path = typer.Option(
-        Path("data/UMLS_processed/semantic_info.parquet"),
+    semantic_info_mm_parquet: Path = typer.Option(
+        Path("data/UMLS_processed/MM/semantic_info.parquet"),
+        help="UMLS semantic info parquet",
+    ),
+    semantic_info_quaero_parquet: Path = typer.Option(
+        Path("data/UMLS_processed/QUAERO/semantic_info.parquet"),
         help="UMLS semantic info parquet",
     ),
 ) -> None:
     """Run preprocessing pipeline for selected datasets and models."""
     # Load UMLS mapping resources
-    semantic_info = pl.read_parquet(semantic_info_parquet)
+    semantic_info_mm = pl.read_parquet(semantic_info_mm_parquet)
+    semantic_info_quaero = pl.read_parquet(semantic_info_quaero_parquet)
     cui_to_syn_mm, cui_to_title_mm, cui_to_groups_mm = _build_mappings(umls_mm_parquet)
     cui_to_syn_quaero, cui_to_title_quaero, cui_to_groups_quaero = _build_mappings(
         umls_quaero_parquet
@@ -343,7 +348,7 @@ def run(
             cui_to_title_mm,
             cui_to_syn_mm,
             cui_to_groups_mm,
-            semantic_info,
+            semantic_info_mm,
             encoder_name,
             tfidf_vectorizer_path,
             start_entity,
@@ -361,7 +366,7 @@ def run(
                 cui_to_title_mm,
                 cui_to_syn_mm,
                 cui_to_groups_mm,
-                semantic_info,
+                semantic_info_mm,
                 encoder_name,
                 tfidf_vectorizer_path,
                 start_entity,
@@ -380,7 +385,7 @@ def run(
             cui_to_title_quaero,
             cui_to_syn_quaero,
             cui_to_groups_quaero,
-            semantic_info,
+            semantic_info_quaero,
             encoder_name,
             tfidf_vectorizer_path,
             start_entity,
@@ -397,7 +402,7 @@ def run(
                 cui_to_title_quaero,
                 cui_to_syn_quaero,
                 cui_to_groups_quaero,
-                semantic_info,
+                semantic_info_quaero,
                 encoder_name,
                 tfidf_vectorizer_path,
                 start_entity,
@@ -416,7 +421,7 @@ def run(
             cui_to_title_quaero,
             cui_to_syn_quaero,
             cui_to_groups_quaero,
-            semantic_info,
+            semantic_info_quaero,
             encoder_name,
             tfidf_vectorizer_path,
             start_entity,
@@ -433,7 +438,7 @@ def run(
                 cui_to_title_quaero,
                 cui_to_syn_quaero,
                 cui_to_groups_quaero,
-                semantic_info,
+                semantic_info_quaero,
                 encoder_name,
                 tfidf_vectorizer_path,
                 start_entity,

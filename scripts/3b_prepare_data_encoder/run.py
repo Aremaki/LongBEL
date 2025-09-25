@@ -174,7 +174,7 @@ def process_bigbio_dataset(
         umls_df.group_by("CUI").agg([pl.col("GROUP").unique()]).iter_rows()
     )
     umls_info = pickle.load(open(umls_path / "umls_info_encoder.pkl", "rb"))
-    semantic_info = pl.read_parquet(umls_path.parent / "semantic_info.parquet")
+    semantic_info = pl.read_parquet(umls_path / "semantic_info.parquet")
     for split in ["validation", "test", "train"]:
         if split not in dataset:
             continue
@@ -235,7 +235,7 @@ def create_augmented_dataset(
             umls_df.group_by("CUI").agg([pl.col("GROUP").unique()]).iter_rows()
         )
         umls_info = pickle.load(open(umls_path / "umls_info_encoder.pkl", "rb"))
-        semantic_info = pl.read_parquet(umls_path.parent / "semantic_info.parquet")
+        semantic_info = pl.read_parquet(umls_path / "semantic_info.parquet")
         synthetic_mentions = _transform_pages(
             pages,
             umls_info,
