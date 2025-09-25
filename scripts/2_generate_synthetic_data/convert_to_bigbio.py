@@ -35,7 +35,7 @@ app = typer.Typer(help="Convert synthetic generation parquet(s) to BigBio JSON."
 
 
 def process_sentence(
-    sentence: str, document_id: int, sentence_num: int, cui: str
+    sentence: str, document_id: int, sentence_num: int, cui: str, category: str
 ) -> dict:
     """Convert one sentence with bracketed entities to a BigBio passage record."""
     output = {
@@ -60,7 +60,7 @@ def process_sentence(
         start, end = match.span(1)  # offsets of the inner group (entity only)
         output["entities"].append({
             "id": f"{document_id}_{sentence_num}_T{match_num}",
-            "type": "LLM_generated",
+            "type": category,
             "text": [entity],
             "offsets": [[start, end]],
             "normalized": [
@@ -75,16 +75,19 @@ def process_sentence(
 
 def dataframe_to_bigbio(df: pl.DataFrame) -> list[dict]:
     """Convert a generation result dataframe to list of BigBio records."""
-    if not {"CUI", "llm_output"}.issubset(df.columns):  # basic schema check
-        raise ValueError("Input DataFrame must contain 'CUI' and 'llm_output' columns")
+    if not {"CUI", "CATEGORY", "llm_output"}.issubset(df.columns):  # basic schema check
+        raise ValueError(
+            "Input DataFrame must contain 'CUI', 'CATEGORY' and 'llm_output' columns"
+        )
     filtered = df.filter(~pl.col("llm_output").str.contains("FAIL"))
     records: list[dict] = []
     for i in tqdm(range(len(filtered)), desc="Converting to BigBio"):
         cui = filtered["CUI"][i]
+        category = filtered["CATEGORY"][i]
         for j, sentence in enumerate(filtered["llm_output"][i].split("\n")):
             if sentence.strip():
                 sentence = sentence.replace("benzo[a]pyrene", "benzo(a)pyrene").strip()
-                records.append(process_sentence(sentence, i, j, cui))
+                records.append(process_sentence(sentence, i, j, cui, category))
     return records
 
 
