@@ -251,7 +251,7 @@ app = typer.Typer(
 @app.command()
 def run(
     datasets: list[str] = typer.Option(
-        ["MedMentions", "EMEA", "MEDLINE", "SynthMM", "SynthQUAERO"],
+        ["MedMentions", "EMEA", "MEDLINE"],
         help="Datasets to process. Include both original and synthetic to create augmented versions.",
     ),
     umls_mm_path: Path = typer.Option(
@@ -283,11 +283,6 @@ def run(
     with open(medmentions_path / "dictionary.pickle", "wb") as f:
         pickle.dump(dictionary_mm, f)
     typer.echo(f"MM dictionary saved to {medmentions_path / 'dictionary.pickle'}")
-    synth_mm_path = out_root / "SynthMM"
-    synth_mm_path.mkdir(parents=True, exist_ok=True)
-    with open(synth_mm_path / "dictionary.pickle", "wb") as f:
-        pickle.dump(dictionary_mm, f)
-    typer.echo(f"SynthMM dictionary saved to {synth_mm_path / 'dictionary.pickle'}")
     dictionary_quaero = prepare_dictionary_from_umls(umls_quaero_path)
     emea_path = out_root / "EMEA"
     emea_path.mkdir(parents=True, exist_ok=True)
@@ -299,13 +294,6 @@ def run(
     with open(medline_path / "dictionary.pickle", "wb") as f:
         pickle.dump(dictionary_quaero, f)
     typer.echo(f"MEDLINE dictionary saved to {medline_path / 'dictionary.pickle'}")
-    synth_quaero_path = out_root / "SynthQUAERO"
-    synth_quaero_path.mkdir(parents=True, exist_ok=True)
-    with open(synth_quaero_path / "dictionary.pickle", "wb") as f:
-        pickle.dump(dictionary_quaero, f)
-    typer.echo(
-        f"SynthQUAERO dictionary saved to {synth_quaero_path / 'dictionary.pickle'}"
-    )
 
     # Process HF datasets
     if "MedMentions" in datasets:

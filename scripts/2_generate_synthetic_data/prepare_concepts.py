@@ -67,12 +67,10 @@ def _decode_escaped_utf8(text: Optional[str]) -> str:
 
 def build_templates(df: pl.DataFrame) -> pl.DataFrame:
     # First extract and process all mentions
-    processed_df = df.group_by("CUI").agg(
+    processed_df = df.group_by("CUI", "GROUP", "SEM_NAME").agg(
         pl.col("Title").first().alias("title"),
         pl.col("Entity").unique().alias("mentions"),
         pl.col("DEF").first().alias("definitions"),
-        pl.col("GROUP").first().alias("semantic_group"),
-        pl.col("SEM_NAME").first().alias("semantic_type"),
         pl.col("Entity").n_unique().alias("mention_count"),
     )
 
@@ -108,9 +106,9 @@ def build_templates(df: pl.DataFrame) -> pl.DataFrame:
                 pl.lit("\n- **Title**:\n"),
                 pl.col("title_processed"),
                 pl.lit("\n- **Semantic group**:\n"),
-                pl.col("semantic_group"),
+                pl.col("GROUP"),
                 pl.lit("\n- **Semantic Type**:\n"),
-                pl.col("semantic_type"),
+                pl.col("SEM_NAME"),
                 pl.lit("\n- **Definitions**:\n"),
                 pl.col("definitions_processed"),
                 pl.lit("- **Mentions**:\n"),
@@ -118,7 +116,7 @@ def build_templates(df: pl.DataFrame) -> pl.DataFrame:
                 pl.lit("\n"),
             ])
         )
-        .select(["CUI", "user_prompt"])
+        .select(["CUI", "GROUP", "SEM_NAME", "user_prompt"])
     )
 
 
