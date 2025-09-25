@@ -4,7 +4,7 @@ import pickle
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import cast
+from typing import Optional, cast
 
 import polars as pl
 import typer
@@ -66,6 +66,7 @@ def _transform_pages(
     umls_info: dict,
     semantic_info: pl.DataFrame,
     cui_to_groups: dict,
+    corrected_cui: Optional[dict[str, str]] = None,
 ) -> list[dict]:
     """Transform a sequence of BigBio-style pages into BLINK-style mention dicts."""
     # Precompute mappings for efficient GROUP lookup
@@ -92,14 +93,19 @@ def _transform_pages(
                 )
                 logging.warning(f"Entity '{ent_text}' has no CUI; skipping.")
                 continue
-            # Define CUI group
+            # Extract CUI
             cui = entity["normalized"][0]["db_id"]  # type: ignore
+            if corrected_cui and cui in corrected_cui:
+                cui = corrected_cui[cui]
+                logging.info(
+                    f"Corrected CUI {entity['normalized'][0]['db_id']} -> {cui} for entity '{' '.join(entity.get('text', []))}'"
+                )
             # Determine group
+            entity_type = entity.get("type")  # type: ignore
             groups = cui_to_groups.get(cui, [])
             if len(groups) == 1:
                 group = groups[0]
             else:
-                entity_type = entity.get("type")  # type: ignore
                 if entity_type in cat_to_group.keys():
                     group = cat_to_group[entity_type]
                 elif entity_type in sem_to_group.keys():
@@ -107,8 +113,13 @@ def _transform_pages(
                 else:
                     group = "Unknown"
                     logging.info(f"No group found for entity type {entity_type}.")
-                if group not in groups:
+                if group not in groups and groups:
                     group = groups[0]
+            if group == "Unknown":
+                logging.info(
+                    f"Group is 'Unknown' for CUI {cui} and entity type {entity_type}. skipping."
+                )
+                continue
             if group not in umls_info.keys():
                 ent_text = (
                     " ".join(entity.get("text", [])) if entity.get("text") else ""
@@ -151,7 +162,11 @@ def _transform_pages(
 
 
 def process_bigbio_dataset(
-    hf_id: str, hf_config: str, output_path: Path, umls_path: Path
+    hf_id: str,
+    hf_config: str,
+    output_path: Path,
+    umls_path: Path,
+    corrected_cui: Optional[dict[str, str]] = None,
 ):
     dataset = load_dataset(hf_id, hf_config)
     umls_df = pl.read_parquet(umls_path / "all_disambiguated.parquet")
@@ -166,7 +181,11 @@ def process_bigbio_dataset(
         logging.info(f"Processing split: {split}")
         pages = dataset[split]
         blink_mentions = _transform_pages(
-            cast(Iterable[dict], pages), umls_info, semantic_info, cui_to_groups
+            cast(Iterable[dict], pages),
+            umls_info,
+            semantic_info,
+            cui_to_groups,
+            corrected_cui,
         )
         # write all of the transformed mentions
         output_path.mkdir(parents=True, exist_ok=True)
@@ -185,6 +204,7 @@ def create_augmented_dataset(
     umls_path: Path,
     dictionary: list[dict],
     out_root: Path,
+    corrected_cui: Optional[dict[str, str]] = None,
 ):
     """Create an augmented dataset combining original val/test with original+synthetic train."""
     augmented_path = out_root / name
@@ -217,7 +237,11 @@ def create_augmented_dataset(
         umls_info = pickle.load(open(umls_path / "umls_info_encoder.pkl", "rb"))
         semantic_info = pl.read_parquet(umls_path.parent / "semantic_info.parquet")
         synthetic_mentions = _transform_pages(
-            pages, umls_info, semantic_info, cui_to_groups
+            pages,
+            umls_info,
+            semantic_info,
+            cui_to_groups,
+            corrected_cui,
         )
         logging.info(
             f"Processed {len(synthetic_mentions)} synthetic mentions from {synth_json_path.name}"
@@ -297,6 +321,14 @@ def run(
         pickle.dump(dictionary_quaero, f)
     typer.echo(f"MEDLINE dictionary saved to {medline_path / 'dictionary.pickle'}")
 
+    # Optional: corrected CUI mapping for QUAERO (from manual review)
+    corrected_cui = None
+    if "EMEA" in datasets or "MEDLINE" in datasets:
+        corrected_cui_path = Path("data") / "corrected_cui" / "QUAERO_2014_adapted.csv"
+        if corrected_cui_path.exists():
+            typer.echo("Using corrected CUI mapping...")
+            corrected_cui = dict(pl.read_csv(corrected_cui_path).iter_rows())
+
     # Process HF datasets
     if "MedMentions" in datasets:
         typer.echo("→ Processing MedMentions (HF)…")
@@ -305,6 +337,7 @@ def run(
             "medmentions_st21pv_bigbio_kb",
             medmentions_path,
             umls_mm_path,
+            corrected_cui,
         )
     if "EMEA" in datasets:
         typer.echo("→ Processing QUAERO EMEA (HF)…")
@@ -313,6 +346,7 @@ def run(
             "quaero_emea_bigbio_kb",
             emea_path,
             umls_quaero_path,
+            corrected_cui,
         )
     if "MEDLINE" in datasets:
         typer.echo("→ Processing QUAERO MEDLINE (HF)…")
@@ -321,6 +355,7 @@ def run(
             "quaero_medline_bigbio_kb",
             medline_path,
             umls_quaero_path,
+            corrected_cui,
         )
 
     # Process augmented datasets (original + synthetic)
@@ -333,6 +368,7 @@ def run(
             umls_mm_path,
             dictionary_mm,
             out_root,
+            corrected_cui,
         )
     if "SynthQUAERO" in datasets and "EMEA" in datasets:
         typer.echo("→ Creating EMEA_augmented (EMEA + SynthQUAERO)…")
@@ -343,6 +379,7 @@ def run(
             umls_quaero_path,
             dictionary_quaero,
             out_root,
+            corrected_cui,
         )
     if "SynthQUAERO" in datasets and "MEDLINE" in datasets:
         typer.echo("→ Creating MEDLINE_augmented (MEDLINE + SynthQUAERO)…")
@@ -353,6 +390,7 @@ def run(
             umls_quaero_path,
             dictionary_quaero,
             out_root,
+            corrected_cui,
         )
 
     typer.echo("✅ Encoder data preparation complete.")

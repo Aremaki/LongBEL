@@ -239,11 +239,11 @@ def parse_text(
                 annotation = clean_natural(annotation)
 
             # Define CUI group
+            entity_type = entity.get("type")
             groups = CUI_to_GROUP.get(normalized_id, [])
             if len(groups) == 1:
                 group = groups[0]
             else:
-                entity_type = entity["type"]
                 if entity_type in cat_to_group.keys():
                     group = cat_to_group[entity_type]
                 elif entity_type in sem_to_group.keys():
@@ -251,8 +251,13 @@ def parse_text(
                 else:
                     group = "Unknown"
                     logging.info(f"No group found for entity type {entity_type}.")
-                if group not in groups:
+                if group not in groups and groups:
                     group = groups[0]
+            if group == "Unknown":
+                logging.info(
+                    f"Group is 'Unknown' for CUI {normalized_id} and entity type {entity_type}. skipping."
+                )
+                continue
 
             # Find the sentence that contains the entity start
             sent_text = passage_text
