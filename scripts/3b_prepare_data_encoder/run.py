@@ -261,7 +261,7 @@ def run(
         Path("data/UMLS_processed/QUAERO"), help="Path to UMLS QUAERO directory"
     ),
     out_root: Path = typer.Option(
-        Path("data/final_data_encoder"), help="Root output directory"
+        Path("arboEL/data/final_data_encoder"), help="Root output directory"
     ),
     synth_mm_json: Path = typer.Option(
         Path("data/synthetic_data/SynthMM/SynthMM_bigbio.json"),
