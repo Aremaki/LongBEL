@@ -25,7 +25,7 @@ EXTRACT_SCRIPT = Path("scripts/1_preprocess_UMLS/extract_umls_data.py")
 PREPARE_SCRIPT = Path("scripts/1_preprocess_UMLS/prepare_umls_data.py")
 
 # You may edit this list to add more releases.
-RELEASES = [("UMLS_2014AB.zip", "QUAERO"), ("UMLS_2017AA.zip", "MM")]
+RELEASES = [("2014AB", "QUAERO"), ("2017AA", "MM")]
 
 
 def run(cmd: list[str]) -> None:
@@ -33,10 +33,11 @@ def run(cmd: list[str]) -> None:
 
 
 def extract(release: tuple[str, str]) -> Path:
-    zip_name, dataset_name = release
-    zip_path = RAW_DIR / zip_name
+    version, dataset_name = release
+    zip_path = RAW_DIR / f"UMLS_{version}.zip"
+    semantic_group_path = RAW_DIR / f"semantic_group_{version}.txt"
     if not zip_path.exists():
-        print(f"[WARN] Missing {zip_path}, skipping {dataset_name} ({zip_name}).")
+        print(f"[WARN] Missing {zip_path}, skipping {dataset_name} ({version}).")
         return None  # type: ignore
     out_dir = EXTRACT_OUT_BASE / dataset_name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -47,6 +48,8 @@ def extract(release: tuple[str, str]) -> Path:
         "all",
         "--umls-zip",
         str(zip_path),
+        "--semantic-group-path",
+        str(semantic_group_path),
         "--out-dir",
         str(out_dir),
     ]
