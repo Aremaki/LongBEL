@@ -21,7 +21,7 @@ for dataset in "${DATASETS[@]}"; do
                 fi
 
                 # Submit the Slurm job
-                sbatch --export=ALL,SCRIPT_ARGS="${ARGS}" -A ssq@h100 scripts/4_training/run.slurm
+                sbatch --export=ALL,SCRIPT_ARGS="${ARGS}" -A ssq@h100 scripts/4_training_seq2seq/run.slurm
                 echo "Submitted job for: ${ARGS}"
                 sleep 1 # To avoid overwhelming the scheduler
             done
