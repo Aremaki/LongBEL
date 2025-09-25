@@ -190,10 +190,14 @@ def process_bigbio_dataset(
         # write all of the transformed mentions
         output_path.mkdir(parents=True, exist_ok=True)
         logging.info(f"Writing {len(blink_mentions)} processed mentions to file...")
-        with open(output_path / f"{split}.jsonl", "w") as f:
+        if split == "validation":
+            split_name = "valid"
+        else:
+            split_name = split
+        with open(output_path / f"{split_name}.jsonl", "w") as f:
             f.write("\n".join([json.dumps(m) for m in blink_mentions]))
         logging.info(
-            f"Finished writing {split} mentions to {output_path / f'{split}.jsonl'}."
+            f"Finished writing {split} mentions to {output_path / f'{split_name}.jsonl'}."
         )
 
 
@@ -217,9 +221,13 @@ def create_augmented_dataset(
 
     # Copy validation and test splits from original (if they exist)
     for split in ["validation", "test"]:
-        original_split_file = original_path / f"{split}.jsonl"
+        if split == "validation":
+            split_name = "valid"
+        else:
+            split_name = split
+        original_split_file = original_path / f"{split_name}.jsonl"
         if original_split_file.exists():
-            augmented_split_file = augmented_path / f"{split}.jsonl"
+            augmented_split_file = augmented_path / f"{split_name}.jsonl"
             augmented_split_file.write_text(original_split_file.read_text())
             logging.info(f"Copied {split} split to {augmented_split_file}")
 
