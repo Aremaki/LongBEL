@@ -105,6 +105,7 @@ def parse_text(
     nlp,
     CUI_to_Title,
     CUI_to_Syn,
+    CUI_to_GROUP,
     cat_to_group,
     sem_to_group,
     natural=False,
@@ -238,14 +239,20 @@ def parse_text(
                 annotation = clean_natural(annotation)
 
             # Define CUI group
-            entity_type = entity["type"]
-            if entity_type in cat_to_group.keys():
-                group = cat_to_group[entity_type]
-            elif entity_type in sem_to_group.keys():
-                group = sem_to_group[entity_type]
+            groups = CUI_to_GROUP.get(normalized_id, [])
+            if len(groups) == 1:
+                group = groups[0]
             else:
-                group = "Unknown"
-                logging.info(f"No group found for entity type {entity_type}.")
+                entity_type = entity["type"]
+                if entity_type in cat_to_group.keys():
+                    group = cat_to_group[entity_type]
+                elif entity_type in sem_to_group.keys():
+                    group = sem_to_group[entity_type]
+                else:
+                    group = "Unknown"
+                    logging.info(f"No group found for entity type {entity_type}.")
+                if group not in groups:
+                    group = groups[0]
 
             # Find the sentence that contains the entity start
             sent_text = passage_text
@@ -326,6 +333,7 @@ def process_bigbio_dataset(
     end_group,
     CUI_to_Title,
     CUI_to_Syn,
+    CUI_to_GROUP,
     semantic_info: pl.DataFrame,
     natural=False,
     encoder_name=None,
@@ -390,6 +398,7 @@ def process_bigbio_dataset(
             nlp,
             CUI_to_Title,
             CUI_to_Syn,
+            CUI_to_GROUP,
             cat_to_group,
             sem_to_group,
             natural,

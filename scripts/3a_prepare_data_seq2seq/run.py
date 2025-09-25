@@ -62,7 +62,8 @@ def _build_mappings(umls_parquet: Path):
     df = pl.read_parquet(umls_parquet)
     cui_to_title = dict(df.group_by("CUI").agg([pl.col("Title").first()]).iter_rows())
     cui_to_syn = dict(df.group_by("CUI").agg([pl.col("Entity").unique()]).iter_rows())
-    return cui_to_syn, cui_to_title
+    cui_to_groups = dict(df.group_by("CUI").agg([pl.col("GROUP").unique()]).iter_rows())
+    return cui_to_syn, cui_to_title, cui_to_groups
 
 
 def _ensure_dir(path: Path):
@@ -116,6 +117,7 @@ def _process_hf_dataset(
     hf_config: str,
     cui_to_title,
     cui_to_syn,
+    cui_to_groups,
     semantic_info,
     encoder_name: str,
     tfidf_vectorizer_path: Path,
@@ -178,6 +180,7 @@ def _process_hf_dataset(
             natural=True,
             CUI_to_Title=cui_to_title,
             CUI_to_Syn=cui_to_syn,
+            CUI_to_GROUP=cui_to_groups,
             semantic_info=semantic_info,
             encoder_name=encoder_name,
             tfidf_vectorizer_path=tfidf_vectorizer_path,
@@ -209,6 +212,7 @@ def _process_synth_dataset(
     synth_pages: Optional[list[dict]],
     cui_to_title,
     cui_to_syn,
+    cui_to_groups,
     semantic_info,
     encoder_name: str,
     tfidf_vectorizer_path: Path,
@@ -249,6 +253,7 @@ def _process_synth_dataset(
         natural=True,
         CUI_to_Title=cui_to_title,
         CUI_to_Syn=cui_to_syn,
+        CUI_to_GROUP=cui_to_groups,
         semantic_info=semantic_info,
         encoder_name=encoder_name,
         tfidf_vectorizer_path=tfidf_vectorizer_path,
@@ -311,8 +316,10 @@ def run(
     """Run preprocessing pipeline for selected datasets and models."""
     # Load UMLS mapping resources
     semantic_info = pl.read_parquet(semantic_info_parquet)
-    cui_to_syn_mm, cui_to_title_mm = _build_mappings(umls_mm_parquet)
-    cui_to_syn_quaero, cui_to_title_quaero = _build_mappings(umls_quaero_parquet)
+    cui_to_syn_mm, cui_to_title_mm, cui_to_groups_mm = _build_mappings(umls_mm_parquet)
+    cui_to_syn_quaero, cui_to_title_quaero, cui_to_groups_quaero = _build_mappings(
+        umls_quaero_parquet
+    )
 
     # Synthetic data (optional)
     synth_mm = _load_json_if_exists(synth_mm_path)
@@ -335,6 +342,7 @@ def run(
             "medmentions_st21pv_bigbio_kb",
             cui_to_title_mm,
             cui_to_syn_mm,
+            cui_to_groups_mm,
             semantic_info,
             encoder_name,
             tfidf_vectorizer_path,
@@ -352,6 +360,7 @@ def run(
                 synth_mm,
                 cui_to_title_mm,
                 cui_to_syn_mm,
+                cui_to_groups_mm,
                 semantic_info,
                 encoder_name,
                 tfidf_vectorizer_path,
@@ -370,6 +379,7 @@ def run(
             "quaero_emea_bigbio_kb",
             cui_to_title_quaero,
             cui_to_syn_quaero,
+            cui_to_groups_quaero,
             semantic_info,
             encoder_name,
             tfidf_vectorizer_path,
@@ -386,6 +396,7 @@ def run(
                 synth_quaero,
                 cui_to_title_quaero,
                 cui_to_syn_quaero,
+                cui_to_groups_quaero,
                 semantic_info,
                 encoder_name,
                 tfidf_vectorizer_path,
@@ -404,6 +415,7 @@ def run(
             "quaero_medline_bigbio_kb",
             cui_to_title_quaero,
             cui_to_syn_quaero,
+            cui_to_groups_quaero,
             semantic_info,
             encoder_name,
             tfidf_vectorizer_path,
@@ -420,6 +432,7 @@ def run(
                 synth_quaero,
                 cui_to_title_quaero,
                 cui_to_syn_quaero,
+                cui_to_groups_quaero,
                 semantic_info,
                 encoder_name,
                 tfidf_vectorizer_path,

@@ -62,7 +62,10 @@ def prepare_dictionary_from_umls(umls_path: Path):
 
 
 def _transform_pages(
-    pages: Iterable[dict], umls_info: dict, semantic_info: pl.DataFrame
+    pages: Iterable[dict],
+    umls_info: dict,
+    semantic_info: pl.DataFrame,
+    cui_to_groups: dict,
 ) -> list[dict]:
     """Transform a sequence of BigBio-style pages into BLINK-style mention dicts."""
     # Precompute mappings for efficient GROUP lookup
@@ -91,17 +94,22 @@ def _transform_pages(
                 continue
             # Define CUI group
             cui = entity["normalized"][0]["db_id"]  # type: ignore
-            entity_type = entity.get("type")  # type: ignore
-            # Determine group using semantic_info
-            group = (
-                cat_to_group.get(entity_type)
-                or sem_to_group.get(entity_type)
-                or "Unknown"
-            )
-            if group == "Unknown":
-                logging.info(f"No group found for entity type {entity_type}.")
-                continue
-            if group not in umls_info:
+            # Determine group
+            groups = cui_to_groups.get(cui, [])
+            if len(groups) == 1:
+                group = groups[0]
+            else:
+                entity_type = entity.get("type")  # type: ignore
+                if entity_type in cat_to_group.keys():
+                    group = cat_to_group[entity_type]
+                elif entity_type in sem_to_group.keys():
+                    group = sem_to_group[entity_type]
+                else:
+                    group = "Unknown"
+                    logging.info(f"No group found for entity type {entity_type}.")
+                if group not in groups:
+                    group = groups[0]
+            if group not in umls_info.keys():
                 ent_text = (
                     " ".join(entity.get("text", [])) if entity.get("text") else ""
                 )
@@ -109,7 +117,7 @@ def _transform_pages(
                     f"Group '{group}' not found in UMLS info; skipping entity '{ent_text}'."
                 )
                 continue
-            if cui not in umls_info[group]:
+            if cui not in umls_info[group].keys():
                 ent_text = (
                     " ".join(entity.get("text", [])) if entity.get("text") else ""
                 )
@@ -146,6 +154,10 @@ def process_bigbio_dataset(
     hf_id: str, hf_config: str, output_path: Path, umls_path: Path
 ):
     dataset = load_dataset(hf_id, hf_config)
+    umls_df = pl.read_parquet(umls_path / "all_disambiguated.parquet")
+    cui_to_groups = dict(
+        umls_df.group_by("CUI").agg([pl.col("GROUP").unique()]).iter_rows()
+    )
     umls_info = pickle.load(open(umls_path / "umls_info_encoder.pkl", "rb"))
     semantic_info = pl.read_parquet(umls_path.parent / "semantic_info.parquet")
     for split in ["validation", "test", "train"]:
@@ -154,7 +166,7 @@ def process_bigbio_dataset(
         logging.info(f"Processing split: {split}")
         pages = dataset[split]
         blink_mentions = _transform_pages(
-            cast(Iterable[dict], pages), umls_info, semantic_info
+            cast(Iterable[dict], pages), umls_info, semantic_info, cui_to_groups
         )
         # write all of the transformed mentions
         output_path.mkdir(parents=True, exist_ok=True)
@@ -164,22 +176,6 @@ def process_bigbio_dataset(
         logging.info(
             f"Finished writing {split} mentions to {output_path / f'{split}.jsonl'}."
         )
-
-
-def process_synth_json(json_path: Path, output_path: Path, umls_path: Path):
-    """Process a synthetic BigBio JSON file as a single 'train' split."""
-    if not json_path.exists():
-        logging.warning(f"Synthetic JSON not found: {json_path}. Skipping…")
-        return
-    pages = json.loads(json_path.read_text(encoding="utf-8"))
-    umls_info = pickle.load(open(umls_path / "umls_info_encoder.pkl", "rb"))
-    semantic_info = pl.read_parquet(umls_path.parent / "semantic_info.parquet")
-    logging.info(f"Processing synthetic dataset: {json_path.name}")
-    blink_mentions = _transform_pages(pages, umls_info, semantic_info)
-    output_path.mkdir(parents=True, exist_ok=True)
-    with open(output_path / "train.jsonl", "w") as f:
-        f.write("\n".join([json.dumps(m) for m in blink_mentions]))
-    logging.info(f"Finished writing train mentions to {output_path / 'train.jsonl'}.")
 
 
 def create_augmented_dataset(
@@ -214,9 +210,15 @@ def create_augmented_dataset(
     # Process synthetic data if available
     if synth_json_path.exists():
         pages = json.loads(synth_json_path.read_text(encoding="utf-8"))
+        umls_df = pl.read_parquet(umls_path / "all_disambiguated.parquet")
+        cui_to_groups = dict(
+            umls_df.group_by("CUI").agg([pl.col("GROUP").unique()]).iter_rows()
+        )
         umls_info = pickle.load(open(umls_path / "umls_info_encoder.pkl", "rb"))
         semantic_info = pl.read_parquet(umls_path.parent / "semantic_info.parquet")
-        synthetic_mentions = _transform_pages(pages, umls_info, semantic_info)
+        synthetic_mentions = _transform_pages(
+            pages, umls_info, semantic_info, cui_to_groups
+        )
         logging.info(
             f"Processed {len(synthetic_mentions)} synthetic mentions from {synth_json_path.name}"
         )
