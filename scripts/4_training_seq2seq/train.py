@@ -335,7 +335,7 @@ def main(
         per_device_eval_batch_size=eval_max_batch,
         eval_accumulation_steps=eval_accumulation_steps,
         save_total_limit=2,
-        num_train_epochs=150,
+        num_train_epochs=120,
         predict_with_generate=True,
         fsdp=fsdp,  # type: ignore
         fsdp_transformer_layer_cls_to_wrap=fsdp_transformer_layer_cls_to_wrap,
@@ -414,7 +414,7 @@ if __name__ == "__main__":
         "--selection-method",
         type=str,
         default="embedding",
-        choices=["embedding", "tfidf", "levenshtein"],
+        choices=["embedding", "tfidf", "levenshtein", "title"],
         help="The method to select concept synonyms",
     )
 
