@@ -79,7 +79,9 @@ def generate_batches(
     batch_size: int = 16,
     max_retries: int = 5,
     pattern: str = r"\[([^]]+)\]",
+    lang: str = "en",
 ):
+    template_answer = "example: " if lang == "en" else "exemple : "
     user_prompts = user_prompts_df["user_prompt"].to_list()
     cui_codes = user_prompts_df["CUI"].to_list()
     all_outputs = []
@@ -175,9 +177,9 @@ def generate_batches(
                 decoded_text = decoded_output.strip()
 
                 examples = [
-                    line.split("example: ", 1)[1]
+                    line.split(template_answer, 1)[1]
                     for line in decoded_text.split("\n")
-                    if "example: " in line and bool(compiled_regex.search(line))
+                    if template_answer in line and bool(compiled_regex.search(line))
                 ]
 
                 if isinstance(examples, list) and len(examples) >= 3:
@@ -244,7 +246,7 @@ def run(
 
     model, tokenizer = load_model_and_tokenizer(str(model_path))  # type: ignore
     system_prompt = load_system_prompt(system_prompt_path)
-
+    lang = "en" if "mm" in system_prompt_path.name else "fr"
     result_df = generate_batches(
         model,
         tokenizer,
@@ -253,6 +255,7 @@ def run(
         max_new_tokens=max_new_tokens,
         batch_size=batch_size,
         max_retries=max_retries,
+        lang=lang,
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)
