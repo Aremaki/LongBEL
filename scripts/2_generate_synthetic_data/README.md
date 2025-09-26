@@ -50,13 +50,13 @@ Prompts used:
 ### a. Directory of parquets
 ```bash
 python scripts/2_generate_synthetic_data/convert_to_bigbio.py convert \
-  --parquet data/SynthMM/generated_def \
+  --parquet data/synthetic_data/SynthMM/generated_def \
   --json-out data/synthetic_data/SynthMM/SynthMM_bigbio_def.json
 ```
 ```bash
 python scripts/2_generate_synthetic_data/convert_to_bigbio.py convert \
-  --parquet data/SynthQUAERO/generated_no_def \
-  --json-out data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio_no_def.json
+  --parquet data/synthetic_data/SynthQUAERO/generated_def \
+  --json-out data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio_def.json
 ```
 Options: `--limit` (row cap), `--fail-pattern` (default FAIL).
 
@@ -65,13 +65,13 @@ Options: `--limit` (row cap), `--fail-pattern` (default FAIL).
 python scripts/2_generate_synthetic_data/convert_to_bigbio.py from-hub \
   --repo-id Aremaki/SynCABEL \
   --split SynthMedMentions \
-  --json-out data/synthetic_data/SynthMM/SynthMM_bigbio.json
+  --json-out data/synthetic_data/SynthMM/SynthMM_bigbio_def.json
 ```
 ```bash
 python scripts/2_generate_synthetic_data/convert_to_bigbio.py from-hub \
   --repo-id Aremaki/SynCABEL \
   --split SynthQUAERO \
-  --json-out data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio.json
+  --json-out data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio_def.json
 ```
 Custom columns:
 ```bash

@@ -89,7 +89,9 @@ def main(
     test_data = {"source": test_source_data, "target": test_target_data}
 
     # Load candidate Trie
-    trie_path = Path(f"data/UMLS_tries/trie_{dataset_name}_{model_name}.pkl")
+    tries_folder = Path("data/UMLS_tries")
+    tries_folder.mkdir(parents=True, exist_ok=True)
+    trie_path = tries_folder / f"trie_{dataset_name}_{model_name}.pkl"
     if os.path.exists(trie_path):  # Check if the file exists
         with open(trie_path, "rb") as file:
             trie_legal_tokens = pickle.load(file)

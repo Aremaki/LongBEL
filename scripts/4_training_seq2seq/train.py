@@ -290,6 +290,11 @@ def main(
     data_collator = DataCollatorForSeq2Seq(tokenizer, model=model, padding="longest")
 
     # Training params
+    num_train_epochs = 60 if dataset_name == "MedMentions" else 120
+    if augmented_data:
+        num_train_epochs = int(
+            num_train_epochs * 0.5
+        )  # Reduce epochs if using augmented data
     train_max_batch = 32
     eval_max_batch = 32
     eval_accumulation_steps = None
@@ -335,7 +340,7 @@ def main(
         per_device_eval_batch_size=eval_max_batch,
         eval_accumulation_steps=eval_accumulation_steps,
         save_total_limit=2,
-        num_train_epochs=120,
+        num_train_epochs=num_train_epochs,
         predict_with_generate=True,
         fsdp=fsdp,  # type: ignore
         fsdp_transformer_layer_cls_to_wrap=fsdp_transformer_layer_cls_to_wrap,

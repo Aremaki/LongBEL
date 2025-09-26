@@ -298,11 +298,11 @@ def run(
         Path("arboEL/data/final_data_encoder"), help="Root output directory"
     ),
     synth_mm_json: Path = typer.Option(
-        Path("data/synthetic_data/SynthMM/SynthMM_bigbio.json"),
+        Path("data/synthetic_data/SynthMM/SynthMM_bigbio_def.json"),
         help="Synthetic MedMentions JSON path",
     ),
     synth_quaero_json: Path = typer.Option(
-        Path("data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio.json"),
+        Path("data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio_def.json"),
         help="Synthetic QUAERO JSON path",
     ),
 ):

@@ -291,11 +291,11 @@ def run(
         help="TF-IDF vectorizer model path",
     ),
     synth_mm_path: Path = typer.Option(
-        Path("data/synthetic_data/SynthMM/SynthMM_bigbio.json"),
+        Path("data/synthetic_data/SynthMM/SynthMM_bigbio_def.json"),
         help="Synthetic MM JSON",
     ),
     synth_quaero_path: Path = typer.Option(
-        Path("data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio.json"),
+        Path("data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio_def.json"),
         help="Synthetic QUAERO JSON",
     ),
     umls_mm_parquet: Path = typer.Option(
