@@ -285,7 +285,7 @@ app = typer.Typer(
 @app.command()
 def run(
     datasets: list[str] = typer.Option(
-        ["MedMentions", "EMEA", "MEDLINE"],
+        ["MedMentions", "EMEA", "MEDLINE", "SynthMM", "SynthQUAERO"],
         help="Datasets to process. Include both original and synthetic to create augmented versions.",
     ),
     umls_mm_path: Path = typer.Option(
