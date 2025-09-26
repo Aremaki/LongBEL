@@ -1,6 +1,7 @@
 import argparse
 import os
 import pickle
+import sys
 from pathlib import Path
 
 import polars as pl
@@ -11,6 +12,8 @@ from transformers import GenerationConfig  # type: ignore
 from syncabel.guided_inference import get_prefix_allowed_tokens_fn
 from syncabel.models import MT5_GENRE, Bart_GENRE, MBart_GENRE
 from syncabel.trie import Trie
+
+sys.setrecursionlimit(5000)
 
 
 def load_pickle(file_path):
