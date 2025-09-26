@@ -134,7 +134,7 @@ def main(
 
     # Perform inference without constraint
     output_sentences = []
-    batch_size = 32
+    batch_size = 16
     for i in tqdm(
         range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
     ):
@@ -154,7 +154,7 @@ def main(
 
     # Perform inference with constraint
     output_sentences = []
-    batch_size = 32
+    batch_size = 8
     for i in tqdm(
         range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
     ):

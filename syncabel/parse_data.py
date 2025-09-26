@@ -14,7 +14,49 @@ from tqdm import tqdm
 from syncabel.embeddings import TextEncoder, best_by_cosine
 
 
-def span_tokenize_with_trailing_newlines(text, nlp):
+def _process_chunk(chunk, offset, text, sent_spans, nlp, entity_spans=None):
+    """Helper to process a chunk of text for sentence tokenization."""
+    if not chunk:
+        return
+
+    chunk_entity_spans = []
+    if entity_spans:
+        for estart, eend in entity_spans:
+            if estart >= offset and eend <= offset + len(chunk):
+                chunk_entity_spans.append((estart - offset, eend - offset))
+
+    last_break = 0
+    spans_from_nlp = nlp.span_tokenize(chunk)
+    for _, end in spans_from_nlp:
+        should_break = True
+        if chunk_entity_spans:
+            for estart, eend in chunk_entity_spans:
+                if estart < end < eend:
+                    should_break = False
+                    break
+        if should_break:
+            abs_start = offset + last_break
+            abs_end = offset + end
+            while abs_start < abs_end and text[abs_start].isspace():
+                abs_start += 1
+            while abs_end > abs_start and text[abs_end - 1].isspace():
+                abs_end -= 1
+            if abs_start < abs_end:
+                sent_spans.append((abs_start, abs_end))
+            last_break = end
+
+    if last_break < len(chunk):
+        abs_start = offset + last_break
+        abs_end = offset + len(chunk)
+        while abs_start < abs_end and text[abs_start].isspace():
+            abs_start += 1
+        while abs_end > abs_start and text[abs_end - 1].isspace():
+            abs_end -= 1
+        if abs_start < abs_end:
+            sent_spans.append((abs_start, abs_end))
+
+
+def span_tokenize_with_trailing_newlines(text, nlp, entity_spans=None):
     """
     Tokenize text into sentence spans, treating punctuation and line breaks as sentence boundaries.
 
@@ -25,55 +67,26 @@ def span_tokenize_with_trailing_newlines(text, nlp):
     Args:
         text (str): The input passage.
         nlp (PunktSentenceTokenizer): Pre-trained NLTK sentence tokenizer.
-
-    Returns:
-        List[Tuple[int, int]]: List of (start, end) indices for each sentence
-        within the original text, without surrounding whitespace/newlines.
+        entity_spans (List[Tuple[int, int]], optional): List of (start, end) character
+            offsets of entities in the text. If provided, sentence splitting will be
+            avoided within these spans.
     """
     sent_spans = []
     offset = 0
-
-    # Split text by lines, but keep \n in the chunks
-    # Use regex to keep trailing newlines
     chunks = re.split(r"(\n+)", text)
-
     current_chunk = ""
+
     for part in chunks:
-        if part == "":
+        if not part:
             continue
         if re.fullmatch(r"\n+", part):
-            # Newline sequence: treat as a boundary, but DO NOT include it in spans.
-            if current_chunk:
-                for start, end in nlp.span_tokenize(current_chunk):
-                    abs_start = offset + start
-                    abs_end = offset + end
-                    # Trim leading/trailing whitespace from the original text
-                    while abs_start < abs_end and text[abs_start].isspace():
-                        abs_start += 1
-                    while abs_end > abs_start and text[abs_end - 1].isspace():
-                        abs_end -= 1
-                    if abs_start < abs_end:
-                        sent_spans.append((abs_start, abs_end))
-            # Advance offset over both the chunk and the newline(s)
+            _process_chunk(current_chunk, offset, text, sent_spans, nlp, entity_spans)
             offset += len(current_chunk) + len(part)
             current_chunk = ""
         else:
-            # Non-newline text: accumulate until a newline or the end
             current_chunk += part
 
-    # Handle any remaining chunk
-    if current_chunk:
-        for start, end in nlp.span_tokenize(current_chunk):
-            abs_start = offset + start
-            abs_end = offset + end
-            # Trim leading/trailing whitespace from the original text
-            while abs_start < abs_end and text[abs_start].isspace():
-                abs_start += 1
-            while abs_end > abs_start and text[abs_end - 1].isspace():
-                abs_end -= 1
-            if abs_start < abs_end:
-                sent_spans.append((abs_start, abs_end))
-        offset += len(current_chunk)
+    _process_chunk(current_chunk, offset, text, sent_spans, nlp, entity_spans)
 
     return sent_spans
 
@@ -135,8 +148,19 @@ def parse_text(
         if natural:
             passage_text = clean_natural(passage_text)
 
+        # Collect entity spans to avoid sentence splitting inside them
+        entity_spans = []
+        for entity in data.get("entities", []):
+            for start, end in entity.get("offsets", []):
+                if start_offset_passage <= start < end_offset_passage:
+                    rel_start = start - start_offset_passage
+                    rel_end = end - start_offset_passage
+                    entity_spans.append((rel_start, rel_end))
+
         # Compute sentence spans within the passage text
-        sent_spans = span_tokenize_with_trailing_newlines(passage_text, nlp)
+        sent_spans = span_tokenize_with_trailing_newlines(
+            passage_text, nlp, entity_spans=entity_spans
+        )
 
         # Pre-extract sentences with text for quick access
         sentences = [
@@ -160,6 +184,7 @@ def parse_text(
 
             rel_start = global_start - start_offset_passage
             # rel_end isn't strictly required for sentence selection, but computed for completeness
+            # global_end = entity["offsets"][0][1]
             # rel_end = global_end - start_offset_passage
 
             entity_text = " ".join(entity["text"])
