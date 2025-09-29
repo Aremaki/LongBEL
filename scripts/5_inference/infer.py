@@ -1,4 +1,5 @@
 import argparse
+import gc
 import os
 import pickle
 import sys
@@ -14,6 +15,15 @@ from syncabel.models import MT5_GENRE, Bart_GENRE, MBart_GENRE
 from syncabel.trie import Trie
 
 sys.setrecursionlimit(5000)
+
+
+def print_memory(tag=""):
+    allocated = torch.cuda.memory_allocated() / 1e9  # actively used by tensors
+    reserved = torch.cuda.memory_reserved() / 1e9  # reserved by allocator
+    free = torch.cuda.get_device_properties(0).total_memory / 1e9 - reserved
+    print(
+        f"[{tag}] Allocated: {allocated:.2f} GB | Reserved: {reserved:.2f} GB | Free: {free:.2f} GB"
+    )
 
 
 def load_pickle(file_path):
@@ -37,6 +47,7 @@ def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
         if "CUDA out of memory" in str(e) and len(sources) > 1:
             print(f"OOM with batch size {len(sources)} → splitting in half")
             torch.cuda.empty_cache()
+            gc.collect()
             half = len(sources) // 2
             left = safe_generation(model, sources[:half], num_beams)
             right = safe_generation(model, sources[half:], num_beams)
@@ -162,12 +173,14 @@ def main(
     for i in tqdm(
         range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
     ):
+        print_memory("before batch")
         batch_sources = test_data["source"][i : i + batch_size]
         batch_output_sentences = safe_generation(model, batch_sources, num_beams)
         output_sentences.extend(batch_output_sentences)
-
-        print(f"Step {i}: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+        print_memory("after batch")
         torch.cuda.empty_cache()
+        gc.collect()
+        print_memory("after empty_cache")
 
     print(f"Generated {len(output_sentences)} sentences without constraint.")
 
@@ -183,6 +196,7 @@ def main(
         range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
     ):
         batch_sources = test_data["source"][i : i + batch_size]
+        print_memory("before batch")
         prefix_allowed_tokens_fn = get_prefix_allowed_tokens_fn(
             model,
             batch_sources,
@@ -195,9 +209,10 @@ def main(
             prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
         )
         output_sentences.extend(batch_output_sentences)
-
-        print(f"Step {i}: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+        print_memory("after batch")
         torch.cuda.empty_cache()
+        gc.collect()
+        print_memory("after empty_cache")
     print(f"Generated {len(output_sentences)} sentences with constraint.")
 
     # Save results
