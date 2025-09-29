@@ -7,6 +7,7 @@ from pathlib import Path
 
 import polars as pl
 import torch
+import torch.multiprocessing as mp
 from tqdm import tqdm
 from transformers import GenerationConfig  # type: ignore
 
@@ -40,72 +41,103 @@ def load_pickle(file_path):
         return pickle.load(file)
 
 
+def inference_worker(
+    sources, batch_size, model, num_beams, prefix_allowed_tokens_fn, return_queue
+):
+    """
+    This runs in a child process. If it OOMs, the process dies but the parent survives.
+    """
+    print_memory("start inference_worker")
+    if batch_size == len(sources):
+        try:
+            with torch.no_grad():
+                results = model.sample(
+                    sources,
+                    prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
+                    num_beams=num_beams,
+                    num_return_sequences=1,
+                )
+            return_queue.put(("ok", results))
+
+        except RuntimeError as e:
+            if "CUDA out of memory" in str(e):
+                return_queue.put(("oom", None))
+            else:
+                return_queue.put(("error", str(e)))
+
+        finally:
+            # cleanup before the process exits
+            simple_reset_memory()
+        print_memory("end inference_worker")
+    else:
+        results = []
+        try:
+            for i in range(0, len(sources), batch_size):
+                batch_sources = sources[i : i + batch_size]
+                with torch.no_grad():
+                    batch_results = model.sample(
+                        batch_sources,
+                        prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
+                        num_beams=num_beams,
+                        num_return_sequences=1,
+                    )
+                results.extend(batch_results)
+                simple_reset_memory()
+            return_queue.put(("ok", results))
+        except RuntimeError as e:
+            if "CUDA out of memory" in str(e):
+                return_queue.put(("oom", None))
+            else:
+                return_queue.put(("error", str(e)))
+        finally:
+            # cleanup before the process exits
+            simple_reset_memory()
+        print_memory("end inference_worker")
+
+
 def safe_generation(
     model,
     sources,
     num_beams,
-    model_name,
-    full_path,
-    device,
-    best,
     prefix_allowed_tokens_fn=None,
+    max_retries=3,
 ):
     """
     Ultra-conservative generation with multiple recovery strategies
     """
-    try:
-        print_memory("Before Generation")
-        with torch.no_grad():
-            results = model.sample(
+    batch_size = len(sources)
+    for attempt in range(max_retries):
+        print(f"[Attempt {attempt + 1}] Trying batch size {batch_size}")
+        ctx = mp.get_context("spawn")
+        return_queue = ctx.Queue()
+        p = ctx.Process(
+            target=inference_worker,
+            args=(
                 sources,
-                prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
-                num_beams=num_beams,
-                num_return_sequences=1,
-            )
-        print_memory("After Generation")
-        simple_reset_memory()
-        print_memory("After Simple Reset")
-        return results
-    except RuntimeError as e:
-        if "CUDA out of memory" in str(e):
-            print(f"OOM error for batch of size {len(sources)}")
-            print_memory("OOM Error - Before simple cleanup")
-            simple_reset_memory()
-            print_memory("OOM Error - After simple cleanup")
-            # Delete Traceback to avoid memory leak
-            # Break the traceback reference
-            tb = sys.exc_info()[2]
-            del tb
-            del e
-            simple_reset_memory()
-            print_memory("OOM Error - After traceback delete")
-            print("Processing items individually...")
-            results = []
-            for i, single_source in enumerate(sources):
-                try:
-                    with torch.no_grad():
-                        print_memory(f"Before item {i} Generation")
-                        single_result = model.sample(
-                            [single_source],
-                            prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
-                            num_beams=num_beams,
-                            num_return_sequences=1,
-                        )
-                        print_memory(f"After item {i} Generation")
-                        simple_reset_memory()
-                        print_memory(f"After item {i} Simple Reset")
-                    results.extend(single_result)
-                except RuntimeError as single_e:
-                    if "CUDA out of memory" in str(single_e):
-                        print(f"Single item {i} failed")
-                        print_memory(f"Error on item {i}")
-                        print(single_source)
-                        raise single_e
-                    else:
-                        raise single_e
-            return results
+                batch_size,
+                model,
+                num_beams,
+                prefix_allowed_tokens_fn,
+                return_queue,
+            ),
+        )
+        p.start()
+        p.join()
+        if not return_queue.empty():
+            status, data = return_queue.get()
+            if status == "ok":
+                return data
+            elif status == "oom":
+                print(f"OOM at batch size {batch_size}, retrying with smaller batch...")
+                batch_size = max(1, batch_size // 2)
+                if attempt == max_retries - 1:
+                    batch_size = 1  # last attempt with batch size 1
+            elif status == "error":
+                raise RuntimeError(f"Inference error: {data}")
         else:
-            raise e
+            raise RuntimeError("Subprocess crashed with no message.")
+
+    raise RuntimeError("Failed after max retries.")
 
 
 def load_model(model_name, full_path, device, best):
@@ -239,10 +271,6 @@ def main(
             sources=batch_sources,
             num_beams=num_beams,
             prefix_allowed_tokens_fn=None,
-            model_name=model_name,
-            full_path=full_path,
-            device=device,
-            best=best,
         )
         output_sentences.extend(batch_output_sentences)  # type: ignore
 
@@ -270,10 +298,6 @@ def main(
             sources=batch_sources,
             num_beams=num_beams,
             prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
-            model_name=model_name,
-            full_path=full_path,
-            device=device,
-            best=best,
         )
         output_sentences.extend(batch_output_sentences)  # type: ignore
         del batch_output_sentences
