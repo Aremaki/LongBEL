@@ -37,16 +37,15 @@ def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
     """
     try:
         with torch.no_grad():
-            # Use more aggressive memory settings
-            torch.cuda.empty_cache()
-            gc.collect()
-
-            return model.sample(
+            results = model.sample(
                 sources,
                 prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
                 num_beams=num_beams,
                 num_return_sequences=1,
             )
+        torch.cuda.empty_cache()
+        gc.collect()
+        return results
     except RuntimeError as e:
         if "CUDA out of memory" in str(e):
             print(f"OOM error for batch of size {len(sources)}")
@@ -60,12 +59,13 @@ def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
             results = []
             for i, single_source in enumerate(sources):
                 try:
-                    single_result = model.sample(
-                        single_source,
-                        prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
-                        num_beams=num_beams,
-                        num_return_sequences=1,
-                    )
+                    with torch.no_grad():
+                        single_result = model.sample(
+                            [single_source],
+                            prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
+                            num_beams=num_beams,
+                            num_return_sequences=1,
+                        )
                     results.extend(single_result)
                     torch.cuda.empty_cache()
                     gc.collect()
@@ -74,6 +74,8 @@ def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
                         print(f"Single item {i} failed")
                         print_memory(f"Error on item {i}")
                         print(single_source)
+                        raise single_e
+                    else:
                         raise single_e
             return results
         else:
@@ -197,14 +199,9 @@ def main(
     for i in tqdm(
         range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
     ):
-        print_memory("before batch")
         batch_sources = test_data["source"][i : i + batch_size]
         batch_output_sentences = safe_generation(model, batch_sources, num_beams)
         output_sentences.extend(batch_output_sentences)  # type: ignore
-        print_memory("after batch")
-        torch.cuda.empty_cache()
-        gc.collect()
-        print_memory("after empty_cache")
 
     print(f"Generated {len(output_sentences)} sentences without constraint.")
 
@@ -220,7 +217,6 @@ def main(
         range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
     ):
         batch_sources = test_data["source"][i : i + batch_size]
-        print_memory("before batch")
         prefix_allowed_tokens_fn = get_prefix_allowed_tokens_fn(
             model,
             batch_sources,
@@ -233,10 +229,6 @@ def main(
             prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
         )
         output_sentences.extend(batch_output_sentences)  # type: ignore
-        print_memory("after batch")
-        torch.cuda.empty_cache()
-        gc.collect()
-        print_memory("after empty_cache")
     print(f"Generated {len(output_sentences)} sentences with constraint.")
 
     # Save results
