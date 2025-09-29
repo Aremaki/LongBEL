@@ -27,46 +27,6 @@ def simple_reset_memory():
         torch.cuda.empty_cache()
 
 
-def complete_reset_memory(model, verbose=True):
-    """
-    Safely clear all generation-related memory for a transformer model
-    to recover from OOMs during beam search or sampling.
-    """
-    if verbose:
-        print("💥 Clearing generation memory...")
-
-    # --- Model-level caches ---
-    for attr in [
-        "_beam_search_state",
-        "_cache",
-        "beam_scorer",
-        "_beam_processor",
-        "_generated_sequences",
-        "past_key_values",
-    ]:
-        if hasattr(model, attr):
-            setattr(model, attr, None)
-            if verbose:
-                print(f"Cleared {attr}")
-
-    # --- Layer-level attention caches ---
-    for module in model.modules():
-        for attr in ["past_key_values", "_attention_cache", "past_key_value"]:
-            if hasattr(module, attr):
-                setattr(module, attr, None)
-
-    # --- Force garbage collection ---
-    gc.collect()
-
-    # --- Clear CUDA memory ---
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
-
-    if verbose:
-        print("✅ Generation memory cleared.")
-
-
 def print_memory(tag=""):
     allocated = torch.cuda.memory_allocated() / 1e9  # actively used by tensors
     reserved = torch.cuda.memory_reserved() / 1e9  # reserved by allocator
@@ -81,7 +41,16 @@ def load_pickle(file_path):
         return pickle.load(file)
 
 
-def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
+def safe_generation(
+    model,
+    sources,
+    num_beams,
+    model_name,
+    full_path,
+    device,
+    best,
+    prefix_allowed_tokens_fn=None,
+):
     """
     Ultra-conservative generation with multiple recovery strategies
     """
@@ -104,8 +73,13 @@ def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
             print_memory("OOM Error - Before simple cleanup")
             simple_reset_memory()
             print_memory("OOM Error - After simple cleanup")
-            complete_reset_memory(model)
+            # Delete model to clear any fragmented memory
+            del model
+            torch.cuda.synchronize()
+            simple_reset_memory()
             print_memory("OOM Error - After complete cleanup")
+            # Reload the model
+            model, _ = load_model(model_name, full_path, device, best)
             print("Processing items individually...")
             results = []
             for i, single_source in enumerate(sources):
@@ -121,11 +95,7 @@ def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
                         print_memory("After item {i} Generation")
                         simple_reset_memory()
                         print_memory("After item {i} Simple Reset")
-                        complete_reset_memory(model)
-                        print_memory("After item {i} Complete Reset")
                     results.extend(single_result)
-                    # Aggressive cleanup after each item
-
                 except RuntimeError as single_e:
                     if "CUDA out of memory" in str(single_e):
                         print(f"Single item {i} failed")
@@ -139,31 +109,7 @@ def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
             raise e
 
 
-def main(
-    model_name,
-    num_beams,
-    best,
-    dataset_name,
-    selection_method,
-    with_group=False,
-    augmented_data=False,
-):
-    # Set device
-    torch.cuda.empty_cache()
-    gc.collect()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    model_path = (
-        Path("models")
-        / "NED"
-        / f"{dataset_name}_{'augmented' if augmented_data else 'original'}_{selection_method}{'_with_group' if with_group else ''}"
-        / model_name
-    )
-    if best:
-        full_path = model_path / "model_best"
-    else:
-        full_path = model_path / "model_last"
-
+def load_model(model_name, full_path, device, best):
     if "mt5" in model_name:
         model = MT5_GENRE.from_pretrained(full_path).eval().to(device)  # type: ignore
         decoder_start_token_id = 0
@@ -193,6 +139,37 @@ def main(
             forced_eos_token_id=2,
             pad_token_id=1,
         )
+    return model, decoder_start_token_id
+
+
+def main(
+    model_name,
+    num_beams,
+    best,
+    dataset_name,
+    selection_method,
+    with_group=False,
+    augmented_data=False,
+):
+    # Set device
+    torch.cuda.empty_cache()
+    gc.collect()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    model_path = (
+        Path("models")
+        / "NED"
+        / f"{dataset_name}_{'augmented' if augmented_data else 'original'}_{selection_method}{'_with_group' if with_group else ''}"
+        / model_name
+    )
+    if best:
+        full_path = model_path / "model_best"
+    else:
+        full_path = model_path / "model_last"
+    model, decoder_start_token_id = load_model(model_name, full_path, device, best)
+    print(
+        f"Model {model_name} {'best' if best else 'last'} checkpoint is loaded to {device}"
+    )
 
     # Load data
     # Load and preprocess data
@@ -258,7 +235,16 @@ def main(
         range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
     ):
         batch_sources = test_data["source"][i : i + batch_size]
-        batch_output_sentences = safe_generation(model, batch_sources, num_beams)
+        batch_output_sentences = safe_generation(
+            model=model,
+            sources=batch_sources,
+            num_beams=num_beams,
+            prefix_allowed_tokens_fn=None,
+            model_name=model_name,
+            full_path=full_path,
+            device=device,
+            best=best,
+        )
         output_sentences.extend(batch_output_sentences)  # type: ignore
 
     print(f"Generated {len(output_sentences)} sentences without constraint.")
@@ -281,10 +267,14 @@ def main(
             candidates_trie=trie_legal_tokens,
         )
         batch_output_sentences = safe_generation(
-            model,
-            batch_sources,
-            num_beams,
+            model=model,
+            sources=batch_sources,
+            num_beams=num_beams,
             prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
+            model_name=model_name,
+            full_path=full_path,
+            device=device,
+            best=best,
         )
         output_sentences.extend(batch_output_sentences)  # type: ignore
         del batch_output_sentences
