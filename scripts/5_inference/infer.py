@@ -3,7 +3,6 @@ import gc
 import os
 import pickle
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 import polars as pl
@@ -78,6 +77,7 @@ def safe_generation(
             tb = sys.exc_info()[2]
             del tb
             del e
+            simple_reset_memory()
             print_memory("OOM Error - After traceback delete")
             print("Processing items individually...")
             results = []
