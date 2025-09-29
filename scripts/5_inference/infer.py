@@ -21,6 +21,30 @@ def load_pickle(file_path):
         return pickle.load(file)
 
 
+def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
+    """
+    Try to sample from model with recursive halving if OOM.
+    """
+    try:
+        with torch.no_grad():
+            return model.sample(
+                sources,
+                prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
+                num_beams=num_beams,
+                num_return_sequences=1,
+            )
+    except RuntimeError as e:
+        if "CUDA out of memory" in str(e) and len(sources) > 1:
+            print(f"OOM with batch size {len(sources)} → splitting in half")
+            torch.cuda.empty_cache()
+            half = len(sources) // 2
+            left = safe_generation(model, sources[:half], num_beams)
+            right = safe_generation(model, sources[half:], num_beams)
+            return left + right
+        else:
+            raise  # rethrow unexpected errors
+
+
 def main(
     model_name,
     num_beams,
@@ -134,17 +158,17 @@ def main(
 
     # Perform inference without constraint
     output_sentences = []
-    batch_size = 16
+    batch_size = 64
     for i in tqdm(
         range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
     ):
         batch_sources = test_data["source"][i : i + batch_size]
-        batch_output_sentences = model.sample(
-            batch_sources,
-            num_beams=num_beams,
-            num_return_sequences=1,
-        )
+        batch_output_sentences = safe_generation(model, batch_sources, num_beams)
         output_sentences.extend(batch_output_sentences)
+
+        print(f"Step {i}: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+        torch.cuda.empty_cache()
+
     print(f"Generated {len(output_sentences)} sentences without constraint.")
 
     # Save results
@@ -154,7 +178,7 @@ def main(
 
     # Perform inference with constraint
     output_sentences = []
-    batch_size = 8
+    batch_size = 64
     for i in tqdm(
         range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
     ):
@@ -164,13 +188,16 @@ def main(
             batch_sources,
             candidates_trie=trie_legal_tokens,
         )
-        batch_output_sentences = model.sample(
+        batch_output_sentences = safe_generation(
+            model,
             batch_sources,
+            num_beams,
             prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
-            num_beams=num_beams,
-            num_return_sequences=1,
         )
         output_sentences.extend(batch_output_sentences)
+
+        print(f"Step {i}: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+        torch.cuda.empty_cache()
     print(f"Generated {len(output_sentences)} sentences with constraint.")
 
     # Save results
