@@ -18,22 +18,13 @@ from syncabel.trie import Trie
 sys.setrecursionlimit(5000)
 
 
-def simple_reset_memory():
+def clear_gpu_memory():
     """
     Basic cleanup to free up memory after generation.
     """
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-
-
-def print_memory(tag=""):
-    allocated = torch.cuda.memory_allocated() / 1e9  # actively used by tensors
-    reserved = torch.cuda.memory_reserved() / 1e9  # reserved by allocator
-    free = torch.cuda.get_device_properties(0).total_memory / 1e9 - reserved
-    print(
-        f"[{tag}] Allocated: {allocated:.2f} GB | Reserved: {reserved:.2f} GB | Free: {free:.2f} GB"
-    )
 
 
 def load_pickle(file_path):
@@ -47,7 +38,6 @@ def inference_worker(
     """
     This runs in a child process. If it OOMs, the process dies but the parent survives.
     """
-    print_memory("start inference_worker")
     if batch_size == len(sources):
         try:
             with torch.no_grad():
@@ -75,8 +65,7 @@ def inference_worker(
 
         finally:
             # cleanup before the process exits
-            simple_reset_memory()
-        print_memory("end inference_worker")
+            clear_gpu_memory()
     else:
         results = []
         try:
@@ -97,8 +86,11 @@ def inference_worker(
                         num_beams=num_beams,
                         num_return_sequences=1,
                     )
+                    # convert to list if single string
+                    if isinstance(batch_results, str):
+                        batch_results = [batch_results]
                 results.extend(batch_results)
-                simple_reset_memory()
+                clear_gpu_memory()
             return_queue.put(("ok", results))
         except RuntimeError as e:
             if "CUDA out of memory" in str(e):
@@ -107,8 +99,7 @@ def inference_worker(
                 return_queue.put(("error", str(e)))
         finally:
             # cleanup before the process exits
-            simple_reset_memory()
-        print_memory("end inference_worker")
+            clear_gpu_memory()
 
 
 def safe_generation(
@@ -116,7 +107,7 @@ def safe_generation(
     sources,
     num_beams,
     trie_legal_tokens=None,
-    max_retries=5,
+    max_retries=3,
 ):
     """
     Ultra-conservative generation with multiple recovery strategies
@@ -145,8 +136,8 @@ def safe_generation(
                 return data
             elif status == "oom":
                 print(f"OOM at batch size {batch_size}, retrying with smaller batch...")
-                batch_size = max(1, batch_size // 2)
-                if attempt == max_retries - 1:
+                batch_size = max(1, batch_size // 4)
+                if attempt == max_retries - 2:
                     batch_size = 1  # last attempt with batch size 1
             elif status == "error":
                 raise RuntimeError(f"Inference error: {data}")
@@ -277,7 +268,7 @@ def main(
 
     # Perform inference without constraint
     output_sentences = []
-    batch_size = 128
+    batch_size = 256
     for i in tqdm(
         range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
     ):
@@ -299,7 +290,7 @@ def main(
 
     # Perform inference with constraint
     output_sentences = []
-    batch_size = 128
+    batch_size = 256
     for i in tqdm(
         range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
     ):
