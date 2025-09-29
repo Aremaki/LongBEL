@@ -77,7 +77,7 @@ def safe_generation(
             del model
             torch.cuda.synchronize()
             simple_reset_memory()
-            print_memory("OOM Error - After complete cleanup")
+            print_memory("OOM Error - After complete Model deletion")
             # Reload the model
             model, _ = load_model(model_name, full_path, device, best)
             print("Processing items individually...")
@@ -139,6 +139,9 @@ def load_model(model_name, full_path, device, best):
             forced_eos_token_id=2,
             pad_token_id=1,
         )
+    print(
+        f"Model {model_name} {'best' if best else 'last'} checkpoint is loaded to {device}"
+    )
     return model, decoder_start_token_id
 
 
@@ -167,9 +170,6 @@ def main(
     else:
         full_path = model_path / "model_last"
     model, decoder_start_token_id = load_model(model_name, full_path, device, best)
-    print(
-        f"Model {model_name} {'best' if best else 'last'} checkpoint is loaded to {device}"
-    )
 
     # Load data
     # Load and preprocess data
