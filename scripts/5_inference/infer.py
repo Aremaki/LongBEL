@@ -50,9 +50,12 @@ def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
         if "CUDA out of memory" in str(e):
             print(f"OOM error for batch of size {len(sources)}")
 
+            print(f"Batch sources: {sources[:2]}")
+            print_memory("Error before cleanup")
             # Aggressive cleanup
             torch.cuda.empty_cache()
             gc.collect()
+            print_memory("Error after cleanup")
 
             # Try single item processing
             print("Processing items individually...")
