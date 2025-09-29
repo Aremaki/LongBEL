@@ -27,100 +27,6 @@ def simple_reset_memory():
         torch.cuda.empty_cache()
 
 
-def find_tensor_holders():
-    """Find what objects are holding references to the large tensors"""
-    print("🔍 FINDING TENSOR HOLDERS...")
-
-    tensor_holders = defaultdict(list)
-
-    for obj in gc.get_objects():
-        try:
-            # Check if this object contains references to our problematic tensors
-            if hasattr(obj, "__dict__"):
-                for attr_name, attr_value in obj.__dict__.items():
-                    if (
-                        torch.is_tensor(attr_value)
-                        and attr_value.is_cuda
-                        and attr_value.shape == torch.Size([320, 250112])
-                    ):
-                        tensor_holders[f"{type(obj).__name__}.{attr_name}"].append(
-                            attr_value
-                        )
-
-            # Also check if it's a container with our tensors
-            elif isinstance(obj, (list, tuple, dict)):
-                for item in obj if not isinstance(obj, dict) else obj.values():
-                    if (
-                        torch.is_tensor(item)
-                        and item.is_cuda
-                        and item.shape == torch.Size([320, 250112])
-                    ):
-                        tensor_holders[f"{type(obj).__name__} container"].append(item)
-
-        except Exception as e:
-            continue
-
-    print("TENSOR HOLDERS FOUND:")
-    for holder, tensors in tensor_holders.items():
-        print(f"  {holder}: {len(tensors)} tensors")
-
-    return tensor_holders
-
-
-def nuclear_reset_with_detection():
-    """Nuclear reset that finds and clears ALL references"""
-    print("💣 NUCLEAR RESET WITH DETECTION")
-
-    # First, find what's holding the tensors
-    holders = find_tensor_holders()
-    print(f"Found {len(holders)} types of holders.")
-    print(holders)
-
-    # Clear common culprits
-    culprits_to_clear = [
-        "generation_utils",
-        "beam_search",
-        "beam_scorer",
-        "model",
-        "tokenizer",
-        "prefix_allowed_tokens_fn",
-    ]
-
-    for culprit in culprits_to_clear:
-        if culprit in globals():
-            print(f"Deleting global: {culprit}")
-            del globals()[culprit]
-
-    # Import common modules that might cache tensors and clear them
-    modules_to_reload = [
-        "transformers.generation.utils",
-        "transformers.generation.beam_search",
-        "transformers.generation.logits_process",
-    ]
-
-    for module_name in modules_to_reload:
-        if module_name in sys.modules:
-            print(f"Reloading module: {module_name}")
-            import importlib
-
-            importlib.reload(sys.modules[module_name])
-
-    # Now delete the model
-    global model
-    if "model" in globals():
-        print("Deleting model...")
-        del model  # type: ignore
-
-    # Force multiple rounds of GC
-    for _ in range(5):
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
-
-    print_memory("After nuclear reset")
-
-
 def print_memory(tag=""):
     allocated = torch.cuda.memory_allocated() / 1e9  # actively used by tensors
     reserved = torch.cuda.memory_reserved() / 1e9  # reserved by allocator
@@ -167,15 +73,12 @@ def safe_generation(
             print_memory("OOM Error - Before simple cleanup")
             simple_reset_memory()
             print_memory("OOM Error - After simple cleanup")
-            # Delete model to clear any fragmented memory
-            del model
-            torch.cuda.synchronize()
-            simple_reset_memory()
-            print_memory("OOM Error - After complete Model deletion")
-            nuclear_reset_with_detection()
-            # Reload the model
-            model, _ = load_model(model_name, full_path, device, best)
-            print_memory("OOM Error - After Model Reload")
+            # Delete Traceback to avoid memory leak
+            # Break the traceback reference
+            tb = sys.exc_info()[2]
+            del tb
+            del e
+            print_memory("OOM Error - After traceback delete")
             print("Processing items individually...")
             results = []
             for i, single_source in enumerate(sources):
