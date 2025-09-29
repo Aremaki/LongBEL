@@ -42,7 +42,7 @@ def load_pickle(file_path):
 
 
 def inference_worker(
-    sources, batch_size, model, num_beams, prefix_allowed_tokens_fn, return_queue
+    sources, batch_size, model, num_beams, trie_legal_tokens, return_queue
 ):
     """
     This runs in a child process. If it OOMs, the process dies but the parent survives.
@@ -51,6 +51,14 @@ def inference_worker(
     if batch_size == len(sources):
         try:
             with torch.no_grad():
+                if trie_legal_tokens is not None:
+                    prefix_allowed_tokens_fn = get_prefix_allowed_tokens_fn(
+                        model,
+                        sources,
+                        candidates_trie=trie_legal_tokens,
+                    )
+                else:
+                    prefix_allowed_tokens_fn = None
                 results = model.sample(
                     sources,
                     prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
@@ -75,6 +83,14 @@ def inference_worker(
             for i in range(0, len(sources), batch_size):
                 batch_sources = sources[i : i + batch_size]
                 with torch.no_grad():
+                    if trie_legal_tokens is not None:
+                        prefix_allowed_tokens_fn = get_prefix_allowed_tokens_fn(
+                            model,
+                            batch_sources,
+                            candidates_trie=trie_legal_tokens,
+                        )
+                    else:
+                        prefix_allowed_tokens_fn = None
                     batch_results = model.sample(
                         batch_sources,
                         prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
@@ -99,8 +115,8 @@ def safe_generation(
     model,
     sources,
     num_beams,
-    prefix_allowed_tokens_fn=None,
-    max_retries=3,
+    trie_legal_tokens=None,
+    max_retries=5,
 ):
     """
     Ultra-conservative generation with multiple recovery strategies
@@ -117,7 +133,7 @@ def safe_generation(
                 batch_size,
                 model,
                 num_beams,
-                prefix_allowed_tokens_fn,
+                trie_legal_tokens,
                 return_queue,
             ),
         )
@@ -270,7 +286,7 @@ def main(
             model=model,
             sources=batch_sources,
             num_beams=num_beams,
-            prefix_allowed_tokens_fn=None,
+            trie_legal_tokens=None,
         )
         output_sentences.extend(batch_output_sentences)  # type: ignore
 
@@ -288,16 +304,11 @@ def main(
         range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
     ):
         batch_sources = test_data["source"][i : i + batch_size]
-        prefix_allowed_tokens_fn = get_prefix_allowed_tokens_fn(
-            model,
-            batch_sources,
-            candidates_trie=trie_legal_tokens,
-        )
         batch_output_sentences = safe_generation(
             model=model,
             sources=batch_sources,
             num_beams=num_beams,
-            prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
+            trie_legal_tokens=trie_legal_tokens,
         )
         output_sentences.extend(batch_output_sentences)  # type: ignore
         del batch_output_sentences
