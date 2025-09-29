@@ -33,10 +33,14 @@ def load_pickle(file_path):
 
 def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
     """
-    Try to sample from model with recursive halving if OOM.
+    Ultra-conservative generation with multiple recovery strategies
     """
     try:
         with torch.no_grad():
+            # Use more aggressive memory settings
+            torch.cuda.empty_cache()
+            gc.collect()
+
             return model.sample(
                 sources,
                 prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
@@ -44,16 +48,36 @@ def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
                 num_return_sequences=1,
             )
     except RuntimeError as e:
-        if "CUDA out of memory" in str(e) and len(sources) > 1:
-            print(f"OOM with batch size {len(sources)} → splitting in half")
+        if "CUDA out of memory" in str(e):
+            print(f"OOM error for batch of size {len(sources)}")
+
+            # Aggressive cleanup
             torch.cuda.empty_cache()
             gc.collect()
-            half = len(sources) // 2
-            left = safe_generation(model, sources[:half], num_beams)
-            right = safe_generation(model, sources[half:], num_beams)
-            return left + right
+
+            # Try single item processing
+            print("Processing items individually...")
+            results = []
+            for i, single_source in enumerate(sources):
+                try:
+                    single_result = model.sample(
+                        single_source,
+                        prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
+                        num_beams=num_beams,
+                        num_return_sequences=1,
+                    )
+                    results.extend(single_result)
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                except RuntimeError as single_e:
+                    if "CUDA out of memory" in str(single_e):
+                        print(f"Single item {i} failed")
+                        print_memory(f"Error on item {i}")
+                        print(single_source)
+                        raise single_e
+            return results
         else:
-            raise  # rethrow unexpected errors
+            raise e
 
 
 def main(
@@ -176,7 +200,7 @@ def main(
         print_memory("before batch")
         batch_sources = test_data["source"][i : i + batch_size]
         batch_output_sentences = safe_generation(model, batch_sources, num_beams)
-        output_sentences.extend(batch_output_sentences)
+        output_sentences.extend(batch_output_sentences)  # type: ignore
         print_memory("after batch")
         torch.cuda.empty_cache()
         gc.collect()
@@ -208,7 +232,7 @@ def main(
             num_beams,
             prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
         )
-        output_sentences.extend(batch_output_sentences)
+        output_sentences.extend(batch_output_sentences)  # type: ignore
         print_memory("after batch")
         torch.cuda.empty_cache()
         gc.collect()
