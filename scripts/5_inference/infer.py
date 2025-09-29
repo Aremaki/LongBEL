@@ -18,6 +18,160 @@ from syncabel.trie import Trie
 sys.setrecursionlimit(5000)
 
 
+def print_kv_cache_memory_usage(model, tag=""):
+    """Print memory usage of KV cache in the model"""
+    print(f"\n{'=' * 60}")
+    print(f"KV CACHE MEMORY USAGE - {tag}")
+    print(f"{'=' * 60}")
+
+    total_kv_memory = 0
+    has_kv_cache = False
+
+    # Check if model is in inference mode with past_key_values
+    if hasattr(model, "past_key_values") and model.past_key_values is not None:
+        has_kv_cache = True
+        print("Model has past_key_values attribute")
+
+    # Iterate through model layers to find KV cache
+    for name, module in model.named_modules():
+        if hasattr(module, "past_key_value") and module.past_key_value is not None:
+            has_kv_cache = True
+            layer_kv_memory = 0
+
+            if isinstance(module.past_key_value, (list, tuple)):
+                for i, kv_tensor in enumerate(module.past_key_value):
+                    if (
+                        kv_tensor is not None
+                        and torch.is_tensor(kv_tensor)
+                        and kv_tensor.is_cuda
+                    ):
+                        kv_memory = (
+                            kv_tensor.element_size() * kv_tensor.nelement() / 1e9
+                        )
+                        layer_kv_memory += kv_memory
+                        print(
+                            f"Layer {name} - KV[{i}]: {kv_tensor.size()} | Memory: {kv_memory:.4f} GB"
+                        )
+
+            total_kv_memory += layer_kv_memory
+
+    # Check for past_key_values in model's state
+    if hasattr(model, "past_key_values") and model.past_key_values is not None:
+        model_kv_memory = 0
+        if isinstance(model.past_key_values, (list, tuple)):
+            for layer_idx, layer_past in enumerate(model.past_key_values):
+                if layer_past is not None:
+                    for kv_idx, kv_tensor in enumerate(layer_past):
+                        if (
+                            kv_tensor is not None
+                            and torch.is_tensor(kv_tensor)
+                            and kv_tensor.is_cuda
+                        ):
+                            kv_memory = (
+                                kv_tensor.element_size() * kv_tensor.nelement() / 1e9
+                            )
+                            model_kv_memory += kv_memory
+                            print(
+                                f"Model past_key_values - Layer {layer_idx} KV[{kv_idx}]: {kv_tensor.size()} | Memory: {kv_memory:.4f} GB"
+                            )
+
+        total_kv_memory += model_kv_memory
+
+    if not has_kv_cache:
+        print(
+            "No KV cache found - model might not be using caching or is in training mode"
+        )
+    else:
+        print(f"{'Total KV Cache Memory:':45} {total_kv_memory:.4f} GB")
+
+    print(f"{'=' * 60}")
+    return total_kv_memory
+
+
+def clear_kv_cache(model):
+    """Clear the KV cache from the model"""
+    # Clear model-level past_key_values
+    if hasattr(model, "past_key_values"):
+        model.past_key_values = None
+
+    # Clear module-level past_key_value
+    for module in model.modules():
+        if hasattr(module, "past_key_value"):
+            module.past_key_value = None
+
+    # For newer transformer versions, also clear _past_key_values
+    if hasattr(model, "_past_key_values"):
+        model._past_key_values = None
+
+    print("✅ KV cache cleared")
+
+
+def analyze_generation_memory_breakdown(model, inputs, generation_outputs=None):
+    """Analyze memory breakdown during generation"""
+    print(f"\n{'=' * 80}")
+    print("GENERATION MEMORY BREAKDOWN")
+    print(f"{'=' * 80}")
+
+    # Model parameters memory
+    model_memory = (
+        sum(p.element_size() * p.nelement() for p in model.parameters() if p.is_cuda)
+        / 1e9
+    )
+
+    # Input memory
+    input_memory = 0
+    if isinstance(inputs, dict):
+        for key, tensor in inputs.items():
+            if torch.is_tensor(tensor) and tensor.is_cuda:
+                input_memory += tensor.element_size() * tensor.nelement() / 1e9
+    elif torch.is_tensor(inputs) and inputs.is_cuda:
+        input_memory = inputs.element_size() * inputs.nelement() / 1e9
+
+    # KV cache memory
+    kv_memory = print_kv_cache_memory_usage(model, "During analysis")
+
+    # Output memory (if provided)
+    output_memory = 0
+    if generation_outputs is not None:
+        if hasattr(generation_outputs, "sequences") and torch.is_tensor(
+            generation_outputs.sequences
+        ):
+            output_memory = (
+                generation_outputs.sequences.element_size()
+                * generation_outputs.sequences.nelement()
+                / 1e9
+            )
+
+        # Beam search scores memory
+        if hasattr(generation_outputs, "sequences_scores") and torch.is_tensor(
+            generation_outputs.sequences_scores
+        ):
+            scores_memory = (
+                generation_outputs.sequences_scores.element_size()
+                * generation_outputs.sequences_scores.nelement()
+                / 1e9
+            )
+            output_memory += scores_memory
+
+    print(f"{'Model Parameters:':30} {model_memory:8.4f} GB")
+    print(f"{'Input Tensors:':30} {input_memory:8.4f} GB")
+    print(f"{'KV Cache:':30} {kv_memory:8.4f} GB")
+    print(f"{'Output Tensors:':30} {output_memory:8.4f} GB")
+    print(
+        f"{'Total Estimated:':30} {model_memory + input_memory + kv_memory + output_memory:8.4f} GB"
+    )
+
+    # Compare with actual GPU memory
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1e9
+        print(f"{'Actual GPU Allocated:':30} {allocated:8.4f} GB")
+        print(
+            f"{'Difference:':30} {allocated - (model_memory + input_memory + kv_memory + output_memory):8.4f} GB"
+        )
+
+    print(f"{'=' * 80}")
+
+
 def get_tensor_memory_usage():
     """Get memory usage of all tensors currently in memory"""
     tensor_memory = defaultdict(list)
@@ -245,6 +399,7 @@ def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
     """
     try:
         print_memory("Before generation")
+        print_kv_cache_memory_usage(model, "Before generation")
         print_object_memory_summary("Before generation")
         print_tensor_memory_usage("Before generation")
         with torch.no_grad():
@@ -255,12 +410,14 @@ def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
                 num_return_sequences=1,
             )
         print_memory("After successful generation")
+        print_kv_cache_memory_usage(model, "After successful generation")
         print_object_memory_summary("After successful generation")
         print_tensor_memory_usage("After successful generation")
 
         # Clear memory immediately after generation
         clear_memory_comprehensive()
         print_memory("After cleanup")
+        print_kv_cache_memory_usage(model, "After cleanup")
         print_object_memory_summary("After cleanup")
         print_tensor_memory_usage("After cleanup")
         return results
@@ -275,7 +432,7 @@ def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
             large_tensors = find_large_tensors(0.01)  # Find tensors > 10MB
             print(f"Number of large tensors: {len(large_tensors)}")
             print_model_memory_usage(model, "OOM Error - Model State")
-
+            print_kv_cache_memory_usage(model, "OOM Error - KV Cache")
             # Aggressive cleanup
             clear_memory_comprehensive()
             # Detailed memory analysis at error time
@@ -284,6 +441,10 @@ def safe_generation(model, sources, num_beams, prefix_allowed_tokens_fn=None):
             large_tensors = find_large_tensors(0.01)  # Find tensors > 10MB
             print(f"Number of large tensors after cleanup: {len(large_tensors)}")
             print_model_memory_usage(model, "OOM Error after cleanup - Model State")
+            print_kv_cache_memory_usage(model, "OOM Error after cleanup - KV Cache")
+            clear_kv_cache(model)
+            print_memory("OOM Error - After cleanup and KV clear")
+            print_kv_cache_memory_usage(model, "After KV clear")
             # Try single item processing
             print("Processing items individually...")
             results = []
