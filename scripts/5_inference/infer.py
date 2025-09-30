@@ -17,15 +17,6 @@ from syncabel.trie import Trie
 sys.setrecursionlimit(5000)
 
 
-def clear_gpu_memory():
-    """
-    Basic cleanup to free up memory after generation.
-    """
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-
 def load_pickle(file_path):
     with open(file_path, "rb") as file:
         return pickle.load(file)
@@ -164,7 +155,6 @@ def main(
                 num_return_sequences=1,
             )
         output_sentences.extend(batch_output_sentences)  # type: ignore
-        clear_gpu_memory()
     print(f"Generated {len(output_sentences)} sentences without constraint.")
 
     # Save results
@@ -191,7 +181,6 @@ def main(
                 num_return_sequences=1,
             )
         output_sentences.extend(batch_output_sentences)  # type: ignore
-        clear_gpu_memory()
     print(f"Generated {len(output_sentences)} sentences with constraint.")
 
     # Save results
