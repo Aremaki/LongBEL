@@ -47,7 +47,6 @@ def prepare_dictionary_from_umls(umls_path: Path):
 
     logging.info(f"UMLS info saved to {umls_path / 'umls_info_encoder.pkl'}")
 
-    umls_df = umls_df.drop("GROUP")
     rename_map = {
         "CUI": "cui",
         "Title": "title",
