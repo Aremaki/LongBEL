@@ -37,13 +37,12 @@ def _get_end_to_end_prefix_allowed_tokens_fn(
     def prefix_allowed_tokens_fn(batch_id, sent):
         sent = sent.tolist()
         sem_type = sent_sem_type[batch_id]
-        tri_out = candidates_trie[
+        trie_out = candidates_trie[
             sem_type  # type: ignore
         ].get(sent)
-        if tri_out:
-            return tri_out
+        if trie_out:
+            return trie_out
         else:
             return [eos_token_id]
-        return tri_out
 
     return prefix_allowed_tokens_fn

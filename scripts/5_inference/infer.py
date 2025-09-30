@@ -256,7 +256,7 @@ def main(
             print(f"processing {category}")
             cat_legal_umls_token = legal_umls_token.filter(pl.col("GROUP") == category)
             trie_legal_tokens[category] = Trie([
-                [decoder_start_token_id] + model.tokenizer.encode(entity)[start_idx:-1]  # type: ignore
+                [decoder_start_token_id] + model.tokenizer.encode(entity)[start_idx:]  # type: ignore
                 for entity in cat_legal_umls_token["Entity"].to_list()
             ])
 
