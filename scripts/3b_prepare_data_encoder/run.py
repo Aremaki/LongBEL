@@ -15,9 +15,9 @@ def prepare_dictionary_from_umls(umls_path: Path):
     """Prepare dictionary pickle files from UMLS data for encoder training/eval."""
     umls_df = pl.read_parquet(umls_path / "all_disambiguated.parquet")
     umls_df = (
-        umls_df.group_by(["CUI", "Title", "GROUP", "CATEGORY"])
+        umls_df.group_by(["CUI", "Title", "GROUP"])
         .agg(pl.col("Entity").unique())
-        .sort("CATEGORY", "CUI")
+        .sort("GROUP", "CUI")
     )
     umls_df = umls_df.with_columns(
         description=pl.col("Title")
@@ -52,7 +52,7 @@ def prepare_dictionary_from_umls(umls_path: Path):
         "CUI": "cui",
         "Title": "title",
         "description": "description",
-        "CATEGORY": "type",
+        "GROUP": "type",
     }
 
     # Convert to list of dicts with renamed keys
