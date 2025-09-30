@@ -131,10 +131,13 @@ def main(
         for category in legal_umls_token["GROUP"].unique().to_list():
             print(f"processing {category}")
             cat_legal_umls_token = legal_umls_token.filter(pl.col("GROUP") == category)
-            trie_legal_tokens[category] = Trie([
-                [decoder_start_token_id] + model.tokenizer.encode(entity)[start_idx:]  # type: ignore
-                for entity in cat_legal_umls_token["Entity"].to_list()
-            ])
+            sequences = []
+            for entity in cat_legal_umls_token["Entity"].to_list():
+                sequences.append(
+                    [decoder_start_token_id]
+                    + model.tokenizer.encode(" " + entity)[start_idx:]  # type: ignore
+                )
+            trie_legal_tokens[category] = Trie(sequences)
 
         # Save it
         # Create directory if it doesn't exist
