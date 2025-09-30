@@ -33,7 +33,7 @@ def structure_data(
         "GROUP": ent_types,
         "Entity_gold": target,
     })
-    df_pred = pl.DataFrame({"Mention": mentions, "GROUP": ent_types, "Entity": pred})
+    df_pred = pl.DataFrame({"GROUP": ent_types, "Entity": pred})
     umls_df = umls_df.select(["CUI", "Entity", "GROUP"]).with_columns(
         pl.col("Entity")
         .str.replace_all("\xa0", " ", literal=True)
@@ -48,12 +48,11 @@ def structure_data(
         right_on=["Entity", "GROUP"],
         how="left",
     ).rename({"CUI": "CUI_gold"})
-    df_pred = df_pred.join(umls_df, on=["Entity", "GROUP"], how="left", suffix="_pred")
-    result = df_source.join(
-        df_pred,
-        on=["Mention", "GROUP"],
-        how="left",
-    )
+    df_pred = df_pred.join(
+        umls_df, on=["Entity", "GROUP"], how="left", suffix="_pred"
+    ).drop("GROUP")
+    # concat pred and source dataframes
+    result = pl.concat([df_pred, df_source], how="horizontal")
     return result
 
 
@@ -220,6 +219,8 @@ def main(args) -> None:
                                         target=target,
                                         pred=pred,
                                     )
+                                    print(result_df.head())
+                                    print(result_df.shape)
 
                                     metrics = compute_metrics(
                                         result_df,

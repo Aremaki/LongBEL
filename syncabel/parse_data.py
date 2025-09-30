@@ -121,7 +121,6 @@ def parse_text(
     CUI_to_GROUP,
     cat_to_group,
     sem_to_group,
-    natural=False,
     corrected_cui=None,
     selection_method: str = "levenshtein",
     encoder: Optional[TextEncoder] = None,
@@ -145,8 +144,7 @@ def parse_text(
         start_offset_passage = passage["offsets"][0][0]
         end_offset_passage = passage["offsets"][0][1]
 
-        if natural:
-            passage_text = clean_natural(passage_text)
+        passage_text = clean_natural(passage_text)
 
         # Collect entity spans to avoid sentence splitting inside them
         entity_spans = []
@@ -188,8 +186,7 @@ def parse_text(
             # rel_end = global_end - start_offset_passage
 
             entity_text = " ".join(entity["text"])
-            if natural:
-                entity_text = clean_natural(entity_text)
+            entity_text = clean_natural(entity_text)
 
             normalized_id = entity["normalized"][0]["db_id"]
             if not normalized_id:
@@ -260,7 +257,7 @@ def parse_text(
                 )
                 continue
 
-            if natural and isinstance(annotation, str):
+            if isinstance(annotation, str):
                 annotation = clean_natural(annotation)
 
             # Define CUI group
@@ -365,7 +362,6 @@ def process_bigbio_dataset(
     CUI_to_Syn,
     CUI_to_GROUP,
     semantic_info: pl.DataFrame,
-    natural=False,
     encoder_name=None,
     tfidf_vectorizer_path: Optional[Path] = None,
     corrected_cui=None,
@@ -431,7 +427,6 @@ def process_bigbio_dataset(
             CUI_to_GROUP,
             cat_to_group,
             sem_to_group,
-            natural,
             corrected_cui,
             selection_method,
             encoder,
