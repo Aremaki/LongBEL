@@ -8,7 +8,7 @@ SELECTION_METHODS=("embedding" "tfidf" "levenshtein" "title")
 AUGMENTED_OPTIONS=(false)
 WITH_GROUP_OPTIONS=(true)
 BEST_OPTIONS=(false)
-
+BATCH_SIZE=64
 # Loop over all combinations
 for dataset in "${DATASETS[@]}"; do
     for selection in "${SELECTION_METHODS[@]}"; do
@@ -18,7 +18,7 @@ for dataset in "${DATASETS[@]}"; do
                     for model in "${MODELS[@]}"; do
                         for best in "${BEST_OPTIONS[@]}"; do
                             # Build the arguments for the python script
-                            ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --num-beams ${num_beams}"
+                            ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --num-beams ${num_beams} --batch-size ${BATCH_SIZE}"
                             if [ "$augmented" = true ]; then
                                 ARGS="${ARGS} --augmented-data"
                             fi
