@@ -209,6 +209,14 @@ def main(
             print(f"Parameter {name} is not contiguous. Making it contiguous.")
             param.data = param.data.contiguous()
 
+    # Set tokenizer lang for mBart model
+    if "mbart" in model_short_name:
+        if dataset_name == "MedMentions":
+            tokenizer.src_lang = "en_XX"
+            tokenizer.tgt_lang = "en_XX"
+        else:
+            tokenizer.src_lang = "fr_XX"
+            tokenizer.tgt_lang = "fr_XX"
     # Load and preprocess data
     with_group_extension = "_with_group" if with_group else ""
     data_folder = Path("data/final_data")

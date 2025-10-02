@@ -22,7 +22,13 @@ def load_pickle(file_path):
         return pickle.load(file)
 
 
-def load_model(model_name, full_path, device, best):
+def load_model(
+    dataset_name: str,
+    model_name: str,
+    full_path: Path,
+    device: str,
+    best: bool,
+):
     if "mt5" in model_name:
         model = MT5_GENRE.from_pretrained(full_path).eval().to(device)  # type: ignore
         decoder_start_token_id = 0
@@ -42,6 +48,12 @@ def load_model(model_name, full_path, device, best):
             forced_eos_token_id=2,
             pad_token_id=1,
         )
+        if dataset_name == "MedMentions":
+            model.tokenizer.src_lang = "en_XX"  # type: ignore
+            model.tokenizer.tgt_lang = "en_XX"  # type: ignore
+        else:
+            model.tokenizer.src_lang = "fr_XX"  # type: ignore
+            model.tokenizer.tgt_lang = "fr_XX"  # type: ignore
     else:
         model = Bart_GENRE.from_pretrained(full_path).eval().to(device)  # type: ignore
         decoder_start_token_id = 2
@@ -83,7 +95,13 @@ def main(
         full_path = model_path / "model_best"
     else:
         full_path = model_path / "model_last"
-    model, decoder_start_token_id = load_model(model_name, full_path, device, best)
+    model, decoder_start_token_id = load_model(
+        dataset_name,
+        model_name,
+        full_path,
+        device,
+        best,
+    )
 
     # Load data
     # Load and preprocess data
