@@ -19,14 +19,18 @@ def get_prefix_allowed_tokens_fn(
 ):
     return _get_end_to_end_prefix_allowed_tokens_fn(
         sentences,
+        model.tokenizer.bos_token_id,
         model.tokenizer.eos_token_id,
+        model.tokenizer.pad_token_id,
         candidates_trie,
     )
 
 
 def _get_end_to_end_prefix_allowed_tokens_fn(
     sentences: list[str],
+    bos_token_id: int,
     eos_token_id: int,
+    pad_token_id: int,
     candidates_trie: dict[str, Trie] = None,  # type: ignore
 ):
     sent_sem_type = []
@@ -36,11 +40,18 @@ def _get_end_to_end_prefix_allowed_tokens_fn(
 
     def prefix_allowed_tokens_fn(batch_id, sent):
         sent = sent.tolist()
-        if len(sent) > 1 and sent[-1] == eos_token_id:
-            return [eos_token_id]
+        if len(sent) > 1 and sent[-1] in [eos_token_id, pad_token_id]:
+            return [pad_token_id]
         sem_type = sent_sem_type[batch_id]
-        return candidates_trie[
-            sem_type  # type: ignore
-        ].get(sent)
+        if bos_token_id is not None:
+            clean_sent = [x for x in sent if x != bos_token_id]
+            trie_out = candidates_trie[
+                sem_type  # type: ignore
+            ].get(clean_sent)
+            return [bos_token_id] + trie_out
+        else:
+            return candidates_trie[
+                sem_type  # type: ignore
+            ].get(sent)
 
     return prefix_allowed_tokens_fn
