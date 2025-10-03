@@ -131,6 +131,7 @@ def main(
     else:
         # Compute candidate Trie
         start_idx = 1 if "bart" in model_name else 0
+        prefix = " " if "mt5" in model_name else ""
         if dataset_name == "MedMentions":
             legal_umls_token = pl.read_parquet(
                 Path("data/UMLS_processed/MM/all_disambiguated.parquet")
@@ -155,7 +156,7 @@ def main(
             for entity in cat_legal_umls_token["Entity"].to_list():
                 sequences.append(
                     [decoder_start_token_id]
-                    + model.tokenizer.encode(" " + entity)[start_idx:]  # type: ignore
+                    + model.tokenizer.encode(prefix + entity)[start_idx:]  # type: ignore
                 )
             trie_legal_tokens[category] = Trie(sequences)
 
