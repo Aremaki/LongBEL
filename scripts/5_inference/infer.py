@@ -43,6 +43,7 @@ def load_model(
         decoder_start_token_id = 2
         model.generation_config = GenerationConfig(
             bos_token_id=0,
+            early_stopping=True,
             decoder_start_token_id=decoder_start_token_id,
             eos_token_id=2,
             forced_eos_token_id=2,
@@ -59,6 +60,7 @@ def load_model(
         decoder_start_token_id = 2
         model.generation_config = GenerationConfig(
             bos_token_id=0,
+            early_stopping=True,
             decoder_start_token_id=decoder_start_token_id,
             eos_token_id=2,
             forced_eos_token_id=2,

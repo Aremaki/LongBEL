@@ -36,7 +36,7 @@ def _get_end_to_end_prefix_allowed_tokens_fn(
 
     def prefix_allowed_tokens_fn(batch_id, sent):
         sent = sent.tolist()
-        if sent[-1] == eos_token_id:
+        if len(sent) > 1 and sent[-1] == eos_token_id:
             return [eos_token_id]
         sem_type = sent_sem_type[batch_id]
         return candidates_trie[
