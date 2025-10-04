@@ -43,7 +43,6 @@ def load_model(
         decoder_start_token_id = 2
         model.generation_config = GenerationConfig(
             bos_token_id=0,
-            early_stopping=True,
             decoder_start_token_id=decoder_start_token_id,
             eos_token_id=2,
             forced_eos_token_id=2,
@@ -130,8 +129,12 @@ def main(
             trie_legal_tokens = pickle.load(file)
     else:
         # Compute candidate Trie
-        start_idx = 1 if "bart" in model_name else 0
-        prefix = " " if "mt5" in model_name else ""
+        if "mbart" in model_name or "mt5" in model_name:
+            start_idx = 0
+            prefix = " "
+        else:
+            start_idx = 1
+            prefix = ""
         if dataset_name == "MedMentions":
             legal_umls_token = pl.read_parquet(
                 Path("data/UMLS_processed/MM/all_disambiguated.parquet")
