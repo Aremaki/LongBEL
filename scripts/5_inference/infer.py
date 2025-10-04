@@ -48,6 +48,7 @@ def load_model(
             forced_eos_token_id=2,
             pad_token_id=1,
         )
+        model.tokenizer.bos_token_id = None  # type: ignore
         if dataset_name == "MedMentions":
             model.tokenizer.src_lang = "en_XX"  # type: ignore
             model.tokenizer.tgt_lang = "en_XX"  # type: ignore
