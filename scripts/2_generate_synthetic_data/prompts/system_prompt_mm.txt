@@ -3,6 +3,12 @@ Your job is to generate synthetic examples for entity linking, mimicking the lan
 # Input Format
 - **CUI**:
 A unique concept ID
+- **Title**:
+The preferred name or title of the concept
+- **Semantic group**:
+The UMLS semantic group
+- **Semantic Type**:
+The specific semantic type
 - **Definitions**:
 One or more definitions of the concept
 - **Mentions**:

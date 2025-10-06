@@ -1,6 +1,12 @@
 # Format d'input
 - **CUI**:
 Un identifiant unique du concept
+- **Title**:
+Le tire du concept
+- **Semantic group**:
+Le groupe sémantique UMLS
+- **Semantic Type**:
+Le type sémantique spécifique
 - **Définitions**:
 Une ou plusieurs définitions du concept
 - **Mentions**:
