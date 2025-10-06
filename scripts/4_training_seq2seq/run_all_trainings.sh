@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Define arrays for the parameters
-MODELS=("google/mt5-large")
-DATASETS=("MedMentions")
-SELECTION_METHODS=("embedding" "tfidf" "levenshtein")
-AUGMENTED_OPTIONS=(false)
+MODELS=("google/mt5-large" "facebook/bart-large" "facebook/mbart-large-50" "dmis-lab/ANGEL_pretrained" "GanjinZero/biobart-v2-large")
+DATASETS=("MedMentions" "MEDLINE" "EMEA")
+SELECTION_METHODS=("embedding" "tfidf" "levenshtein" "title")
+AUGMENTED_OPTIONS=(true false)
 WITH_GROUP_OPTIONS=(true false)
 
 # Loop over all combinations

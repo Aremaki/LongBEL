@@ -63,20 +63,20 @@ Options: `--limit` (row cap), `--fail-pattern` (default FAIL).
 ### b. Directly from HuggingFace Hub dataset
 ```bash
 python scripts/2_generate_synthetic_data/convert_to_bigbio.py from-hub \
-  --repo-id Aremaki/SynCABEL \
+  --repo-id XXXX/SynCABEL \
   --split SynthMedMentions \
   --json-out data/synthetic_data/SynthMM/SynthMM_bigbio_def.json
 ```
 ```bash
 python scripts/2_generate_synthetic_data/convert_to_bigbio.py from-hub \
-  --repo-id Aremaki/SynCABEL \
+  --repo-id XXXX/SynCABEL \
   --split SynthQUAERO \
   --json-out data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio_def.json
 ```
 Custom columns:
 ```bash
 python scripts/2_generate_synthetic_data/convert_to_bigbio.py from-hub \
-  --repo-id Aremaki/SynCABEL \
+  --repo-id XXXX/SynCABEL \
   --split train \
   --cui-col concept_id \
   --text-col generations \
