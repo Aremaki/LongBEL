@@ -8,7 +8,7 @@ python scripts/6_evaluate_syncabel/evaluate.py \
     --datasets MedMentions MEDLINE EMEA \
     --model_names "mt5-large" "bart-large" "mbart-large-50" "ANGEL_pretrained" "biobart-v2-large" \
     --selection_methods "embedding" "levenshtein" "tfidf" "title" \
-    --num_beams 1 5 10 \
+    --num_beams 1 5 10 15 20 \
     --with_group True False \
     --best True False \
     --augmented_data True False \
