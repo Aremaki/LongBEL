@@ -241,8 +241,9 @@ def run(
         typer.echo(f"Semantic info file not found. Creating at {semantic_info_parquet}")
         df = pl.read_parquet(umls_parquet)
         semantic_info = df.group_by("CUI").agg([
-            pl.col("GROUP").unique(),
-            pl.col("CATEGORY").unique(),
+            pl.col("GROUP").first(),
+            pl.col("CATEGORY").first().alias("SEM_CODE"),
+            pl.col("CATEGORY").first(),
         ])
         semantic_info.write_parquet(semantic_info_parquet)
 

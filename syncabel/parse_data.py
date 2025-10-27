@@ -266,7 +266,9 @@ def parse_text(
             if len(groups) == 1:
                 group = groups[0]
             else:
-                if entity_type in cat_to_group.keys():
+                if entity_type in cat_to_group.values():
+                    group = entity_type
+                elif entity_type in cat_to_group.keys():
                     group = cat_to_group[entity_type]
                 elif entity_type in sem_to_group.keys():
                     group = sem_to_group[entity_type]
