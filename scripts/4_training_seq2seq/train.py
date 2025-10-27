@@ -214,6 +214,9 @@ def main(
         if dataset_name == "MedMentions":
             tokenizer.src_lang = "en_XX"
             tokenizer.tgt_lang = "en_XX"
+        elif dataset_name == "SPACCC":
+            tokenizer.src_lang = "es_XX"
+            tokenizer.tgt_lang = "es_XX"
         else:
             tokenizer.src_lang = "fr_XX"
             tokenizer.tgt_lang = "fr_XX"
@@ -228,13 +231,24 @@ def main(
     train_target_data = load_pickle(
         data_folder / dataset_name / f"train_{selection_method}_target.pkl"
     )
-    validation_source_data = load_pickle(
+    validation_source_path = (
         data_folder
         / dataset_name
         / f"validation_{selection_method}_source{with_group_extension}.pkl"
     )
+    if validation_source_path.exists():
+        split_name = "validation"
+    else:
+        split_name = "test"
+        print("Validation file not found, using test file instead.")
+
+    validation_source_data = load_pickle(
+        data_folder
+        / dataset_name
+        / f"{split_name}_{selection_method}_source{with_group_extension}.pkl"
+    )
     validation_target_data = load_pickle(
-        data_folder / dataset_name / f"validation_{selection_method}_target.pkl"
+        data_folder / dataset_name / f"{split_name}_{selection_method}_target.pkl"
     )
 
     train_data = {"source": train_source_data, "target": train_target_data}

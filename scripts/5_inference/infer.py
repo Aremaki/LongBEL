@@ -52,6 +52,9 @@ def load_model(
         if dataset_name == "MedMentions":
             model.tokenizer.src_lang = "en_XX"  # type: ignore
             model.tokenizer.tgt_lang = "en_XX"  # type: ignore
+        elif dataset_name == "SPACCC":
+            model.tokenizer.src_lang = "es_XX"  # type: ignore
+            model.tokenizer.tgt_lang = "es_XX"  # type: ignore
         else:
             model.tokenizer.src_lang = "fr_XX"  # type: ignore
             model.tokenizer.tgt_lang = "fr_XX"  # type: ignore
@@ -139,6 +142,10 @@ def main(
         if dataset_name == "MedMentions":
             legal_umls_token = pl.read_parquet(
                 Path("data/UMLS_processed/MM/all_disambiguated.parquet")
+            )
+        elif dataset_name == "SPACCC":
+            legal_umls_token = pl.read_parquet(
+                Path("data/UMLS_processed/SPACCC/all_disambiguated.parquet")
             )
         else:
             legal_umls_token = pl.read_parquet(

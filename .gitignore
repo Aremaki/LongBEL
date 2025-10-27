@@ -147,8 +147,19 @@ dmypy.json
 # Log files
 *.log
 
+# Model files
+*.bin
+*.model
+*.joblib
+*.h5
+*.ckpt
+
 # Dataset files (large)
 *.json.gz
 *.jsonl.gz
 *.tsv.gz
 *.csv.gz
+data/**/*.txt
+data/**/*.tsv
+data/**/*.csv
+data/**/*.pkl

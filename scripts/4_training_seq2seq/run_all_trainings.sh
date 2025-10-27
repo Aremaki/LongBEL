@@ -2,10 +2,10 @@
 
 # Define arrays for the parameters
 MODELS=("google/mt5-large" "facebook/bart-large" "facebook/mbart-large-50" "dmis-lab/ANGEL_pretrained" "GanjinZero/biobart-v2-large")
-DATASETS=("MedMentions" "MEDLINE" "EMEA")
-SELECTION_METHODS=("embedding" "tfidf" "levenshtein" "title")
-AUGMENTED_OPTIONS=(true false)
-WITH_GROUP_OPTIONS=(true false)
+DATASETS=("SPACCC")
+SELECTION_METHODS=("tfidf")
+AUGMENTED_OPTIONS=(false)
+WITH_GROUP_OPTIONS=(true)
 
 # Loop over all combinations
 for dataset in "${DATASETS[@]}"; do

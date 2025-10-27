@@ -2,11 +2,11 @@
 
 # Define arrays for the parameters
 MODELS=("mt5-large" "bart-large" "mbart-large-50" "ANGEL_pretrained" "biobart-v2-large")
-DATASETS=("MedMentions" "EMEA" "MEDLINE")
+DATASETS=("SPACCC")
 NUM_BEAMS=(1 5 10)
-SELECTION_METHODS=("embedding" "tfidf" "levenshtein" "title")
-AUGMENTED_OPTIONS=(true false)
-WITH_GROUP_OPTIONS=(true false)
+SELECTION_METHODS=("tfidf")
+AUGMENTED_OPTIONS=(false)
+WITH_GROUP_OPTIONS=(true)
 BEST_OPTIONS=(true false)
 BATCH_SIZE=64
 # Loop over all combinations
