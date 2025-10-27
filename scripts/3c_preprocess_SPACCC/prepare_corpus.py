@@ -158,7 +158,6 @@ def _process_spaccc_dataset(
         splits["test"] = _load_spaccc_as_bigbio(
             test_annotations_path, test_raw_files_folder
         )
-    typer.echo(splits["test"][:10])
 
     processed = {}
     for split_name, split_data in splits.items():
