@@ -213,7 +213,7 @@ def parse_text(
                         logging.warning(
                             f"Title selection requested but no title mapping available for CUI {normalized_id} (entity '{entity_text}');"
                         )
-
+                        continue
                 # Prefer precomputed best synonyms if provided
                 elif selection_method == "embedding":
                     if best_syn_map is not None:
@@ -245,6 +245,7 @@ def parse_text(
                         logging.warning(
                             f"TF-IDF selection requested but no synonyms or vectorizer available for CUI {normalized_id} (entity '{entity_text}');"
                         )
+                        continue
                 elif selection_method == "levenshtein":
                     if CUI_to_Syn is not None:
                         possible_syns = CUI_to_Syn.get(normalized_id)
@@ -292,6 +293,8 @@ def parse_text(
                     group_annotations.append(group)
 
             # Merge annotations in a string with | separator
+            if not annotations:
+                continue
             group_annotation = " | ".join(group_annotations)
             annotation = " | ".join(annotations)
 

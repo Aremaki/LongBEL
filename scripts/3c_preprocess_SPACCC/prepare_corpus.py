@@ -148,7 +148,10 @@ def _process_spaccc_dataset(
     corrected_cui = None
     if corrected_cui_path.exists():
         typer.echo(f"  • Using corrected CUI mapping from {corrected_cui_path}...")
-        corrected_cui = dict(pl.read_csv(corrected_cui_path).iter_rows())
+        corrected_cui = {
+            str(row[0]): str(row[1])
+            for row in pl.read_csv(corrected_cui_path).iter_rows()
+        }
 
     typer.echo(f"Processing dataset {name} ...")
 
