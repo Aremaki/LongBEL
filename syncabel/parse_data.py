@@ -188,100 +188,112 @@ def parse_text(
             entity_text = " ".join(entity["text"])
             entity_text = clean_natural(entity_text)
 
-            normalized_id = entity["normalized"][0]["db_id"]
-            if not normalized_id:
+            normalized_ids = entity["normalized"][0]["db_id"]
+            if not normalized_ids:
                 logging.warning(
                     f"Entity '{entity_text}' has empty CUI; skipping entity."
                 )
                 continue
-            if corrected_cui and normalized_id in corrected_cui:
-                normalized_id = corrected_cui[normalized_id]
-                logging.info(
-                    f"Corrected CUI {entity['normalized'][0]['db_id']} -> {normalized_id} for entity '{entity_text}'"
-                )
-
-            possible_syns = None
-            annotation = None
-            if selection_method == "title":
-                if CUI_to_Title is not None:
-                    annotation = CUI_to_Title.get(normalized_id)
-                else:
-                    logging.warning(
-                        f"Title selection requested but no title mapping available for CUI {normalized_id} (entity '{entity_text}');"
+            normalized_ids = normalized_ids.split("+")  # Handle multiple CUIs
+            annotations = []
+            group_annotations = []
+            for normalized_id in normalized_ids:
+                if corrected_cui and normalized_id in corrected_cui:
+                    normalized_id = corrected_cui[normalized_id]
+                    logging.info(
+                        f"Corrected CUI {entity['normalized'][0]['db_id']} -> {normalized_id} for entity '{entity_text}'"
                     )
 
-            # Prefer precomputed best synonyms if provided
-            elif selection_method == "embedding":
-                if best_syn_map is not None:
-                    pre_key = (normalized_id, entity_text)
-                    if pre_key in best_syn_map:
-                        annotation = best_syn_map[pre_key]
-                # Otherwise select from possible synonyms
-                if annotation is None and CUI_to_Syn is not None:
-                    possible_syns = CUI_to_Syn.get(normalized_id)
-                    if possible_syns and encoder is not None:
+                possible_syns = None
+                annotation = None
+                if selection_method == "title":
+                    if CUI_to_Title is not None:
+                        annotation = CUI_to_Title.get(normalized_id)
+                    else:
                         logging.warning(
-                            f"No precomputed best synonym map provided; Selecting best synonym by embedding for CUI {normalized_id} (entity '{entity_text}')"
+                            f"Title selection requested but no title mapping available for CUI {normalized_id} (entity '{entity_text}');"
                         )
-                        best_syn, _ = best_by_cosine(
-                            encoder=encoder,
-                            mention=entity_text,
-                            candidates=list(possible_syns),
-                        )  # type: ignore
+
+                # Prefer precomputed best synonyms if provided
+                elif selection_method == "embedding":
+                    if best_syn_map is not None:
+                        pre_key = (normalized_id, entity_text)
+                        if pre_key in best_syn_map:
+                            annotation = best_syn_map[pre_key]
+                    # Otherwise select from possible synonyms
+                    if annotation is None and CUI_to_Syn is not None:
+                        possible_syns = CUI_to_Syn.get(normalized_id)
+                        if possible_syns and encoder is not None:
+                            logging.warning(
+                                f"No precomputed best synonym map provided; Selecting best synonym by embedding for CUI {normalized_id} (entity '{entity_text}')"
+                            )
+                            best_syn, _ = best_by_cosine(
+                                encoder=encoder,
+                                mention=entity_text,
+                                candidates=list(possible_syns),
+                            )  # type: ignore
+                            annotation = best_syn
+                elif selection_method == "tfidf":
+                    if CUI_to_Syn is not None:
+                        possible_syns = CUI_to_Syn.get(normalized_id)
+                    if possible_syns and tfidf_vectorizer is not None:
+                        best_idx, best_score = cal_similarity_tfidf(
+                            possible_syns, entity_text, tfidf_vectorizer
+                        )
+                        annotation = possible_syns[best_idx]
+                    else:
+                        logging.warning(
+                            f"TF-IDF selection requested but no synonyms or vectorizer available for CUI {normalized_id} (entity '{entity_text}');"
+                        )
+                elif selection_method == "levenshtein":
+                    if CUI_to_Syn is not None:
+                        possible_syns = CUI_to_Syn.get(normalized_id)
+                    if possible_syns:
+                        # Default to Levenshtein matching (previous behavior)
+                        text = entity_text
+                        dists = [nltk.edit_distance(text, syn) for syn in possible_syns]
+                        best_syn = possible_syns[int(np.argmin(dists))]
                         annotation = best_syn
-            elif selection_method == "tfidf":
-                if CUI_to_Syn is not None:
-                    possible_syns = CUI_to_Syn.get(normalized_id)
-                if possible_syns and tfidf_vectorizer is not None:
-                    best_idx, best_score = cal_similarity_tfidf(
-                        possible_syns, entity_text, tfidf_vectorizer
-                    )
-                    annotation = possible_syns[best_idx]
-                else:
+                if annotation is None:
+                    # If no synonyms mapping, skip entity
                     logging.warning(
-                        f"TF-IDF selection requested but no synonyms or vectorizer available for CUI {normalized_id} (entity '{entity_text}');"
+                        f"No synonyms found for CUI {normalized_id} (entity '{entity_text}'); skipping entity."
                     )
-            elif selection_method == "levenshtein":
-                if CUI_to_Syn is not None:
-                    possible_syns = CUI_to_Syn.get(normalized_id)
-                if possible_syns:
-                    # Default to Levenshtein matching (previous behavior)
-                    text = entity_text
-                    dists = [nltk.edit_distance(text, syn) for syn in possible_syns]
-                    best_syn = possible_syns[int(np.argmin(dists))]
-                    annotation = best_syn
-            if annotation is None:
-                # If no synonyms mapping, skip entity
-                logging.warning(
-                    f"No synonyms found for CUI {normalized_id} (entity '{entity_text}'); skipping entity."
-                )
-                continue
+                    continue
 
-            if isinstance(annotation, str):
-                annotation = clean_natural(annotation)
+                if isinstance(annotation, str):
+                    annotations.append(clean_natural(annotation))
 
-            # Define CUI group
-            entity_type = entity.get("type")
-            groups = CUI_to_GROUP.get(normalized_id, [])
-            if len(groups) == 1:
-                group = groups[0]
-            else:
-                if entity_type in cat_to_group.values():
-                    group = entity_type
-                elif entity_type in cat_to_group.keys():
-                    group = cat_to_group[entity_type]
-                elif entity_type in sem_to_group.keys():
-                    group = sem_to_group[entity_type]
-                else:
-                    group = "Unknown"
-                    logging.info(f"No group found for entity type {entity_type}.")
-                if group not in groups and groups:
+                # Define CUI group
+                entity_type = entity.get("type")
+                groups = CUI_to_GROUP.get(normalized_id, [])
+                if len(groups) == 1:
                     group = groups[0]
-            if group == "Unknown":
-                logging.info(
-                    f"Group is 'Unknown' for CUI {normalized_id} and entity type {entity_type}. skipping."
-                )
-                continue
+                else:
+                    if entity_type in cat_to_group.values():
+                        group = entity_type
+                    elif entity_type in cat_to_group.keys():
+                        group = cat_to_group[entity_type]
+                    elif entity_type in sem_to_group.keys():
+                        group = sem_to_group[entity_type]
+                    else:
+                        group = "Unknown"
+                        logging.info(f"No group found for entity type {entity_type}.")
+                    if group not in groups and groups:
+                        group = groups[0]
+                if group == "Unknown":
+                    logging.info(
+                        f"Group is 'Unknown' for CUI {normalized_id} and entity type {entity_type}. skipping."
+                    )
+                    continue
+
+                # Append only if different
+                if group not in group_annotations:
+                    group_annotations.append(group)
+
+            # Merge annotations in a string with | separator
+            group_annotation = " | ".join(group_annotations)
+            annotation = " | ".join(annotations)
 
             # Find the sentence that contains the entity start
             sent_text = passage_text
@@ -324,7 +336,7 @@ def parse_text(
                         + marked_with_group_text[start_in_sent:end_in_sent]
                         + end_entity
                         + start_group
-                        + group
+                        + group_annotation
                         + end_group
                         + marked_with_group_text[end_in_sent:]
                     )

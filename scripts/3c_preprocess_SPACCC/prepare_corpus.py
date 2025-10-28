@@ -69,7 +69,8 @@ def _load_spaccc_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dat
             "entities": [],
         })
 
-    passages = []
+    pages = []
+    id = 0
     for doc_id, group in annotations_df.group_by("doc_id"):
         # Load raw text for the document
         raw_text_path = raw_files_folder / f"{doc_id[0]}.txt"
@@ -81,37 +82,46 @@ def _load_spaccc_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dat
             typer.echo(f"Warning: Raw text file {raw_text_path} not found.")
             continue
 
+        page = {
+            "id": doc_id[0],
+            "document_id": doc_id[0],
+        }
+
         entities = []
         for i, record in enumerate(group.to_dicts()):
             entity = {
-                "id": f"{doc_id}_{i}_e{i}",
+                "id": f"{doc_id[0]}_T{i}",
                 "text": [record["entity_text"]],
                 "offsets": [[int(record["start_span"]), int(record["end_span"])]],
                 "type": record["entity_type"],
-                "normalized": [{"db_name": "UMLS", "db_id": record["cui"]}],
+                "normalized": [{"db_name": "SNOMED_CT", "db_id": record["cui"]}],
             }
             entities.append(entity)
+        page["entities"] = entities
+        page["passages"] = [
+            {
+                "id": f"{doc_id[0]}_passage",
+                "type": "clinical_case",
+                "text": [text],
+                "offsets": [[0, len(text)]],
+            }
+        ]
+        pages.append(page)
+        id += 1
 
-        passage = {
-            "id": doc_id,
-            "document_id": doc_id,
-            "text": text,
-            "entities": entities,
-        }
-        passages.append(passage)
-
-    if not passages:
-        return Dataset.from_dict({
-            "id": [],
-            "document_id": [],
-            "text": [],
-            "entities": [],
-        })
+    if not pages:
+        return Dataset.from_list([
+            {
+                "id": None,
+                "document_id": None,
+                "passages": [],
+                "entities": [],
+            }
+        ])
 
     # Convert to Hugging Face Dataset
-    typer.echo(f"Loaded {len(passages)} passages from {annotation_file}")
-    data_dict = {key: [p[key] for p in passages] for key in passages[0]}
-    return Dataset.from_dict(data_dict)
+    typer.echo(f"Loaded {len(pages)} pages from {annotation_file}")
+    return Dataset.from_list(pages)
 
 
 def _process_spaccc_dataset(
