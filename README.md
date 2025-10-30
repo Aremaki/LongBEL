@@ -3,7 +3,7 @@
 <div align="center">
     <img src="logo.png" alt="SynCABEL" width="200">
     <p align="center">
-<a href="https://doi.org/10.5281/zenodo.13838918"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.13838918.svg" alt="DOI"></a>
+<!-- <a href="https://doi.org/10.5281/zenodo.13838918"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.13838918.svg" alt="DOI"></a> -->
 <a href="https://github.com/astral-sh/uv" target="_blank">
     <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json"
     alt="UV">
