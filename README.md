@@ -1,6 +1,29 @@
 # SynCABEL: Synthetic Contextualized Augmentation for Biomedical Entity Linking
 
-A novel approach for biomedical entity linking using synthetic contextualized data generation to improve model performance.
+<div align="center">
+    <img src="logo.png" alt="SynCABEL">
+<p align="center">
+<a href="https://doi.org/10.5281/zenodo.13838918"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.13838918.svg" alt="DOI"></a>
+<a href="https://github.com/astral-sh/uv" target="_blank">
+    <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json"
+    alt="UV">
+</a>
+<a href="https://github.com/astral-sh/ruff" target="_blank">
+    <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v2.json"
+    alt="Ruff">
+</a>
+</p>
+</div>
+
+A novel approach for biomedical entity linking using synthetic contextualized data generation to improve model performance. This repositoy contains the computer code that has been executed to generate the results of the article:
+```
+@unpublished{syncabel,
+author = {Adam Remaki and Christel Gérardin and Xavier Tannier},
+title = {SynCABEL: Synthetic Contextualized Augmentation for Biomedical Entity Linking},
+note = {Manuscript submitted for publication},
+year = {2025}
+}
+```
 
 ## Quick Start
 

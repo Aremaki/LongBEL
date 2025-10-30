@@ -9,17 +9,18 @@ description = "SynCABEL: Synthetic Contextualized Augmentation for Biomedical En
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
-    {name = "Anonymous", email = "anonymous@example.com"},
+    {name = "Adam REMAKI", email = "ad.remaki@gmail.com"},
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
