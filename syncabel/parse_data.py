@@ -293,9 +293,9 @@ def parse_text(
                 if group not in group_annotations:
                     group_annotations.append(group)
                     # Warning if multiple groups found
-                    if len(groups) > 1:
+                    if len(group_annotations) > 1:
                         logging.warning(
-                            f"Multiple groups {groups} found for CUI {normalized_id} (entity '{entity_text}'); using group '{group}'."
+                            f"Multiple groups {group_annotations} found for CUI {normalized_id} (entity '{entity_text}')"
                         )
 
             # Merge annotations in a string with | separator
