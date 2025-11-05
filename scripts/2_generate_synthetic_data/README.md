@@ -42,7 +42,7 @@ BATCH_SIZE=2 MAX_NEW_TOKENS=768 MAX_RETRIES=4 bash scripts/2_generate_synthetic_
 
 Prompts used:
 - MM: `scripts/2_generate_synthetic_data/prompts/system_prompt_mm.txt`
-- QUAERO (FR): `scripts/2_generate_synthetic_data/prompts/system_prompt_quaero_fr.txt`
+- QUAERO: `scripts/2_generate_synthetic_data/prompts/system_prompt_quaero.txt`
 
 ---
 ## 3. Convert Parquet(s) to BigBio JSON

@@ -60,7 +60,7 @@ if [[ "${DATASET}" == "MM" ]]; then
 elif [[ "${DATASET}" == "QUAERO" ]]; then
   BASE_DIR="data/synthetic_data/SynthQUAERO"
   DATASET_PREFIX="SynthQUAERO"
-  SYSTEM_PROMPT_PATH="scripts/2_generate_synthetic_data/prompts/system_prompt_quaero_fr.txt"
+  SYSTEM_PROMPT_PATH="scripts/2_generate_synthetic_data/prompts/system_prompt_quaero.txt"
 else
   BASE_DIR="data/synthetic_data/SynthSPACCC"
   DATASET_PREFIX="SynthSPACCC"

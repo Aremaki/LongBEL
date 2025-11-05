@@ -9,7 +9,7 @@ set -euo pipefail
 shopt -s nullglob
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-SLURM_SCRIPT="${SCRIPT_DIR}/generate_slurm.slurm"
+SLURM_SCRIPT="${SCRIPT_DIR}/generate.slurm"
 
 # Ensure slurm script exists
 if [[ ! -f "${SLURM_SCRIPT}" ]]; then
