@@ -369,6 +369,29 @@ def main(
                 .select(["CUI", "chosen_CUI"])
             )
 
+        # --- Load SNOMED_FSN.tsv ---
+        snomed_fsn_file = spaccc_dir / "SNOMED_FSN.tsv"
+        if snomed_fsn_file.exists():
+            snomed_df = pl.read_csv(
+                snomed_fsn_file,
+                separator="\t",
+                has_header=True,
+                quote_char=None,
+                schema_overrides=[pl.Utf8, pl.Utf8, pl.Utf8],
+            )
+            logging.info(f"Loaded {snomed_df.height} SNOMED FSN entries")
+
+            # Join with clean_terminology on CUI
+            clean_terminology = clean_terminology.join(snomed_df, on="CUI")
+
+            logging.info(
+                f"After joining with SNOMED_FSN: {clean_terminology.height} rows, "
+                f"columns: {clean_terminology.columns}"
+            )
+        else:
+            logging.warning(
+                f"SNOMED_FSN.tsv file not found at {snomed_fsn_file}, skipping join."
+            )
         # Save results
         logging.info(
             f"💾 Saving {mapping_df.height} mapping entries to {corrected_cui_file}"

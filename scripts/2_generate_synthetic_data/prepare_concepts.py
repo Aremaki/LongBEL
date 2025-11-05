@@ -137,6 +137,9 @@ def run(
     mm_def: Path = typer.Option(None, help="Path to MM definitions parquet"),
     quaero_path: Path = typer.Option(None, help="Path to QUAERO concepts parquet"),
     quaero_def: Path = typer.Option(None, help="Path to QUAERO definitions parquet"),
+    spaccc_path: Path = typer.Option(
+        None, help="Path to SPACCC concepts parquet (no definitions)"
+    ),
     out_mm_def: Path = typer.Option(
         Path("data/synthetic_data/SynthMM/user_prompts_def"),
         help="Output dir for MM prompts with definitions",
@@ -153,27 +156,30 @@ def run(
         Path("data/synthetic_data/SynthQUAERO/user_prompts_no_def"),
         help="Output dir for QUAERO prompts without definitions",
     ),
+    out_spaccc_no_def: Path = typer.Option(
+        Path("data/synthetic_data/SynthSPACCC/user_prompts"),
+        help="Output dir for SPACCC prompts (no definitions)",
+    ),
     shuffle: bool = typer.Option(True, help="Shuffle concepts (sample fraction=1)"),
     chunk_size: int = typer.Option(2500, help="Chunk size for output parquet files"),
 ) -> None:
-    """Generate user prompts for one or both datasets depending on provided paths."""
+    """Generate user prompts for MM, QUAERO, and SPACCC datasets."""
     if not any([mm_path and mm_def, quaero_path and quaero_def]):
         raise typer.BadParameter(
             "Provide at least one dataset (MM or QUAERO) with its definition file."
         )
 
+    # --- MM dataset ---
     if mm_path and mm_def:
         mm_joined = _load_join(mm_path, mm_def)
-        # If only definitions file is desired (original logic sampled from defs directly)
         if "DEF" in mm_joined.columns:
-            # Filter out concepts without definitions
             mm_filtered = mm_joined.filter(pl.col("DEF").is_not_null())
             if shuffle:
                 mm_filtered = mm_filtered.sample(fraction=1)
             user_prompt_mm = build_templates(mm_filtered)
             _write_chunks(user_prompt_mm, out_mm_def, chunk_size)
             typer.echo(f"MM concepts written to {out_mm_def}")
-            # Filter out concepts with definitions for no-def file
+
             mm_no_def = mm_joined.filter(pl.col("DEF").is_null())
             if shuffle:
                 mm_no_def = mm_no_def.sample(fraction=1)
@@ -181,6 +187,7 @@ def run(
             _write_chunks(user_prompt_mm_no_def, out_mm_no_def, chunk_size)
             typer.echo(f"MM concepts without definitions written to {out_mm_no_def}")
 
+    # --- QUAERO dataset ---
     if quaero_path and quaero_def:
         q_joined = _load_join(quaero_path, quaero_def)
         if "DEF" in q_joined.columns:
@@ -190,7 +197,7 @@ def run(
             user_prompt_q = build_templates(q_filtered)
             _write_chunks(user_prompt_q, out_quaero_def, chunk_size)
             typer.echo(f"QUAERO concepts written to {out_quaero_def}")
-            # Filter out concepts with definitions for no-def file
+
             q_no_def = q_joined.filter(pl.col("DEF").is_null())
             if shuffle:
                 q_no_def = q_no_def.sample(fraction=1)
@@ -199,6 +206,17 @@ def run(
             typer.echo(
                 f"QUAERO concepts without definitions written to {out_quaero_no_def}"
             )
+
+    # --- SPACCC dataset (no definitions) ---
+    if spaccc_path:
+        spaccc_df = pl.read_parquet(spaccc_path)
+        if shuffle:
+            spaccc_df = spaccc_df.sample(fraction=1)
+        # Add empty DEF column to maintain compatibility with build_templates
+        spaccc_df = spaccc_df.with_columns(pl.lit(None).alias("DEF"))
+        user_prompt_spaccc = build_templates(spaccc_df)
+        _write_chunks(user_prompt_spaccc, out_spaccc_no_def, chunk_size)
+        typer.echo(f"SPACCC concepts written to {out_spaccc_no_def}")
 
 
 if __name__ == "__main__":

@@ -13,24 +13,32 @@
 # Fail fast and be verbose about failures
 set -euo pipefail
 
-# Args: DATASET (MM|QUAERO), VARIANT (def|no_def), CHUNK (number)
+# Args: DATASET (MM|QUAERO|SPACCC), VARIANT (def|no_def), CHUNK (number)
 DATASET=${1:-}
 VARIANT=${2:-}
 CHUNK=${3:-}
 
 if [[ -z "${DATASET}" || -z "${VARIANT}" || -z "${CHUNK}" ]]; then
-  echo "Usage: sbatch $(basename "$0") <MM|QUAERO> <def|no_def> <chunk>"
+  echo "Usage: sbatch $(basename "$0") <MM|QUAERO|SPACCC> <def|no_def> <chunk>"
   exit 1
 fi
 
-if [[ "${DATASET}" != "MM" && "${DATASET}" != "QUAERO" ]]; then
-  echo "DATASET must be MM or QUAERO"
+if [[ "${DATASET}" != "MM" && "${DATASET}" != "QUAERO" && "${DATASET}" != "SPACCC" ]]; then
+  echo "DATASET must be MM, QUAERO, or SPACCC"
   exit 1
 fi
 
-if [[ "${VARIANT}" != "def" && "${VARIANT}" != "no_def" ]]; then
-  echo "VARIANT must be def or no_def"
-  exit 1
+if [[ "${DATASET}" == "SPACCC" ]]; then
+  # SPACCC only has no_def variant
+  if [[ "${VARIANT}" != "no_def" ]]; then
+    echo "SPACCC only supports 'no_def' variant"
+    exit 1
+  fi
+else
+  if [[ "${VARIANT}" != "def" && "${VARIANT}" != "no_def" ]]; then
+    echo "VARIANT must be def or no_def"
+    exit 1
+  fi
 fi
 
 # Environment setup (adapt to your cluster modules)
@@ -44,14 +52,19 @@ BATCH_SIZE=${BATCH_SIZE:-16}
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-512}
 MAX_RETRIES=${MAX_RETRIES:-5}
 
+# Set dataset-specific paths
 if [[ "${DATASET}" == "MM" ]]; then
   BASE_DIR="data/synthetic_data/SynthMM"
   DATASET_PREFIX="SynthMM"
   SYSTEM_PROMPT_PATH="scripts/2_generate_synthetic_data/prompts/system_prompt_mm.txt"
-else
+elif [[ "${DATASET}" == "QUAERO" ]]; then
   BASE_DIR="data/synthetic_data/SynthQUAERO"
   DATASET_PREFIX="SynthQUAERO"
   SYSTEM_PROMPT_PATH="scripts/2_generate_synthetic_data/prompts/system_prompt_quaero_fr.txt"
+else
+  BASE_DIR="data/synthetic_data/SynthSPACCC"
+  DATASET_PREFIX="SynthSPACCC"
+  SYSTEM_PROMPT_PATH="scripts/2_generate_synthetic_data/prompts/system_prompt_spaccc.txt"
 fi
 
 USER_PROMPTS_DIR="${BASE_DIR}/user_prompts_${VARIANT}"

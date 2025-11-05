@@ -41,4 +41,7 @@ submit_for_dir MM no_def "data/synthetic_data/SynthMM/user_prompts_no_def"
 submit_for_dir QUAERO def    "data/synthetic_data/SynthQUAERO/user_prompts_def"
 submit_for_dir QUAERO no_def "data/synthetic_data/SynthQUAERO/user_prompts_no_def"
 
+# SPACCC
+submit_for_dir SPACCC no_def "data/synthetic_data/SynthSPACCC/user_prompts_no_def"
+
 echo "All jobs submitted."

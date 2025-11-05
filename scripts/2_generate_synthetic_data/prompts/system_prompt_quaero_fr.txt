@@ -7,7 +7,7 @@ Le tire du concept
 Le groupe sémantique UMLS
 - **Semantic Type**:
 Le type sémantique spécifique
-- **Définitions**:
+- **Definitions**:
 Une ou plusieurs définitions du concept
 - **Mentions**:
 Une liste de mentions (peut inclure des termes techniques ou artificiels)
