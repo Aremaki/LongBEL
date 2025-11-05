@@ -17,7 +17,7 @@ Create chunked parquet files (`sample_{i}.parquet`) containing columns: `CUI`, `
 python scripts/2_generate_synthetic_data/prepare_concepts.py \
   --mm-path data/UMLS_processed/MM/all_disambiguated.parquet \
   --quaero-path data/UMLS_processed/QUAERO/all_disambiguated.parquet \
-  --spaccc_path data/UMLS_processed/SPACCC/all_disambiguated.parquet \
+  --spaccc-path data/UMLS_processed/SPACCC/all_disambiguated.parquet \
   --mm-def data/UMLS_processed/MM/umls_def.parquet \
   --quaero-def data/UMLS_processed/QUAERO/umls_def.parquet \
   --chunk-size 2500

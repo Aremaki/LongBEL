@@ -81,7 +81,12 @@ def generate_batches(
     pattern: str = r"\[([^]]+)\]",
     lang: str = "en",
 ):
-    template_answer = "example: " if lang == "en" else "exemple : "
+    if lang == "fr":
+        template_answer = "exemple : "
+    elif lang == "es":
+        template_answer = "ejemplo: "
+    else:
+        template_answer = "example: "
     user_prompts = user_prompts_df["user_prompt"].to_list()
     cui_codes = user_prompts_df["CUI"].to_list()
     sem_cats = user_prompts_df["CATEGORY"].to_list()
@@ -254,7 +259,12 @@ def run(
 
     model, tokenizer = load_model_and_tokenizer(str(model_path))  # type: ignore
     system_prompt = load_system_prompt(system_prompt_path)
-    lang = "en" if "mm" in system_prompt_path.name else "fr"
+    if "quaero" in system_prompt_path.name:
+        lang = "fr"
+    elif "spaccc" in system_prompt_path.name:
+        lang = "es"
+    else:
+        lang = "en"
     result_df = generate_batches(
         model,
         tokenizer,
