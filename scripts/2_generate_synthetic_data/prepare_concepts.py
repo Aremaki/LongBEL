@@ -157,7 +157,7 @@ def run(
         help="Output dir for QUAERO prompts without definitions",
     ),
     out_spaccc_no_def: Path = typer.Option(
-        Path("data/synthetic_data/SynthSPACCC/user_prompts"),
+        Path("data/synthetic_data/SynthSPACCC/user_prompts_no_def"),
         help="Output dir for SPACCC prompts (no definitions)",
     ),
     shuffle: bool = typer.Option(True, help="Shuffle concepts (sample fraction=1)"),
