@@ -7,7 +7,7 @@ A unique concept ID
 The preferred name or title of the concept
 - **Semantic group**:
 The UMLS semantic group
-- **Semantic Type**:
+- **Semantic type**:
 The specific semantic type
 - **Definitions**:
 One or more definitions of the concept
@@ -62,7 +62,7 @@ C3539909
 Allergic disposition
 - **Semantic group**:
 Disorders
-- **Semantic Type**:
+- **Semantic type**:
 Disease or Syndrome
 - **Definitions**:
 * 1. The disposition to develop an allergic reaction.
@@ -86,7 +86,7 @@ C0024307
 Lymphomatoid Granulomatosis
 - **Semantic group**:
 Disorders
-- **Semantic Type**:
+- **Semantic type**:
 Neoplastic Process
 - **Definitions**:
 * 1. Destructive growth of lymph cells, usually involving the lungs, skin, kidneys, and central nervous system. Grades I and II are not considered cancerous, but grade III is considered a lymphoma.

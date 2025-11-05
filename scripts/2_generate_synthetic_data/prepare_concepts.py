@@ -65,7 +65,7 @@ def _decode_escaped_utf8(text: Optional[str]) -> str:
     return s
 
 
-def build_templates(df: pl.DataFrame) -> pl.DataFrame:
+def build_templates(df: pl.DataFrame, include_definitions: bool = True) -> pl.DataFrame:
     # First extract and process all mentions
     processed_df = df.group_by("CUI", "CATEGORY", "GROUP", "SEM_NAME").agg(
         pl.col("Title").first().alias("title"),
@@ -86,6 +86,30 @@ def build_templates(df: pl.DataFrame) -> pl.DataFrame:
         return "'" + "', '".join(normalized) + "'"
 
     # Process with explicit return types to avoid warnings
+    # Build the prompt parts conditionally (omit definitions if requested)
+    prompt_parts = [
+        pl.lit("- **CUI**:\n"),
+        pl.col("CUI"),
+        pl.lit("\n- **Title**:\n"),
+        pl.col("title_processed"),
+        pl.lit("\n- **Semantic group**:\n"),
+        pl.col("GROUP"),
+        pl.lit("\n- **Semantic type**:\n"),
+        pl.col("SEM_NAME"),
+    ]
+
+    if include_definitions:
+        prompt_parts += [
+            pl.lit("\n- **Definitions**:\n"),
+            pl.col("definitions_processed"),
+        ]
+
+    prompt_parts += [
+        pl.lit("- **Mentions**:\n"),
+        pl.col("mentions_processed"),
+        pl.lit("\n"),
+    ]
+
     return (
         processed_df.with_columns(
             # Normalize scalar text fields
@@ -99,23 +123,7 @@ def build_templates(df: pl.DataFrame) -> pl.DataFrame:
                 format_mentions, return_dtype=pl.String
             ),
         )
-        .with_columns(
-            user_prompt=pl.concat_str([
-                pl.lit("- **CUI**:\n"),
-                pl.col("CUI"),
-                pl.lit("\n- **Title**:\n"),
-                pl.col("title_processed"),
-                pl.lit("\n- **Semantic group**:\n"),
-                pl.col("GROUP"),
-                pl.lit("\n- **Semantic Type**:\n"),
-                pl.col("SEM_NAME"),
-                pl.lit("\n- **Definitions**:\n"),
-                pl.col("definitions_processed"),
-                pl.lit("- **Mentions**:\n"),
-                pl.col("mentions_processed"),
-                pl.lit("\n"),
-            ])
-        )
+        .with_columns(user_prompt=pl.concat_str(prompt_parts))
         .select(["CUI", "CATEGORY", "SEM_NAME", "user_prompt"])
     )
 
@@ -214,7 +222,8 @@ def run(
             spaccc_df = spaccc_df.sample(fraction=1)
         # Add empty DEF column to maintain compatibility with build_templates
         spaccc_df = spaccc_df.with_columns(pl.lit(None).alias("DEF"))
-        user_prompt_spaccc = build_templates(spaccc_df)
+        # Do not include definitions section for SPACCC prompts
+        user_prompt_spaccc = build_templates(spaccc_df, include_definitions=False)
         _write_chunks(user_prompt_spaccc, out_spaccc_no_def, chunk_size)
         typer.echo(f"SPACCC concepts written to {out_spaccc_no_def}")
 

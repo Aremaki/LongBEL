@@ -5,7 +5,7 @@ Un identifiant unique du concept
 Le tire du concept
 - **Semantic group**:
 Le groupe sémantique UMLS
-- **Semantic Type**:
+- **Semantic type**:
 Le type sémantique spécifique
 - **Definitions**:
 Une ou plusieurs définitions du concept
@@ -54,7 +54,7 @@ C1142738
 anidulafungin
 - **Semantic group**:
 Chemicals & Drugs
-- **Semantic Type**:
+- **Semantic type**:
 Pharmacologic Substance
 - **Definitions**:
 * 1. A cyclic lipopeptide echinocandin derivative with antifungal activity. Anidulafungin inhibits 1,3 beta-D-glucan synthase, an enzyme involved in fungal cell wall synthesis, resulting in cell lysis and death. This agent is active against Candida species and Aspergillus. (NCI04)
@@ -80,7 +80,7 @@ C0024137
 Cutaneous lupus erythematosus
 - **Semantic group**:
 Disorders
-- **Semantic Type**:
+- **Semantic type**:
 Disease or Syndrome
 - **Definitions**:
 * 1. Disease of skin in someone with Lupus erythematosis, though not necessarily systemic or subacute

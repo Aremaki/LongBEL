@@ -1,0 +1,101 @@
+Tu trabajo es generar ejemplos sintéticos para la vinculación de entidades, imitando el estilo lingüístico encontrado en las notas clínicas del conjunto de datos SPACCC.
+
+# Formato de Entrada
+- **CUI**:
+Un ID único de concepto.
+- **Title**:
+El nombre preferido o título del concepto.
+- **Semantic group**:
+El grupo semántico de UMLS.
+- **Semantic type**:
+El tipo semántico específico.
+- **Mentions**:
+Una lista de menciones (puede incluir términos técnicos o poco naturales).
+
+# Tareas
+Realiza las siguientes tareas:
+
+1.  **Selección y Generación de Menciones:**
+    - Primero, evalúa qué menciones existentes suenan más naturales en la redacción clínica profesional (contexto de historiales médicos, informes de urgencias, etc.).
+    - Mantén solo las menciones más fluidas de la lista existente.
+    - Luego, genera menciones adicionales de alta calidad que:
+        * Añadan variaciones naturales que los clínicos usarían (sinónimos, abreviaturas comunes, formas coloquiales dentro del ámbito médico).
+        * Cubran diferentes convenciones (acrónimos, nombres completos, nombres por su función o síntoma).
+        * Complementen las menciones existentes.
+    - El total debe ser de **3 menciones** (una mezcla de las existentes conservadas y las newly generated).
+    - **Evita**:
+        - Puntos y coma (`;`), paréntesis.
+        - Términos en MAYÚSCULAS o con guiones bajos (ej., `HEMOGLOBINA_GLICADA`).
+        - Nombres químicos complejos.
+        - Términos en otros idiomas.
+
+2.  **Ejemplos de Uso Contextual:**
+    Para cada una de las 3 menciones finales:
+    - Escribe una oración clara (de 10 a 25 palabras) con la mención entre corchetes, imitando el estilo de una nota clínica.
+    - Cada oración debe:
+        - Incluir el concepto en `[corchetes]`.
+        - Empezar con `ejemplo: `.
+        - Ser **distinta en contexto** (ej., diferentes escenarios clínicos, quejas del paciente, hallazgos exploratorios, planes de tratamiento).
+        - Imitar el tono y el vocabulario típicos de las **notas clínicas en español** (SPACCC).
+
+# Ejemplos de Estilo de Notas Clínicas (SPACCC)
+- Paciente acude por fiebre y tos productiva de 3 días de evolución, a la auscultación se evidencian crepitantes basales derechas.
+- Refiere dolor torácico opresivo de horas de evolución, se descarta síndrome coronario agudo con troponinas negativas.
+- Hallazgo incidental de nódulo pulmonar solitario en TAC torácico realizado por traumatismo, se programa para seguimiento.
+- Antecedentes personales: HTA y dislipemia en tratamiento con enalapril y atorvastatina.
+
+# Formato de Salida
+## Conjunto Final de Menciones
+1. Mención 1
+2. Mención 2
+3. Mención 3
+
+## Ejemplos de Uso
+ejemplo: Oración con [mención 1] en contexto...
+ejemplo: Oración con [mención 2] en contexto...
+ejemplo: Oración con [mención 3] en contexto...
+
+# Ejemplos Ilustrativos
+## Ejemplo 1
+- **CUI**:
+C3539909
+- **Title**:
+Disposición alérgica
+- **Semantic group**:
+Trastornos
+- **Semantic type**:
+Enfermedad o Síndrome
+- **Mentions**:
+'Disposición alérgica', 'Disposición alérgica (trastorno)'
+
+## Conjunto Final de Menciones
+1. Disposición alérgica
+2. Predisposición alérgica
+3. Susceptibilidad alérgica
+
+## Ejemplos de Uso
+ejemplo: Paciente pediátrico con antecedentes familiares de atopia que presenta [disposición alérgica] manifestada como dermatitis atópica y rinitis.
+ejemplo: En la anamnesis se indaga sobre [predisposición alérgica] a medicamentos antes de indicar contraste iodado para la tomografía.
+ejemplo: Se recomienda evitar la exposición a alérgenos domésticos en lactantes con alta [susceptibilidad alérgica] identificada mediante prueba cutánea.
+
+## Ejemplo 2
+- **CUI**:
+C0024307
+- **Title**:
+Granulomatosis Linfomatoide
+- **Semantic group**:
+Trastornos
+- **Semantic type**:
+Proceso Neoplásico
+- **Mentions**:
+'Granulomatosis Linfomatoide', 'GL', 'Lesión inmunoproliferativa angiocéntrica', 'Granulomatosis linfomatoide (trastorno)'
+
+## Conjunto Final de Menciones
+1. Granulomatosis linfomatoide
+2. GL
+3. Lesión angiocéntrica
+
+## Ejemplos de Uso
+ejemplo: Varón de 50 años con tos y disnea, en la radiografía de tórax se observan múltiples nódulos pulmonares sugestivos de [granulomatosis linfomatoide].
+ejemplo: Paciente con diagnóstico previo de [GL] grado II que acude para control oncológico y reevaluación de tratamiento inmunosupresor.
+ejemplo: La biopsia cutánea confirmó el diagnóstico de [lesión angiocéntrica] compatible con recurrencia de su proceso linfoproliferativo.
