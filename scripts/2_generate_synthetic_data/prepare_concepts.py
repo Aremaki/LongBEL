@@ -103,6 +103,8 @@ def build_templates(df: pl.DataFrame, include_definitions: bool = True) -> pl.Da
             pl.lit("\n- **Definitions**:\n"),
             pl.col("definitions_processed"),
         ]
+    else:
+        prompt_parts += [pl.lit("\n")]
 
     prompt_parts += [
         pl.lit("- **Mentions**:\n"),
