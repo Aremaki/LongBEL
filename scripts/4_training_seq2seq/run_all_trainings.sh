@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define arrays for the parameters
-MODELS=("google/mt5-large" "facebook/bart-large" "facebook/mbart-large-50" "dmis-lab/ANGEL_pretrained" "GanjinZero/biobart-v2-large")
+MODELS=("google/mt5-large" "facebook/bart-large" "facebook/mbart-large-50" "dmis-lab/ANGEL_pretrained_bart" "GanjinZero/biobart-v2-large")
 DATASETS=("SPACCC")
 SELECTION_METHODS=("tfidf")
 AUGMENTED_OPTIONS=(false)

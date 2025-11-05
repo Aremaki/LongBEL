@@ -61,7 +61,24 @@ def load_pickle(file_path):
         return pickle.load(file)
 
 
-def compute_metrics(result_df, train_mentions, train_cuis, top_100_cuis):
+def compute_metrics(
+    result_df, train_mentions, train_cuis, top_100_cuis, per_group=False
+):
+    if per_group:
+        groups = result_df["GROUP"].unique().to_list()
+        all_metrics = []
+        for group in groups:
+            if group is None:
+                continue
+            group_df = result_df.filter(pl.col("GROUP") == group)
+            metrics = compute_metrics(
+                group_df, train_mentions, train_cuis, top_100_cuis, per_group=False
+            )
+            if isinstance(metrics, dict):
+                metrics["GROUP"] = group
+                all_metrics.append(metrics)
+        return all_metrics
+
     correct = result_df.filter(pl.col("CUI") == pl.col("CUI_gold"))
 
     recall = len(correct) / len(result_df)
@@ -238,7 +255,7 @@ def main(args) -> None:
                                         "best": is_best,
                                         "augmented_data": aug_data,
                                         "constraints": constraint,
-                                        **metrics,
+                                        **metrics,  # type: ignore
                                     }
                                     all_results.append(result_entry)
 
@@ -255,7 +272,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--datasets",
         nargs="+",
-        choices=["MedMentions", "EMEA", "MEDLINE"],
+        choices=["MedMentions", "EMEA", "MEDLINE", "SPACCC"],
         required=True,
         help="Datasets to evaluate on",
     )
@@ -305,6 +322,12 @@ if __name__ == "__main__":
         type=lambda x: (str(x).lower() == "true"),
         default=[True, False],
         help="List of constraints flags",
+    )
+    parser.add_argument(
+        "--add_group_column",
+        type=lambda x: (str(x).lower() == "true"),
+        default=True,
+        help="Add GROUP column to the result table and compute metrics per group.",
     )
     args = parser.parse_args()
     main(args)

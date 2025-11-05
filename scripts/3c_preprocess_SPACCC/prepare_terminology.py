@@ -234,6 +234,61 @@ def validate_coverage(
     return missing_pairs
 
 
+def augment_with_missing_pairs(
+    df_final: pl.DataFrame, missing_pairs: set[tuple[str, str]]
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """
+    Duplicate CUIs for missing (CUI, GROUP) pairs using a single canonical row per CUI.
+    CATEGORY is derived from GROUP, and ambiguous_level=3 marks synthetic rows.
+    """
+
+    if not missing_pairs:
+        return df_final, pl.DataFrame({})
+
+    # Build a tiny frame of missing pairs with derived CATEGORY
+    missing_df = pl.DataFrame([
+        {"CUI": cui, "GROUP": group} for cui, group in missing_pairs
+    ]).with_columns([
+        pl.col("CUI").cast(pl.Utf8),
+        pl.col("GROUP").cast(pl.Utf8),
+        pl.col("GROUP").str.slice(0, 4).alias("CATEGORY"),
+    ])
+
+    # Pick one canonical row per CUI (prefer is_main=True, then lowest ambiguous_level)
+    base_per_cui = (
+        df_final.with_columns([
+            pl.col("is_main").fill_null(False),
+            pl.col("ambiguous_level").fill_null(0),
+        ])
+        .sort(
+            ["CUI", "is_main", "ambiguous_level", "Entity"],
+            descending=[False, True, False, False],
+        )
+        .unique(subset=["CUI"], keep="first")
+        .select(["CUI", "Entity", "is_main"])
+    )
+
+    # Create duplicates by joining missing pairs with canonical rows
+    dup_df = (
+        missing_df.join(base_per_cui, on="CUI", how="left")
+        .with_columns(ambiguous_level=pl.lit(3))
+        .select(["CUI", "Entity", "CATEGORY", "GROUP", "is_main", "ambiguous_level"])
+    )
+
+    # If some CUI truly doesn't exist in df_final (edge case), keep but Entity will be null
+    # Filter those out to avoid invalid rows
+    dup_df = dup_df.filter(pl.col("Entity").is_not_null())
+
+    if dup_df.is_empty():
+        return df_final, pl.DataFrame({})
+
+    augmented = pl.concat([df_final, dup_df])
+    logging.info(
+        f"➕ Added {dup_df.height} duplicated rows to cover missing priority pairs"
+    )
+    return augmented, dup_df
+
+
 @app.command()
 def main(
     spaccc_dir: Path = typer.Option(
@@ -284,10 +339,22 @@ def main(
             terminology_df, priority_pairs
         )
 
-        # Validate coverage
-        missing_pairs = validate_coverage(clean_terminology, priority_pairs)
+        # Validate coverage (pre-augmentation)
+        missing_pairs_pre = validate_coverage(clean_terminology, priority_pairs)
 
         _ = validate_coverage(terminology_df, priority_pairs)
+
+        # If some (CUI, GROUP) exist in train/test but are missing in the final set,
+        # duplicate the CUI under the requested GROUP to ensure coverage
+        if missing_pairs_pre:
+            clean_terminology, added_rows_df = augment_with_missing_pairs(
+                clean_terminology, missing_pairs_pre
+            )
+        else:
+            added_rows_df = pl.DataFrame({})
+
+        # Re-validate after augmentation
+        missing_pairs = validate_coverage(clean_terminology, priority_pairs)
 
         # Filter mapping to only include missing priority pairs
         if missing_pairs:
@@ -319,6 +386,10 @@ def main(
         logging.info(
             f"   - Ambiguity levels: {clean_terminology['ambiguous_level'].value_counts()}"
         )
+        if added_rows_df.height if hasattr(added_rows_df, "height") else 0:
+            logging.info(
+                f"   - Added duplicates for coverage: {getattr(added_rows_df, 'height', 0)}"
+            )
 
         logging.info("✅ Processing completed successfully")
 

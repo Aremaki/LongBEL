@@ -203,6 +203,16 @@ def main(
         else:
             raise hub_err
 
+    # Unconditionally use <SEP> as the sep_token everywhere and resize embeddings if added
+    sep_token_str = "<SEP>"
+    num_added_tokens = 0
+    num_added_tokens = tokenizer.add_special_tokens({"sep_token": sep_token_str})
+    if num_added_tokens > 0:
+        model.resize_token_embeddings(len(tokenizer))
+        print("Added <SEP> as sep_token and resized token embeddings.")
+    else:
+        print("Set sep_token to <SEP> (no new tokens added).")
+
     # Make sure all model parameters are contiguous on memory. This is necessary to save model state dict as safetensor
     for name, param in model.named_parameters():
         if not param.is_contiguous():

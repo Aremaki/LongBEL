@@ -22,6 +22,7 @@ def get_prefix_allowed_tokens_fn(
         model.tokenizer.bos_token_id,
         model.tokenizer.eos_token_id,
         model.tokenizer.pad_token_id,
+        model.tokenizer.sep_token_id,
         candidates_trie,
     )
 
@@ -31,6 +32,7 @@ def _get_end_to_end_prefix_allowed_tokens_fn(
     bos_token_id: int,
     eos_token_id: int,
     pad_token_id: int,
+    sep_token_id: int,
     candidates_trie: dict[str, Trie] = None,  # type: ignore
 ):
     sent_sem_type = []
@@ -48,6 +50,8 @@ def _get_end_to_end_prefix_allowed_tokens_fn(
             trie_out = candidates_trie[
                 sem_type  # type: ignore
             ].get(clean_sent)
+            if eos_token_id in trie_out:
+                trie_out.append(sep_token_id)
             return [bos_token_id] + trie_out
         else:
             return candidates_trie[

@@ -121,6 +121,7 @@ def parse_text(
     CUI_to_GROUP,
     cat_to_group,
     sem_to_group,
+    transition_verb,
     corrected_cui=None,
     selection_method: str = "levenshtein",
     encoder: Optional[TextEncoder] = None,
@@ -291,12 +292,17 @@ def parse_text(
                 # Append only if different
                 if group not in group_annotations:
                     group_annotations.append(group)
+                    # Warning if multiple groups found
+                    if len(groups) > 1:
+                        logging.warning(
+                            f"Multiple groups {groups} found for CUI {normalized_id} (entity '{entity_text}'); using group '{group}'."
+                        )
 
             # Merge annotations in a string with | separator
             if not annotations:
                 continue
-            group_annotation = " | ".join(group_annotations)
-            annotation = " | ".join(annotations)
+            group_annotation = "<SEP>".join(group_annotations)
+            annotation = "<SEP>".join(annotations)
 
             # Find the sentence that contains the entity start
             sent_text = passage_text
@@ -358,8 +364,8 @@ def parse_text(
                     + end_entity
                     + marked_sent_text[end_in_sent:]
                 )
-            marked_sent_text += f"</s>{entity_text} is"
-            marked_with_group_text += f"</s>{entity_text} is"
+            marked_sent_text += f"<SEP>{entity_text} {transition_verb}"
+            marked_with_group_text += f"<SEP>{entity_text} {transition_verb}"
 
             # Emit the pair
             source_sentences.append(marked_sent_text)
@@ -402,10 +408,18 @@ def process_bigbio_dataset(
         row["SEM_CODE"]: row["GROUP"]
         for row in semantic_info.select(["SEM_CODE", "GROUP"]).to_dicts()
     }
+    # transition verb depend on language (french, english, spanish)
+    if language == "french":
+        transition_verb = "est"
+    elif language == "spanish":
+        transition_verb = "es"
+    else:
+        transition_verb = "is"
     # Load sentence tokenizer for requested language (default english).
     # Falls back to english if the specified model is unavailable.
     try:
         nlp = nltk.data.load(f"tokenizers/punkt/{language}.pickle")
+
     except LookupError:
         print(f"⚠️ Punkt model for '{language}' not found; falling back to English.")
         nlp = nltk.data.load("tokenizers/punkt/english.pickle")
@@ -444,6 +458,7 @@ def process_bigbio_dataset(
             CUI_to_GROUP,
             cat_to_group,
             sem_to_group,
+            transition_verb,
             corrected_cui,
             selection_method,
             encoder,
