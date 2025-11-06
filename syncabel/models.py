@@ -8,6 +8,7 @@ Core models for SynCABEL
 # LICENSE file in the root directory of this source tree.
 
 import logging
+import re
 
 from transformers import (
     AutoTokenizer,
@@ -23,17 +24,33 @@ logger = logging.getLogger(__name__)
 
 
 def skip_undesired_tokens(outputs, tokenizer):
+    # Identify the separator token (if it exists)
+    sep_token = tokenizer.sep_token if tokenizer.sep_token is not None else None
+
+    # Build the list of special tokens to remove
     if any("tag" in token for token in tokenizer.all_special_tokens):
         tokens_to_remove = tokenizer.all_special_tokens[:-3]
     elif any("{" in token for token in tokenizer.all_special_tokens):
         tokens_to_remove = tokenizer.all_special_tokens[:-4]
     else:
         tokens_to_remove = tokenizer.all_special_tokens
+
+    # Keep the sep_token if defined
+    if sep_token in tokens_to_remove:
+        tokens_to_remove = [tok for tok in tokens_to_remove if tok != sep_token]
+
     cleaned_outputs = []
     for sequence in outputs:
+        # Remove undesired special tokens
         for token in tokens_to_remove:
-            sequence = sequence.replace(token, "")  # Remove unwanted special tokens
+            sequence = sequence.replace(token, "")
+
+        # Remove spaces *immediately* after the sep_token (e.g. "<sep>  text" → "<sep>text")
+        if sep_token:
+            sequence = re.sub(rf"({re.escape(sep_token)})\s+", r"\1", sequence)
+
         cleaned_outputs.append(sequence.strip())
+
     return cleaned_outputs
 
 
