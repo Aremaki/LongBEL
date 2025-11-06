@@ -61,44 +61,52 @@ ejemplo: Oración con [mención 5] en contexto...
 # Ejemplos Ilustrativos
 ## Caso 1
 - **CUI**:
-C3539909
+293591000
 - **Title**:
-Disposición alérgica
+alergia a dextromoramida (hallazgo)
 - **Semantic group**:
-Trastornos
+SINTOMA
 - **Semantic type**:
-Enfermedad o Síndrome
+hallazgo
 - **Mentions**:
-'Disposición alérgica', 'Disposición alérgica (trastorno)'
+'alergia a dextromoramida'
 
-## Conjunto Final de Menciones
-1. Disposición alérgica
-2. Predisposición alérgica
-3. Susceptibilidad alérgica
+## Conjunto Final de Menciones  
+1. alergia a dextromoramida  
+2. hipersensibilidad a dextromoramida  
+3. reacción alérgica a dextromoramida  
+4. antecedente de alergia a dextromoramida  
+5. intolerancia a dextromoramida  
 
-## Ejemplos de Uso
-ejemplo: Paciente pediátrico con antecedentes familiares de atopia que presenta [disposición alérgica] manifestada como dermatitis atópica y rinitis.
-ejemplo: En la anamnesis se indaga sobre [predisposición alérgica] a medicamentos antes de indicar contraste iodado para la tomografía.
-ejemplo: Se recomienda evitar la exposición a alérgenos domésticos en lactantes con alta [susceptibilidad alérgica] identificada mediante prueba cutánea.
+## Ejemplos de Uso  
+ejemplo: Se recoge en antecedentes personales [alergia a dextromoramida], por lo que se contraindica su uso en el perioperatorio.  
+ejemplo: El paciente refiere [hipersensibilidad a dextromoramida], con aparición previa de exantema pruriginoso tras administración oral.  
+ejemplo: Se suspende el tratamiento por [reacción alérgica a dextromoramida] con cuadro de urticaria y edema periorbitario.  
+ejemplo: Se documenta en la historia clínica [antecedente de alergia a dextromoramida], sin requerimiento de atención hospitalaria previa.  
+ejemplo: Informa el paciente de episodios de náuseas y prurito atribuidos a [intolerancia a dextromoramida], descartándose otras etiologías.
 
 ## Caso 2
 - **CUI**:
-C0024307
+83445009
 - **Title**:
-Granulomatosis Linfomatoide
+cambio en la longitud de los huesos tarsianos y metatarsianos (procedimiento)
 - **Semantic group**:
-Trastornos
+PROCEDIMIENTO
 - **Semantic type**:
-Proceso Neoplásico
+procedimiento
 - **Mentions**:
-'Granulomatosis Linfomatoide', 'GL', 'Lesión inmunoproliferativa angiocéntrica', 'Granulomatosis linfomatoide (trastorno)'
+'cambio en la longitud de los huesos tarsianos y metatarsianos', 'cambio en la longitud de huesos de tarso y metatarso'
 
 ## Conjunto Final de Menciones
-1. Granulomatosis linfomatoide
-2. GL
-3. Lesión angiocéntrica
+1. cambio en la longitud de los huesos tarsianos y metatarsianos  
+2. alargamiento de huesos tarso-metatarsianos  
+3. acortamiento de huesos del pie  
+4. modificación de la longitud de tarso y metatarso  
+5. cirugía de alargamiento óseo del pie  
 
 ## Ejemplos de Uso
-ejemplo: Varón de 50 años con tos y disnea, en la radiografía de tórax se observan múltiples nódulos pulmonares sugestivos de [granulomatosis linfomatoide].
-ejemplo: Paciente con diagnóstico previo de [GL] grado II que acude para control oncológico y reevaluación de tratamiento inmunosupresor.
-ejemplo: La biopsia cutánea confirmó el diagnóstico de [lesión angiocéntrica] compatible con recurrencia de su proceso linfoproliferativo.
+ejemplo: Durante la intervención se realizó un [cambio en la longitud de los huesos tarsianos y metatarsianos] por deformidad congénita.  
+ejemplo: Paciente ingresada para [alargamiento de huesos tarso-metatarsianos] debido a discrepancia de longitud en ambos pies.  
+ejemplo: Se programó [acortamiento de huesos del pie] para mejorar la funcionalidad tras fractura previa.  
+ejemplo: El equipo indica [modificación de la longitud de tarso y metatarso] como tratamiento ante la presencia de pie plano severo.  
+ejemplo: Valorado por traumatología, se decide [cirugía de alargamiento óseo del pie] para corregir malformación estructural.
