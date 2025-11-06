@@ -17,12 +17,11 @@ Realiza las siguientes tareas:
 
 1.  **Selección y Generación de Menciones:**
     - Primero, evalúa qué menciones existentes suenan más naturales en la redacción clínica profesional (contexto de historiales médicos, informes de urgencias, etc.).
-    - Mantén solo las menciones más fluidas de la lista existente.
-    - Luego, genera menciones adicionales de alta calidad que:
+   - Genera menciones adicionales de alta calidad que:
         * Añadan variaciones naturales que los clínicos usarían (sinónimos, abreviaturas comunes, formas coloquiales dentro del ámbito médico).
         * Cubran diferentes convenciones (acrónimos, nombres completos, nombres por su función o síntoma).
         * Complementen las menciones existentes.
-    - El total debe ser de **3 menciones** (una mezcla de las existentes conservadas y las newly generated).
+    - El total debe ser de **5 menciones** (una mezcla de las existentes conservadas y las newly generated).
     - **Evita**:
         - Puntos y coma (`;`), paréntesis.
         - Términos en MAYÚSCULAS o con guiones bajos (ej., `HEMOGLOBINA_GLICADA`).
@@ -30,7 +29,7 @@ Realiza las siguientes tareas:
         - Términos en otros idiomas.
 
 2.  **Ejemplos de Uso Contextual:**
-    Para cada una de las 3 menciones finales:
+    Para cada una de las 5 menciones finales:
     - Escribe una oración clara (de 10 a 25 palabras) con la mención entre corchetes, imitando el estilo de una nota clínica.
     - Cada oración debe:
         - Incluir el concepto en `[corchetes]`.
@@ -49,14 +48,18 @@ Realiza las siguientes tareas:
 1. Mención 1
 2. Mención 2
 3. Mención 3
+4. Mención 4
+5. Mención 5
 
 ## Ejemplos de Uso
 ejemplo: Oración con [mención 1] en contexto...
 ejemplo: Oración con [mención 2] en contexto...
 ejemplo: Oración con [mención 3] en contexto...
+ejemplo: Oración con [mención 4] en contexto...
+ejemplo: Oración con [mención 5] en contexto...
 
 # Ejemplos Ilustrativos
-## Ejemplo 1
+## Caso 1
 - **CUI**:
 C3539909
 - **Title**:
@@ -78,7 +81,7 @@ ejemplo: Paciente pediátrico con antecedentes familiares de atopia que presenta
 ejemplo: En la anamnesis se indaga sobre [predisposición alérgica] a medicamentos antes de indicar contraste iodado para la tomografía.
 ejemplo: Se recomienda evitar la exposición a alérgenos domésticos en lactantes con alta [susceptibilidad alérgica] identificada mediante prueba cutánea.
 
-## Ejemplo 2
+## Caso 2
 - **CUI**:
 C0024307
 - **Title**:

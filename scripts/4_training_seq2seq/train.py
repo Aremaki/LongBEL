@@ -323,8 +323,8 @@ def main(
 
     # Training params
     num_train_epochs = 200
-    train_max_batch = 25
-    eval_max_batch = 25
+    train_max_batch = 16
+    eval_max_batch = 16
     eval_accumulation_steps = None
     gradient_accumulation_steps = 1
     ddp_backend = "nccl"  # Enable Distributed Data Parallel with NCCL backend
