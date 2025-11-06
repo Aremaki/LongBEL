@@ -10,15 +10,27 @@
 #SBATCH --output=logs/log_out%j.out    # name of output file
 #SBATCH --error=logs/log_err%j.out     # name of error file (here, in common with the output file)
  
-# Cleans out the modules loaded in interactive and inherited by default 
+set -e
+mkdir -p logs
+
+# Clean modules and load environment
 module purge
- 
-# Loading of modules
 module load arch/h100
 module load pytorch-gpu/py3/2.3.1
 
 export OMP_NUM_THREADS=1
 
-# Train models
-torchrun --nproc_per_node=1 scripts/4_training_seq2seq/train.py $SCRIPT_ARGS
-echo SCRIPT FINISHED
+# Diagnostics
+echo "Running on host: $(hostname)"
+echo "GPUs per node: $SLURM_GPUS_ON_NODE"
+echo "Job ID: $SLURM_JOB_ID"
+echo "Starting training..."
+
+# Launch training
+GPUS_PER_NODE=${SLURM_GPUS_ON_NODE:-1}
+torchrun --nproc_per_node=$GPUS_PER_NODE \
+         --master-addr=$(hostname) \
+         --master-port=$((10000 + $RANDOM % 50000)) \
+         scripts/4_training_seq2seq/train.py $SCRIPT_ARGS
+
+echo "SCRIPT FINISHED"

@@ -78,7 +78,7 @@ fi
 mkdir -p "${OUT_DIR}"
 
 echo "[INFO] Launching generation for ${DATASET} ${VARIANT} chunk=${CHUNK}"
-python scripts/2_generate_synthetic_data/generate.py \
+python -u scripts/2_generate_synthetic_data/generate.py \
   --chunk "${CHUNK}" \
   --user-prompts-dir "${USER_PROMPTS_DIR}" \
   --out-dir "${OUT_DIR}" \
