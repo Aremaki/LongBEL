@@ -205,6 +205,7 @@ def main(
         batch_sources = test_data["source"][i : i + batch_size]
         prefix_allowed_tokens_fn = get_prefix_allowed_tokens_fn(
             model,
+            decoder_start_token_id,
             batch_sources,
             candidates_trie=trie_legal_tokens,
         )
