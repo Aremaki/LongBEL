@@ -83,8 +83,9 @@ def add_cui_column(df: pl.DataFrame, umls_df: pl.DataFrame) -> pl.DataFrame:
     return result
 
 
-def _extract_mention_and_type(text: str) -> tuple[str, str]:
+def _extract_mention_and_type(text: str, transition_verb: str) -> tuple[str, str]:
     """Extract the mention and type from a string"""
+    mention = text.split("<SEP>")[-1].rsplit(f" {transition_verb}", 1)[0].strip()
     mention = text.split("</s>")[-1].rsplit(" is", 1)[0].strip()
     type_match = re.search(r"\{(.*?)\}", text)
     ent_type = type_match.group(1).strip() if type_match else "Unknown"
@@ -92,12 +93,16 @@ def _extract_mention_and_type(text: str) -> tuple[str, str]:
 
 
 def structure_data(
-    umls_df: pl.DataFrame, source: list[str], target: list[str], pred: list[str]
+    umls_df: pl.DataFrame,
+    source: list[str],
+    target: list[str],
+    pred: list[str],
+    transition_verb: str,
 ) -> pl.DataFrame:
     mentions = []
     ent_types = []
     for sentence in source:
-        mention, ent_type = _extract_mention_and_type(sentence)
+        mention, ent_type = _extract_mention_and_type(sentence, transition_verb)
         mentions.append(mention)
         ent_types.append(ent_type)
     df_mentions = pl.DataFrame({"Mention": mentions}).with_row_index("row_idx")
@@ -216,7 +221,17 @@ def main(args) -> None:
     all_results = []
 
     for dataset in datasets:
-        dataset_short = "MM" if dataset == "MedMentions" else dataset
+        if dataset == "MedMentions":
+            dataset_short = "MM"
+            transition_verb = "is"
+        elif dataset == "QUAERO":
+            transition_verb = "est"
+            dataset_short = "QUAERO"
+        elif dataset == "SPACCC":
+            transition_verb = "es"
+            dataset_short = "SPACCC"
+        else:
+            raise ValueError(f"Unknown dataset: {dataset}")
         umls_path = (
             Path("data")
             / "UMLS_processed"
@@ -245,7 +260,7 @@ def main(args) -> None:
             train_mentions = set()
             train_ent_types = []
             for sentence in train_source_list:
-                mention, ent_type = _extract_mention_and_type(sentence)
+                mention, ent_type = _extract_mention_and_type(sentence, transition_verb)
                 train_mentions.add(mention)
                 train_ent_types.append(ent_type)
 
@@ -302,6 +317,7 @@ def main(args) -> None:
                                         source=source,
                                         target=target,
                                         pred=pred,
+                                        transition_verb=transition_verb,
                                     )
                                     print(result_df.head())
                                     print(result_df.shape)
