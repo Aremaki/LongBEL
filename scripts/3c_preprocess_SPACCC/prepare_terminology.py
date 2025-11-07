@@ -289,6 +289,61 @@ def augment_with_missing_pairs(
     return augmented, dup_df
 
 
+def _complete_cui_entity_group_combinations(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    For each CUI, ensure all its associated entities appear for all its associated groups.
+    This is a simplified approach.
+    """
+    logging.info("Completing CUI-Entity-GROUP combinations...")
+
+    # Create a frame with all combinations of CUI, Entity, and GROUP
+    all_combinations = df.select(["CUI", "Entity", "GROUP"]).unique()
+
+    # For each CUI, get all its unique entities and groups
+    cui_to_entities = all_combinations.group_by("CUI").agg(
+        pl.col("Entity").unique().alias("all_entities")
+    )
+    cui_to_groups = all_combinations.group_by("CUI").agg(
+        pl.col("GROUP").unique().alias("all_groups")
+    )
+
+    # Create the full cartesian product of entities and groups for each CUI
+    full_product = (
+        cui_to_entities.join(cui_to_groups, on="CUI")
+        .explode("all_entities")
+        .explode("all_groups")
+        .rename({"all_entities": "Entity", "all_groups": "GROUP"})
+    )
+
+    # Use the original data as the source of truth for other columns
+    # and join it with the full product.
+    # This will put nulls where a combination did not originally exist.
+    completed_df = full_product.join(
+        df.unique(subset=["CUI", "Entity", "GROUP"]),
+        on=["CUI", "Entity", "GROUP"],
+        how="left",
+    )
+
+    # Forward fill missing values within each CUI-Entity group.
+    # This assumes that for a given CUI-Entity pair, other attributes are consistent.
+    completed_df = completed_df.with_columns(
+        pl.all().forward_fill().over(["CUI", "Entity"])
+    )
+
+    # For any remaining nulls (e.g., a CUI-Entity pair only existed with nulls), backfill.
+    completed_df = completed_df.with_columns(
+        pl.all().backward_fill().over(["CUI", "Entity"])
+    )
+
+    # Ensure CATEGORY is consistent with GROUP
+    completed_df = completed_df.with_columns(CATEGORY=pl.col("GROUP").str.slice(0, 4))
+
+    logging.info(
+        f"DF size before completion: {df.height}, after: {completed_df.height}"
+    )
+    return completed_df.unique()
+
+
 @app.command()
 def main(
     spaccc_dir: Path = typer.Option(
@@ -356,6 +411,9 @@ def main(
         # Re-validate after augmentation
         missing_pairs = validate_coverage(clean_terminology, priority_pairs)
 
+        # Complete CUI-Entity-GROUP combinations
+        clean_terminology = _complete_cui_entity_group_combinations(clean_terminology)
+
         # Filter mapping to only include missing priority pairs
         if missing_pairs:
             mapping_df = (
@@ -382,7 +440,30 @@ def main(
             logging.info(f"Loaded {snomed_df.height} SNOMED FSN entries")
 
             # Join with clean_terminology on CUI
-            clean_terminology = clean_terminology.join(snomed_df, on="CUI")
+            clean_terminology = (
+                clean_terminology.join(snomed_df, on="CUI", how="left")
+                .with_columns(
+                    pl.col("Entity")
+                    .str.replace_all("\xa0", " ", literal=True)
+                    .str.replace_all(r"\s*\(NOS\)\s*$", "")
+                    .str.replace_all(r",\sNOS\s*$", "")
+                    .str.replace_all(r"\sNOS\s*$", "")
+                    .str.replace_all(r"\s*\(SAI\)\s*$", "")
+                    .str.replace_all(r",\sSAI\s*$", "")
+                    .str.replace_all(r"\sSAI\s*$", "")
+                )
+                .with_columns(
+                    pl.col("Title")
+                    .str.replace_all("\xa0", " ", literal=True)
+                    .str.replace_all(r"\s*\(NOS\)\s*$", "")
+                    .str.replace_all(r",\sNOS\s*$", "")
+                    .str.replace_all(r"\sNOS\s*$", "")
+                    .str.replace_all(r"\s*\(SAI\)\s*$", "")
+                    .str.replace_all(r",\sSAI\s*$", "")
+                    .str.replace_all(r"\sSAI\s*$", "")
+                )
+                .unique()
+            )
 
             logging.info(
                 f"After joining with SNOMED_FSN: {clean_terminology.height} rows, "

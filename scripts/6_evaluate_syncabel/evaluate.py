@@ -11,6 +11,78 @@ logging.basicConfig(
 )
 
 
+def add_cui_column(df: pl.DataFrame, umls_df: pl.DataFrame) -> pl.DataFrame:
+    # 1) Prepare umls_df: clean Entity strings
+    umls_df = umls_df.select(["CUI", "Entity", "GROUP"]).with_columns(
+        pl.col("Entity")
+        .str.replace_all("\xa0", " ", literal=True)
+        .str.replace_all("{", "(", literal=True)
+        .str.replace_all("}", ")", literal=True)
+        .str.replace_all("[", "(", literal=True)
+        .str.replace_all("]", ")", literal=True)
+    )
+
+    # 2) Prepare df1: keep original, split into list, and compute number of terms
+    df_prep = (
+        df.with_row_index("row_idx")
+        .with_columns([
+            pl.col("Entity").alias("Entity_orig"),
+            pl.col("Entity").str.split("<SEP>").alias("Entity_split"),
+        ])
+        .with_columns(
+            pl.col("Entity_split")
+            .map_elements(
+                lambda lst: [{"pos": i, "term": t} for i, t in enumerate(lst)],
+                return_dtype=pl.List(
+                    pl.Struct([pl.Field("pos", pl.Int64), pl.Field("term", pl.Utf8)])
+                ),  # type: ignore
+            )
+            .alias("term_structs")
+        )
+    )
+
+    # 3) explode the positional structs, then extract pos and term columns
+    df_exp = (
+        df_prep.explode("term_structs")
+        .with_columns([
+            # term_structs are Python dicts after apply; extract fields with .apply
+            pl.col("term_structs")
+            .map_elements(lambda d: d["term"], return_dtype=pl.Utf8)
+            .alias("term"),
+            pl.col("term_structs")
+            .map_elements(lambda d: d["pos"], return_dtype=pl.Int64)
+            .alias("pos"),
+        ])
+        .select(["row_idx", "Entity_orig", "GROUP", "term", "pos"])
+    )
+
+    # 4) join exploded terms with umls_df on term and GROUP
+    df_exp = df_exp.join(
+        umls_df, left_on=["term", "GROUP"], right_on=["Entity", "GROUP"], how="left"
+    )
+    # 5) Group back by original row; collect CUIs in exploded order (including possible nulls),
+    #    count nulls and keep n_terms for comparison
+
+    df_exp = df_exp.group_by(["row_idx", "Entity_orig", "GROUP"]).agg([
+        # collect CUI values in the order of the exploded rows (pos order is preserved by explode)
+        pl.col("CUI").unique().alias("cu_list"),
+        # how many CUI values are null (i.e., missing mappings)
+        pl.col("CUI").is_null().sum().alias("n_nulls"),
+    ])
+
+    # 6) keep only rows where there are zero nulls (every term matched)
+    df_exp = df_exp.filter(pl.col("n_nulls") == 0)
+
+    # 7) join the CUIs in order with '+'
+    result = df_exp.with_columns(pl.col("cu_list").list.join("+").alias("CUI")).select([
+        pl.col("Entity_orig").alias("Entity"),
+        "GROUP",
+        "CUI",
+        "row_idx",
+    ])
+    return result
+
+
 def _extract_mention_and_type(text: str) -> tuple[str, str]:
     """Extract the mention and type from a string"""
     mention = text.split("</s>")[-1].rsplit(" is", 1)[0].strip()
@@ -28,31 +100,29 @@ def structure_data(
         mention, ent_type = _extract_mention_and_type(sentence)
         mentions.append(mention)
         ent_types.append(ent_type)
+    df_mentions = pl.DataFrame({"Mention": mentions}).with_row_index("row_idx")
     df_source = pl.DataFrame({
-        "Mention": mentions,
         "GROUP": ent_types,
-        "Entity_gold": target,
+        "Entity": target,
     })
     df_pred = pl.DataFrame({"GROUP": ent_types, "Entity": pred})
-    umls_df = umls_df.select(["CUI", "Entity", "GROUP"]).with_columns(
-        pl.col("Entity")
-        .str.replace_all("\xa0", " ", literal=True)
-        .str.replace_all("{", "(", literal=True)
-        .str.replace_all("}", ")", literal=True)
-        .str.replace_all("[", "(", literal=True)
-        .str.replace_all("]", ")", literal=True)
-    )
-    df_source = df_source.join(
-        umls_df,
-        left_on=["Entity_gold", "GROUP"],
-        right_on=["Entity", "GROUP"],
-        how="left",
-    ).rename({"CUI": "CUI_gold"})
-    df_pred = df_pred.join(
-        umls_df, on=["Entity", "GROUP"], how="left", suffix="_pred"
-    ).drop("GROUP")
+
+    # add CUI columns
+    df_source = add_cui_column(df_source, umls_df).rename({
+        "CUI": "CUI_gold",
+        "Entity": "Entity_gold",
+    })
+    df_pred = add_cui_column(df_pred, umls_df).drop("GROUP")
+
     # concat pred and source dataframes
-    result = pl.concat([df_pred, df_source], how="horizontal")
+    result = pl.concat(
+        [
+            df_pred,
+            df_source,
+            df_mentions,
+        ],
+        how="align",
+    )
     return result
 
 
@@ -141,11 +211,12 @@ def main(args) -> None:
     best = args.best
     augmented_data = args.augmented_data
     constraints = args.constraints
+    add_group_column = args.add_group_column
 
     all_results = []
 
     for dataset in datasets:
-        dataset_short = "MM" if dataset == "MedMentions" else "QUAERO"
+        dataset_short = "MM" if dataset == "MedMentions" else dataset
         umls_path = (
             Path("data")
             / "UMLS_processed"
@@ -182,11 +253,7 @@ def main(args) -> None:
                 "Entity": train_target_list,
                 "GROUP": train_ent_types,
             })
-            train_df = train_df.join(
-                umls_df.select(["CUI", "Entity", "GROUP"]),
-                on=["Entity", "GROUP"],
-                how="left",
-            )
+            train_df = add_cui_column(train_df, umls_df)
             train_cuis = set(train_df["CUI"].drop_nulls())
             top_100_cuis = set(train_df["CUI"].value_counts().head(100)["CUI"])
 
@@ -244,9 +311,11 @@ def main(args) -> None:
                                         train_mentions,
                                         train_cuis,
                                         top_100_cuis,
+                                        add_group_column,
                                     )
 
-                                    result_entry = {
+                                    # Support both overall metrics (dict) and per-group metrics (list of dicts)
+                                    common_fields = {
                                         "model_name": model_name,
                                         "dataset": dataset,
                                         "selection_method": selection_method,
@@ -255,9 +324,13 @@ def main(args) -> None:
                                         "best": is_best,
                                         "augmented_data": aug_data,
                                         "constraints": constraint,
-                                        **metrics,  # type: ignore
                                     }
-                                    all_results.append(result_entry)
+
+                                    if isinstance(metrics, list):
+                                        for m in metrics:
+                                            all_results.append({**common_fields, **m})
+                                    else:
+                                        all_results.append({**common_fields, **metrics})
 
     results_df = pl.DataFrame(all_results)
     # Ensure the parent directory exists before writing
