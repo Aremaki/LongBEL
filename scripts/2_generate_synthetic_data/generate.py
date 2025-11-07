@@ -75,6 +75,7 @@ def generate_batches(
     tokenizer,
     user_prompts_df: pl.DataFrame,
     system_prompt: str,
+    n_examples: int = 5,
     max_new_tokens: int = 512,
     batch_size: int = 16,
     max_retries: int = 5,
@@ -191,9 +192,9 @@ def generate_batches(
                     if template_answer in line and bool(compiled_regex.search(line))
                 ]
 
-                if isinstance(examples, list) and len(examples) >= 3:
+                if isinstance(examples, list) and len(examples) >= n_examples:
                     success_mask[i] = True
-                    batch_final_text[i] = "\n".join(examples[:3])  # type: ignore
+                    batch_final_text[i] = "\n".join(examples[:n_examples])  # type: ignore
                 else:
                     # Keep best-effort text for debugging; will retry if attempts left
                     batch_final_text[i] = f"FAIL !!\n\n{decoded_text}"  # type: ignore
@@ -250,6 +251,7 @@ def run(
     max_new_tokens: int = 512,
     batch_size: int = 16,
     max_retries: int = 5,
+    n_examples: int = 5,
 ) -> None:
     """Generate synthetic sentences for a chunk of user prompts."""
     user_prompts_path = user_prompts_dir / f"sample_{chunk}.parquet"
@@ -270,6 +272,7 @@ def run(
         tokenizer,
         user_prompts_df,
         system_prompt=system_prompt,
+        n_examples=n_examples,
         max_new_tokens=max_new_tokens,
         batch_size=batch_size,
         max_retries=max_retries,

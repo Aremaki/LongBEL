@@ -17,6 +17,7 @@ set -euo pipefail
 DATASET=${1:-}
 VARIANT=${2:-}
 CHUNK=${3:-}
+N_EXAMPLES=${4:-5}  # Number of examples to generate per prompt
 
 if [[ -z "${DATASET}" || -z "${VARIANT}" || -z "${CHUNK}" ]]; then
   echo "Usage: sbatch $(basename "$0") <MM|QUAERO|SPACCC> <def|no_def> <chunk>"
@@ -86,6 +87,7 @@ python -u scripts/2_generate_synthetic_data/generate.py \
   --system-prompt-path "${SYSTEM_PROMPT_PATH}" \
   --batch-size "${BATCH_SIZE}" \
   --max-new-tokens "${MAX_NEW_TOKENS}" \
-  --max-retries "${MAX_RETRIES}"
+  --max-retries "${MAX_RETRIES}" \
+  --n-examples "${N_EXAMPLES}"
 
 echo "SCRIPT FINISHED: ${DATASET} ${VARIANT} chunk=${CHUNK}"
