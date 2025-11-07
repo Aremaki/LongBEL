@@ -260,8 +260,12 @@ def main(args) -> None:
                                     all_results.append(result_entry)
 
     results_df = pl.DataFrame(all_results)
-    results_df.write_csv("evaluation_results.csv")
-    logging.info("Evaluation finished. Results saved to evaluation_results.csv")
+    # Ensure the parent directory exists before writing
+    output_path = Path(args.output)
+    if output_path.parent != Path(""):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    results_df.write_csv(str(output_path))
+    logging.info(f"Evaluation finished. Results saved to {output_path}")
 
 
 if __name__ == "__main__":
@@ -322,6 +326,13 @@ if __name__ == "__main__":
         type=lambda x: (str(x).lower() == "true"),
         default=[True, False],
         help="List of constraints flags",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default="evaluation_results.csv",
+        help="Output CSV filename or path. Example: result_spaccc.csv",
     )
     parser.add_argument(
         "--add_group_column",

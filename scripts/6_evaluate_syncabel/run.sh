@@ -12,4 +12,6 @@ python scripts/6_evaluate_syncabel/evaluate.py \
     --with_group True False \
     --best True False \
     --augmented_data True False \
-    --constraints True False
+    --constraints True False \
+    --output "evaluation_results_spaccc.csv" \
+    --add_group_column True
