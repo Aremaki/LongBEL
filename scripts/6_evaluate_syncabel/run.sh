@@ -6,7 +6,7 @@
 
 python scripts/6_evaluate_syncabel/evaluate.py \
     --datasets SPACCC \
-    --model_names "mt5-large" "bart-large" "mbart-large-50" "ANGEL_pretrained" "biobart-v2-large" \
+    --model_names "mt5-large" "bart-large" "mbart-large-50" "ANGEL_pretrained_bart" "biobart-v2-large" \
     --selection_methods "tfidf" \
     --num_beams 1 5 10 15 20 \
     --with_group True False \
