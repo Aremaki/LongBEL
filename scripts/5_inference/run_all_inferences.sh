@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define arrays for the parameters
-MODELS=("mt5-large" "bart-large" "mbart-large-50" "ANGEL_pretrained" "biobart-v2-large")
+MODELS=("mt5-large" "bart-large" "mbart-large-50" "ANGEL_pretrained_bart" "biobart-v2-large")
 DATASETS=("SPACCC")
 NUM_BEAMS=(1 5 10)
 SELECTION_METHODS=("tfidf")
