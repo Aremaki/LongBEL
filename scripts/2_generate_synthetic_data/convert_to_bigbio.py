@@ -45,7 +45,7 @@ def process_sentence(
             {
                 "id": f"{document_id}_{sentence_num}__text",
                 "type": "abstract",
-                "text": [sentence + "\n"],
+                "text": [sentence.replace("[", "").replace("]", "") + "\n"],
                 "offsets": [[0, len(sentence)]],
             }
         ],
@@ -58,6 +58,10 @@ def process_sentence(
     for match_num, match in enumerate(re.finditer(pattern, sentence), 1):
         entity = match.group(1)  # the text inside [ ... ]
         start, end = match.span(1)  # offsets of the inner group (entity only)
+        # take into account "[]" removal
+        offset_correction = 2 * match_num - 1
+        start -= offset_correction
+        end -= offset_correction
         output["entities"].append({
             "id": f"{document_id}_{sentence_num}_T{match_num}",
             "type": category,
