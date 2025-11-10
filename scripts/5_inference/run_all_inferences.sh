@@ -5,7 +5,7 @@ MODELS=("mt5-large" "bart-large" "mbart-large-50" "ANGEL_pretrained_bart" "bioba
 DATASETS=("SPACCC")
 NUM_BEAMS=(1 5 10)
 SELECTION_METHODS=("tfidf")
-AUGMENTED_OPTIONS=(false)
+AUGMENTED_OPTIONS=("human_only" "synth_only" "full")
 WITH_GROUP_OPTIONS=(true)
 BEST_OPTIONS=(true false)
 BATCH_SIZE=64
@@ -18,10 +18,7 @@ for dataset in "${DATASETS[@]}"; do
                     for model in "${MODELS[@]}"; do
                         for best in "${BEST_OPTIONS[@]}"; do
                             # Build the arguments for the python script
-                            ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --num-beams ${num_beams} --batch-size ${BATCH_SIZE}"
-                            if [ "$augmented" = true ]; then
-                                ARGS="${ARGS} --augmented-data"
-                            fi
+                            ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --num-beams ${num_beams} --batch-size ${BATCH_SIZE} --augmented-data ${augmented}"
                             if [ "$group" = true ]; then
                                 ARGS="${ARGS} --with-group"
                             fi

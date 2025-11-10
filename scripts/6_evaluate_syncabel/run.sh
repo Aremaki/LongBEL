@@ -11,7 +11,7 @@ python scripts/6_evaluate_syncabel/evaluate.py \
     --num_beams 1 5 10 15 20 \
     --with_group True False \
     --best True False \
-    --augmented_data True False \
+    --augmented_data "human_only" "synth_only" "full" \
     --constraints True False \
     --output "evaluation_results_spaccc.csv" \
     --add_group_column True

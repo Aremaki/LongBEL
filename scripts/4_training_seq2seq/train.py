@@ -156,7 +156,7 @@ def main(
     model_name: str,
     lr: float,
     dataset_name: str,
-    augmented_data: bool,
+    augmented_data: str,
     with_group: bool = False,
     selection_method: str = "embedding",
 ):
@@ -178,7 +178,7 @@ def main(
         )
 
     print(
-        f"The model {model_name} will start training with learning rate {lr} on dataset {dataset_name} {'with' if augmented_data else 'without'} augmented data and selection method {selection_method}."
+        f"The model {model_name} will start training with learning rate {lr} on dataset {augmented_data} {dataset_name} and selection method {selection_method}."
     )
     model_short_name = model_name.split("/")[-1]
     # The Trainer will handle the distributed training setup automatically.
@@ -233,14 +233,6 @@ def main(
     # Load and preprocess data
     with_group_extension = "_with_group" if with_group else ""
     data_folder = Path("data/final_data")
-    train_source_data = load_pickle(
-        data_folder
-        / dataset_name
-        / f"train_{selection_method}_source{with_group_extension}.pkl"
-    )
-    train_target_data = load_pickle(
-        data_folder / dataset_name / f"train_{selection_method}_target.pkl"
-    )
     validation_source_path = (
         data_folder
         / dataset_name
@@ -261,50 +253,83 @@ def main(
         data_folder / dataset_name / f"{split_name}_{selection_method}_target.pkl"
     )
 
-    train_data = {"source": train_source_data, "target": train_target_data}
-
     validation_data = {
         "source": validation_source_data,
         "target": validation_target_data,
     }
 
     validation_dataset = Dataset.from_dict(validation_data)
+
+    # Reduce validation dataset to 20% to save time during training
     indexes = list(range(len(validation_dataset)))
     split = int(len(validation_dataset) * 0.9)
-    split_train = indexes[:split]
     split_val = indexes[split:]
-    train_dataset = concatenate_datasets([
-        Dataset.from_dict(train_data),
-        validation_dataset.select(split_train),
-    ])
     validation_dataset = validation_dataset.select(split_val)
 
-    if augmented_data:
+    if augmented_data in ["human_only", "full"]:
+        human_train_source_data = load_pickle(
+            data_folder
+            / dataset_name
+            / f"train_{selection_method}_source{with_group_extension}.pkl"
+        )
+        human_train_target_data = load_pickle(
+            data_folder / dataset_name / f"train_{selection_method}_target.pkl"
+        )
+        human_train_data = {
+            "source": human_train_source_data,
+            "target": human_train_target_data,
+        }
+        human_train_dataset = Dataset.from_dict(human_train_data)
+        # if validation add the rest to training dataset
+        if split_name == "validation":
+            split_train = indexes[:split]
+            human_train_dataset = concatenate_datasets([
+                human_train_dataset,
+                validation_dataset.select(split_train),
+            ])
+
+    if augmented_data in ["synth_only", "full"]:
         if dataset_name == "MedMentions":
-            train_generated_source_data = load_pickle(
+            synth_train_source_data = load_pickle(
                 data_folder
                 / "SynthMM"
                 / f"train_{selection_method}_source{with_group_extension}.pkl"
             )
-            train_generated_target_data = load_pickle(
+            synth_train_target_data = load_pickle(
                 data_folder / "SynthMM" / f"train_{selection_method}_target.pkl"
             )
-        else:
-            train_generated_source_data = load_pickle(
+        elif dataset_name == "QUAERO":
+            synth_train_source_data = load_pickle(
                 data_folder
                 / "SynthQUAERO"
                 / f"train_{selection_method}_source{with_group_extension}.pkl"
             )
-            train_generated_target_data = load_pickle(
+            synth_train_target_data = load_pickle(
                 data_folder / "SynthQUAERO" / f"train_{selection_method}_target.pkl"
             )
-        train_generated_data = {
-            "source": train_generated_source_data,
-            "target": train_generated_target_data,
+        else:  # SPACCC
+            synth_train_source_data = load_pickle(
+                data_folder
+                / "SynthSPACCC"
+                / f"train_{selection_method}_source{with_group_extension}.pkl"
+            )
+            synth_train_target_data = load_pickle(
+                data_folder / "SynthSPACCC" / f"train_{selection_method}_target.pkl"
+            )
+        synth_train_data = {
+            "source": synth_train_source_data,
+            "target": synth_train_target_data,
         }
+        synth_train_dataset = Dataset.from_dict(synth_train_data)
+
+    if augmented_data == "human_only":
+        train_dataset = human_train_dataset  # type: ignore
+    elif augmented_data == "synth_only":
+        train_dataset = synth_train_dataset  # type: ignore
+    else:  # full
         train_dataset = concatenate_datasets([
-            train_dataset,
-            Dataset.from_dict(train_generated_data),
+            human_train_dataset,  # type: ignore
+            synth_train_dataset,  # type: ignore
         ])
 
     tokenized_datasets = {
@@ -346,12 +371,12 @@ def main(
     output_dir = (
         Path("models")
         / "NED"
-        / f"{dataset_name}_{'augmented' if augmented_data else 'original'}_{selection_method}{'_with_group' if with_group else ''}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
         / model_short_name
     )
     logging_dir = (
         Path("logs")
-        / f"{dataset_name}_{'augmented' if augmented_data else 'original'}_{selection_method}{'_with_group' if with_group else ''}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
         / model_short_name
     )
     print(f"BATCH SIZE : {train_max_batch}")
@@ -435,7 +460,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--augmented-data",
-        action="store_true",
+        type=str,
+        default="human_only",
+        choices=["human_only", "synth_only", "full"],
         help="Whether to use augmented data for training",
     )
     parser.add_argument(

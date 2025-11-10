@@ -59,6 +59,11 @@ python scripts/2_generate_synthetic_data/convert_to_bigbio.py convert \
   --parquet data/synthetic_data/SynthQUAERO/generated_def \
   --json-out data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio_def.json
 ```
+```bash
+python scripts/2_generate_synthetic_data/convert_to_bigbio.py convert \
+  --parquet data/synthetic_data/SynthSPACCC/generated_no_def \
+  --json-out data/synthetic_data/SynthSPACCC/SynthQUAERO_bigbio_no_def.json
+```
 Options: `--limit` (row cap), `--fail-pattern` (default FAIL).
 
 ### b. Directly from HuggingFace Hub dataset

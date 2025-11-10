@@ -82,7 +82,7 @@ def main(
     dataset_name,
     selection_method,
     with_group=False,
-    augmented_data=False,
+    augmented_data="human_only",
     batch_size=64,
 ):
     # Set device
@@ -93,7 +93,7 @@ def main(
     model_path = (
         Path("models")
         / "NED"
-        / f"{dataset_name}_{'augmented' if augmented_data else 'original'}_{selection_method}{'_with_group' if with_group else ''}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
         / model_name
     )
     if best:
@@ -260,9 +260,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--augmented-data",
-        default=False,
-        action="store_true",
-        help="Use augmented data if True",
+        type=str,
+        default="human_only",
+        choices=["human_only", "synth_only", "full"],
+        help="Whether to use augmented data for training",
     )
     parser.add_argument(
         "--batch-size",

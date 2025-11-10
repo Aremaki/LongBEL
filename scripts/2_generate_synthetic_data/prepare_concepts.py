@@ -174,7 +174,7 @@ def run(
     chunk_size: int = typer.Option(2500, help="Chunk size for output parquet files"),
 ) -> None:
     """Generate user prompts for MM, QUAERO, and SPACCC datasets."""
-    if not any([mm_path and mm_def, quaero_path and quaero_def]):
+    if not any([mm_path and mm_def, quaero_path and quaero_def, spaccc_path]):
         raise typer.BadParameter(
             "Provide at least one dataset (MM or QUAERO) with its definition file."
         )

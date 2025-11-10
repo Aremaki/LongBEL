@@ -298,7 +298,7 @@ def main(args) -> None:
                                     model_path = (
                                         Path("models")
                                         / "NED"
-                                        / f"{dataset}_{'augmented' if aug_data else 'original'}_{selection_method}{'_with_group' if group else ''}"
+                                        / f"{dataset}_{aug_data}_{selection_method}{'_with_group' if group else ''}"
                                         / model_name
                                         / f"model_{'best' if is_best else 'last'}"
                                     )
@@ -405,8 +405,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--augmented_data",
         nargs="+",
-        type=lambda x: (str(x).lower() == "true"),
-        default=[True, False],
+        default=["human_only"],
         help="List of augmented_data flags",
     )
     parser.add_argument(

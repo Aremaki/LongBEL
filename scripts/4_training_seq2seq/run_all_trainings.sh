@@ -4,7 +4,7 @@
 MODELS=("google/mt5-large" "facebook/bart-large" "facebook/mbart-large-50" "dmis-lab/ANGEL_pretrained_bart" "GanjinZero/biobart-v2-large")
 DATASETS=("SPACCC")
 SELECTION_METHODS=("tfidf")
-AUGMENTED_OPTIONS=(false)
+AUGMENTED_OPTIONS=("human_only" "synth_only" "full")
 WITH_GROUP_OPTIONS=(true)
 
 # Loop over all combinations
@@ -14,10 +14,7 @@ for dataset in "${DATASETS[@]}"; do
             for group in "${WITH_GROUP_OPTIONS[@]}"; do
                 for model in "${MODELS[@]}"; do
                     # Build the arguments for the python script
-                    ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection}"
-                    if [ "$augmented" = true ]; then
-                        ARGS="${ARGS} --augmented-data"
-                    fi
+                    ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --augmented-data ${augmented}"
                     if [ "$group" = true ]; then
                         ARGS="${ARGS} --with-group"
                     fi
