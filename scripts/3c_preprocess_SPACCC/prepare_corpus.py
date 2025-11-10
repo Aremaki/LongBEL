@@ -1,5 +1,6 @@
 """Prepare model-specific source/target datasets from SPACCC corpora (Typer CLI)."""
 
+import json
 import pickle
 from pathlib import Path
 
@@ -33,6 +34,13 @@ def _ensure_dir(path: Path):
 def _dump(obj, path: Path):
     with path.open("wb") as f:
         pickle.dump(obj, f, protocol=-1)
+
+
+def _load_json_if_exists(path: Path):
+    if path and path.exists():
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
 
 
 def _load_spaccc_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dataset:
@@ -122,6 +130,69 @@ def _load_spaccc_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dat
     # Convert to Hugging Face Dataset
     typer.echo(f"Loaded {len(pages)} pages from {annotation_file}")
     return Dataset.from_list(pages)
+
+
+def _process_synth_dataset(
+    name: str,
+    cui_to_title,
+    cui_to_syn,
+    cui_to_groups,
+    semantic_info,
+    tfidf_vectorizer_path: Path,
+    start_entity: str,
+    end_entity: str,
+    start_group: str,
+    end_group: str,
+    out_root: Path,
+    synth_data_dir: Path,
+    corrected_cui_path: Path,
+):
+    """Process a synthetic dataset already in BigBio format."""
+    typer.echo(f"→ Loading synthetic dataset {name} ...")
+    data_folder = out_root / name
+    _ensure_dir(data_folder)
+
+    language = "spanish"
+    selection_method = "tfidf"
+
+    corrected_cui = None
+
+    typer.echo(f"Processing dataset {name} ...")
+    dataset = _load_json_if_exists(synth_data_dir)
+    if dataset is None:
+        typer.echo(f"Error loading dataset from {synth_data_dir}: File not found.")
+        return
+    src, src_with_group, tgt = process_bigbio_dataset(
+        dataset,
+        start_entity,
+        end_entity,
+        start_group,
+        end_group,
+        CUI_to_Title=cui_to_title,
+        CUI_to_Syn=cui_to_syn,
+        CUI_to_GROUP=cui_to_groups,
+        semantic_info=semantic_info,
+        tfidf_vectorizer_path=tfidf_vectorizer_path,
+        corrected_cui=corrected_cui,
+        language=language,
+        selection_method=selection_method,
+        best_syn_map=None,  # Not used for tfidf
+    )
+
+    # Write outputs
+    typer.echo("Writing output")
+    _dump(
+        src,
+        data_folder / f"train_{selection_method}_source.pkl",
+    )
+    _dump(
+        src_with_group,
+        data_folder / f"train_{selection_method}_source_with_group.pkl",
+    )
+    _dump(
+        tgt,
+        data_folder / f"train_{selection_method}_target.pkl",
+    )
 
 
 def _process_spaccc_dataset(
@@ -242,6 +313,10 @@ def run(
         Path("data/corrected_cui/SPACCC_adapted.csv"),
         help="Corrected CUI mapping file",
     ),
+    synth_spaccc_data_dir: Path = typer.Option(
+        Path("data/synthetic_data/SynthSPACCC/SynthSPACCC_bigbio_no_def.json"),
+        help="SynthSPACCC data directory (BigBio format)",
+    ),
 ) -> None:
     """Run preprocessing pipeline for SPACCC dataset."""
     # Load UMLS mapping resources
@@ -276,6 +351,23 @@ def run(
         spaccc_data_dir,
         corrected_cui_path,
     )
+
+    if synth_spaccc_data_dir.exists():
+        _process_synth_dataset(
+            "SynthSPACCC",
+            cui_to_title,
+            cui_to_syn,
+            cui_to_groups,
+            semantic_info,
+            tfidf_vectorizer_path,
+            start_entity,
+            end_entity,
+            start_group,
+            end_group,
+            out_root,
+            synth_spaccc_data_dir,
+            corrected_cui_path,
+        )
 
     typer.echo("✅ Preprocessing complete.")
 

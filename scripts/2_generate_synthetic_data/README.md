@@ -62,7 +62,7 @@ python scripts/2_generate_synthetic_data/convert_to_bigbio.py convert \
 ```bash
 python scripts/2_generate_synthetic_data/convert_to_bigbio.py convert \
   --parquet data/synthetic_data/SynthSPACCC/generated_no_def \
-  --json-out data/synthetic_data/SynthSPACCC/SynthQUAERO_bigbio_no_def.json
+  --json-out data/synthetic_data/SynthSPACCC/SynthSPACCC_bigbio_no_def.json
 ```
 Options: `--limit` (row cap), `--fail-pattern` (default FAIL).
 

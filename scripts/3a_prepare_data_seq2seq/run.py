@@ -24,33 +24,6 @@ app = typer.Typer(
 # --- Embedding helpers -----------------------------------------------------
 
 
-def _yield_mentions_from_bigbio(ds) -> set[tuple[str, str]]:
-    mention_cui: set[tuple[str, str]] = set()
-    for page in ds:
-        for ent in page.get("entities", []):
-            if ent.get("text"):
-                mention = ent["text"][0]
-                cui = ent.get("normalized", [{}])[0].get("db_id")
-                if cui:
-                    mention_cui.add((mention, cui))
-    return mention_cui
-
-
-def _yield_mentions_from_synth(json_path: Path) -> set[tuple[str, str]]:
-    if not json_path.exists():
-        return set()
-    data = json.loads(json_path.read_text(encoding="utf-8"))
-    mention_cui: set[tuple[str, str]] = set()
-    for page in data:
-        for ent in page.get("entities", []):
-            if ent.get("text"):
-                mention = ent["text"][0]
-                cui = ent.get("normalized", [{}])[0].get("db_id")
-                if cui:
-                    mention_cui.add((mention, cui))
-    return mention_cui
-
-
 def _load_json_if_exists(path: Path):
     if path and path.exists():
         with path.open("r", encoding="utf-8") as f:
