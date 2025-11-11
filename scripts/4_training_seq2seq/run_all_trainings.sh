@@ -4,7 +4,7 @@
 MODELS=("google/mt5-large" "facebook/bart-large" "facebook/mbart-large-50" "dmis-lab/ANGEL_pretrained_bart" "GanjinZero/biobart-v2-large")
 DATASETS=("SPACCC")
 SELECTION_METHODS=("tfidf")
-AUGMENTED_OPTIONS=("human_only" "synth_only" "full")
+AUGMENTED_OPTIONS=("synth_only" "full" "full_upsampled")
 WITH_GROUP_OPTIONS=(true)
 
 # Loop over all combinations

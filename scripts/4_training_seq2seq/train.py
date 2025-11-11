@@ -10,7 +10,7 @@ import idr_torch  # type: ignore
 import numpy as np
 import pynvml
 import torch.distributed as dist
-from datasets import Dataset, concatenate_datasets
+from datasets import Dataset, concatenate_datasets, interleave_datasets
 from transformers import (
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
@@ -181,19 +181,22 @@ def main(
         f"The model {model_name} will start training with learning rate {lr} on dataset {augmented_data} {dataset_name} and selection method {selection_method}."
     )
     model_short_name = model_name.split("/")[-1]
-    # The Trainer will handle the distributed training setup automatically.
-    # No need to manually initialize the process group.
-    if model_short_name == "mt5-xl":
-        # Remove the DDP initialization completely
-        if dist.is_available() and dist.is_initialized():
-            dist.destroy_process_group()
 
     # Load tokenizer and model
     try:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
     except Exception as hub_err:  # pragma: no cover - network / availability branch
-        local_dir = Path("models") / str(model_name)
+        if augmented_data == "human_only_ft":
+            local_dir = (
+                Path("models")
+                / "NED"
+                / f"{dataset_name}_synth_only_{selection_method}{'_with_group' if with_group else ''}"
+                / model_short_name
+                / "model_last"
+            )
+        else:
+            local_dir = Path("models") / str(model_name)
         if local_dir.exists():
             print(
                 f"⚠️ Hub load failed for '{model_name}' ({hub_err}); falling back to local path {local_dir}."
@@ -266,7 +269,7 @@ def main(
     split_val = indexes[split:]
     validation_dataset = validation_dataset.select(split_val)
 
-    if augmented_data in ["human_only", "full"]:
+    if augmented_data in ["human_only", "full", "human_only_ft", "full_upsampled"]:
         human_train_source_data = load_pickle(
             data_folder
             / dataset_name
@@ -288,7 +291,7 @@ def main(
                 validation_dataset.select(split_train),
             ])
 
-    if augmented_data in ["synth_only", "full"]:
+    if augmented_data in ["synth_only", "full", "full_upsampled"]:
         if dataset_name == "MedMentions":
             synth_train_source_data = load_pickle(
                 data_folder
@@ -322,15 +325,40 @@ def main(
         }
         synth_train_dataset = Dataset.from_dict(synth_train_data)
 
-    if augmented_data == "human_only":
+    if augmented_data in ["synth_only", "full", "full_upsampled"]:
+        save_strategy = "steps"
+        save_steps = 20000
+        eval_strategy = "steps"
+        eval_steps = 20000
+        logging_strategy = "steps"
+        logging_steps = 20000
+        num_train_epochs = 3
+        if augmented_data == "synth_only":
+            train_dataset = synth_train_dataset  # type: ignore
+        elif augmented_data == "full":
+            train_dataset = concatenate_datasets([
+                human_train_dataset,  # type: ignore
+                synth_train_dataset,  # type: ignore
+            ])
+        else:  # full_upsampled
+            train_dataset = interleave_datasets(
+                [human_train_dataset, synth_train_dataset],  # type: ignore
+                stopping_strategy="all_exhausted",
+                seed=42,
+            )
+    else:
+        save_strategy = "epoch"
+        save_steps = 0  # Not used when strategy is epoch
+        eval_strategy = "epoch"
+        eval_steps = 0
+        logging_strategy = "epoch"
+        logging_steps = 0
         train_dataset = human_train_dataset  # type: ignore
-    elif augmented_data == "synth_only":
-        train_dataset = synth_train_dataset  # type: ignore
-    else:  # full
-        train_dataset = concatenate_datasets([
-            human_train_dataset,  # type: ignore
-            synth_train_dataset,  # type: ignore
-        ])
+        if augmented_data == "human_only":
+            num_train_epochs = 200
+        else:  # human_only_ft
+            num_train_epochs = 70
+            lr = lr / 3
 
     tokenized_datasets = {
         "train": train_dataset.map(
@@ -347,7 +375,6 @@ def main(
     data_collator = DataCollatorForSeq2Seq(tokenizer, model=model, padding="longest")
 
     # Training params
-    num_train_epochs = 200
     train_max_batch = 16
     eval_max_batch = 16
     eval_accumulation_steps = None
@@ -357,17 +384,7 @@ def main(
     fsdp = ""
     fsdp_transformer_layer_cls_to_wrap = None
     gradient_checkpointing = False
-    if model_short_name == "mt5-xl":
-        fsdp = ["full_shard", "auto_wrap"]
-        fsdp_transformer_layer_cls_to_wrap = "MT5Block"
-        ddp_backend = None  # Enable Distributed Data Parallel with NCCL backend
-        train_max_batch = 4
-        eval_max_batch = 6
-        gradient_accumulation_steps = 2
-        gradient_checkpointing = True
-        eval_accumulation_steps = (
-            int(len(validation_dataset) / (eval_max_batch * 2)) + 2
-        )
+
     output_dir = (
         Path("models")
         / "NED"
@@ -379,14 +396,18 @@ def main(
         / f"{dataset_name}_{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
         / model_short_name
     )
+
     print(f"BATCH SIZE : {train_max_batch}")
     training_args = Seq2SeqTrainingArguments(
         output_dir=str(output_dir),
         logging_dir=str(logging_dir),
-        logging_strategy="epoch",
+        logging_strategy=logging_strategy,
+        logging_steps=logging_steps,
         report_to="tensorboard",
-        eval_strategy="epoch",
-        save_strategy="epoch",
+        eval_strategy=eval_strategy,
+        eval_steps=eval_steps,
+        save_strategy=save_strategy,
+        save_steps=save_steps,
         auto_find_batch_size=auto_find_batch_size,
         per_device_train_batch_size=train_max_batch,
         gradient_accumulation_steps=gradient_accumulation_steps,
@@ -405,7 +426,7 @@ def main(
         greater_is_better=True,
         eval_on_start=True,
         seed=42,
-        warmup_steps=500,
+        warmup_ratio=0.03,
         learning_rate=lr,
         lr_scheduler_type="linear",
         gradient_checkpointing=gradient_checkpointing,
@@ -462,7 +483,13 @@ if __name__ == "__main__":
         "--augmented-data",
         type=str,
         default="human_only",
-        choices=["human_only", "synth_only", "full"],
+        choices=[
+            "human_only",
+            "human_only_ft",
+            "synth_only",
+            "full",
+            "full_upsampled",
+        ],
         help="Whether to use augmented data for training",
     )
     parser.add_argument(
