@@ -261,13 +261,13 @@ def main(
         "target": validation_target_data,
     }
 
-    validation_dataset = Dataset.from_dict(validation_data)
+    dev_dataset = Dataset.from_dict(validation_data)
 
-    # Reduce validation dataset to 20% to save time during training
-    indexes = list(range(len(validation_dataset)))
-    split = int(len(validation_dataset) * 0.9)
+    # Reduce validation dataset to 10% to save time during training
+    indexes = list(range(len(dev_dataset)))
+    split = int(len(dev_dataset) * 0.9)
     split_val = indexes[split:]
-    validation_dataset = validation_dataset.select(split_val)
+    validation_dataset = dev_dataset.select(split_val)
 
     if augmented_data in ["human_only", "full", "human_only_ft", "full_upsampled"]:
         human_train_source_data = load_pickle(
@@ -288,7 +288,7 @@ def main(
             split_train = indexes[:split]
             human_train_dataset = concatenate_datasets([
                 human_train_dataset,
-                validation_dataset.select(split_train),
+                dev_dataset.select(split_train),
             ])
 
     if augmented_data in ["synth_only", "full", "full_upsampled"]:
