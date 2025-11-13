@@ -379,11 +379,14 @@ if __name__ == "__main__":
 
     # Pass the parsed argument to the main function
     main(
-        args.model_name,
-        args.num_beams,
-        args.best,
-        args.dataset_name,
-        args.selection_method,
-        args.with_group,
-        args.augmented_data,
+        model_name=args.model_name,
+        num_beams=args.num_beams,
+        best=args.best,
+        dataset_name=args.dataset_name,
+        selection_method=args.selection_method,
+        split_name=args.split_name,
+        with_group=args.with_group,
+        augmented_data=args.augmented_data,
+        batch_size=args.batch_size,
+        output_folder=args.output_folder,
     )
