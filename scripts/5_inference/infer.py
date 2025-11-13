@@ -88,15 +88,7 @@ def add_cui_column(df: pl.DataFrame, umls_df: pl.DataFrame) -> pl.DataFrame:
     6.  Filters out rows where none of the constituent terms mapped to a CUI.
     7.  Constructs the final CUI string by sorting the unique CUIs and joining them with '+'.
     """
-    # 1) Prepare umls_df: clean Entity strings
-    umls_df_clean = umls_df.select(["CUI", "Entity", "GROUP"]).with_columns(
-        pl.col("Entity")
-        .str.replace_all("\xa0", " ", literal=True)
-        .str.replace_all(r"[\{\[]", "(", literal=False)
-        .str.replace_all(r"[\}\]]", ")", literal=False)
-    )
-
-    # Check if there are duplicated entries
+    # 1) Check if there are duplicated entries
     if (
         df.shape[0]
         != df.unique(subset=["filename", "label", "start_span", "end_span"]).shape[0]
@@ -111,7 +103,7 @@ def add_cui_column(df: pl.DataFrame, umls_df: pl.DataFrame) -> pl.DataFrame:
 
     # 3) Join with UMLS data to get CUIs for each term
     df_joined = df_exploded.join(
-        umls_df_clean,
+        umls_df.select(["CUI", "Entity", "GROUP"]),
         left_on=["Prediction", "label"],
         right_on=["Entity", "GROUP"],
         how="left",
@@ -198,6 +190,12 @@ def main(
         Path("data") / "UMLS_processed" / dataset_short / "all_disambiguated.parquet"
     )
     umls_df = pl.read_parquet(umls_path)
+    umls_df = umls_df.with_columns(
+        pl.col("Entity")
+        .str.replace_all("\xa0", " ", literal=True)
+        .str.replace_all(r"[\{\[]", "(", literal=False)
+        .str.replace_all(r"[\}\]]", ")", literal=False)
+    )
 
     # Load candidate Trie
     tries_folder = Path("data/UMLS_tries")
@@ -214,32 +212,12 @@ def main(
         else:
             start_idx = 1
             prefix = ""
-        if dataset_name == "MedMentions":
-            legal_umls_token = pl.read_parquet(
-                Path("data/UMLS_processed/MM/all_disambiguated.parquet")
-            )
-        elif dataset_name == "SPACCC":
-            legal_umls_token = pl.read_parquet(
-                Path("data/UMLS_processed/SPACCC/all_disambiguated.parquet")
-            )
-        else:
-            legal_umls_token = pl.read_parquet(
-                Path("data/UMLS_processed/QUAERO/all_disambiguated.parquet")
-            )
-        legal_umls_token = legal_umls_token.with_columns(
-            pl.col("Entity")
-            .str.replace_all("\xa0", " ", literal=True)
-            .str.replace_all("{", "(", literal=True)
-            .str.replace_all("}", ")", literal=True)
-            .str.replace_all("[", "(", literal=True)
-            .str.replace_all("]", ")", literal=True)
-        )
         trie_legal_tokens = {}
-        for category in legal_umls_token["GROUP"].unique().to_list():
+        for category in umls_df["GROUP"].unique().to_list():
             print(f"processing {category}")
-            cat_legal_umls_token = legal_umls_token.filter(pl.col("GROUP") == category)
+            cat_umls_df = umls_df.filter(pl.col("GROUP") == category)
             sequences = []
-            for entity in cat_legal_umls_token["Entity"].to_list():
+            for entity in cat_umls_df["Entity"].to_list():
                 sequences.append(
                     [decoder_start_token_id]
                     + model.tokenizer.encode(prefix + entity)[start_idx:]  # type: ignore
@@ -265,8 +243,11 @@ def main(
                 num_beams=num_beams,
                 num_return_sequences=1,
             )
-        output_sentences.extend([d["text"] for d in batch_output_sentences])  # type: ignore
-        output_scores.extend([d["score"] for d in batch_output_sentences])  # type: ignore
+        output_sentences.extend([batch[0]["text"] for batch in batch_output_sentences])  # type: ignore
+        output_scores.extend([
+            1 + float(batch[0]["score"])  # type: ignore
+            for batch in batch_output_sentences
+        ])
     no_constraint_df = test_data.with_columns(
         pl.Series(name="Prediction", values=output_sentences),
         pl.Series(name="Prediction_score", values=output_scores),
@@ -309,8 +290,11 @@ def main(
                 num_beams=num_beams,
                 num_return_sequences=1,
             )
-        output_sentences.extend([d["text"] for d in batch_output_sentences])  # type: ignore
-        output_scores.extend([d["score"] for d in batch_output_sentences])  # type: ignore
+        output_sentences.extend([batch[0]["text"] for batch in batch_output_sentences])  # type: ignore
+        output_scores.extend([
+            1 + float(batch[0]["score"])  # type: ignore
+            for batch in batch_output_sentences
+        ])
     constraint_df = test_data.with_columns(
         pl.Series(name="Prediction", values=output_sentences),
         pl.Series(name="Prediction_score", values=output_scores),
