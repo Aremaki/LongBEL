@@ -305,7 +305,9 @@ def _process_spaccc_dataset(
             data_folder / f"{split_name}_{selection_method}_target.pkl",
         )
         pl.DataFrame(tsv_data).write_csv(
-            data_folder / f"{split_name}_{selection_method}_annotations.tsv"
+            file=data_folder / f"{split_name}_{selection_method}_annotations.tsv",
+            separator="\t",
+            include_header=True,
         )
 
 
