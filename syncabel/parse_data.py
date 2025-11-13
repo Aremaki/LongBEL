@@ -195,9 +195,10 @@ def parse_text(
                 normalized_ids = normalized_ids.split("+")  # Handle multiple CUIs
                 annotations = []
                 group_annotations = []
-                for normalized_id in normalized_ids:
+                for i, normalized_id in enumerate(normalized_ids):
                     if corrected_cui and normalized_id in corrected_cui:
                         normalized_id = corrected_cui[normalized_id]
+                        normalized_ids[i] = normalized_id
                         logging.info(
                             f"Corrected CUI {entity['normalized'][0]['db_id']} -> {normalized_id} for entity '{entity_text}'"
                         )
