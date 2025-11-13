@@ -336,6 +336,7 @@ def main(
         if augmented_data == "synth_only":
             train_dataset = synth_train_dataset  # type: ignore
         elif augmented_data == "full":
+            num_train_epochs = 5
             train_dataset = concatenate_datasets([
                 human_train_dataset,  # type: ignore
                 synth_train_dataset,  # type: ignore
