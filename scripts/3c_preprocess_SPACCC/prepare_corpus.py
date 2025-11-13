@@ -53,19 +53,31 @@ def _load_spaccc_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dat
     """
     # Read annotations and group by document
     try:
+        # Read the file first without forcing column names
         annotations_df = pl.read_csv(
             annotation_file,
             separator="\t",
             has_header=True,
-            new_columns=[
-                "doc_id",
-                "entity_type",
-                "start_span",
-                "end_span",
-                "entity_text",
-                "cui",
-                "cui_type",
-            ],
+        )
+
+        # Define the expected column names (7 total)
+        expected_cols = [
+            "doc_id",
+            "entity_type",
+            "start_span",
+            "end_span",
+            "entity_text",
+            "cui",
+            "cui_type",
+        ]
+
+        # If fewer than expected columns exist, add missing ones as null columns
+        for col in expected_cols[len(annotations_df.columns) :]:
+            annotations_df = annotations_df.with_columns(pl.lit(None).alias(col))
+
+        # Rename all columns to expected names
+        annotations_df = annotations_df.rename(
+            dict(zip(annotations_df.columns, expected_cols))
         )
     except pl.ShapeError:
         # Handle empty file
@@ -162,7 +174,7 @@ def _process_synth_dataset(
     if dataset is None:
         typer.echo(f"Error loading dataset from {synth_data_dir}: File not found.")
         return
-    src, src_with_group, tgt = process_bigbio_dataset(
+    src, src_with_group, tgt, _ = process_bigbio_dataset(
         dataset,
         start_entity,
         end_entity,
@@ -177,6 +189,7 @@ def _process_synth_dataset(
         language=language,
         selection_method=selection_method,
         best_syn_map=None,  # Not used for tfidf
+        ner_mode=False,
     )
 
     # Write outputs
@@ -229,8 +242,10 @@ def _process_spaccc_dataset(
     splits = {}
     train_annotations_path = spaccc_data_dir / "train.tsv"
     test_annotations_path = spaccc_data_dir / "test.tsv"
+    test_ner_annotations_path = spaccc_data_dir / "test_ner.tsv"
     train_raw_files_folder = spaccc_data_dir / "raw_txt" / "train"
     test_raw_files_folder = spaccc_data_dir / "raw_txt" / "test"
+    test_ner_raw_files_folder = spaccc_data_dir / "raw_txt" / "test"
 
     if train_annotations_path.exists():
         typer.echo(f"  • Loading train split from {train_annotations_path}")
@@ -242,6 +257,11 @@ def _process_spaccc_dataset(
         splits["test"] = _load_spaccc_as_bigbio(
             test_annotations_path, test_raw_files_folder
         )
+    if test_ner_annotations_path.exists():
+        typer.echo(f"  • Loading test_ner split from {test_ner_annotations_path}")
+        splits["test_ner"] = _load_spaccc_as_bigbio(
+            test_ner_annotations_path, test_ner_raw_files_folder
+        )
 
     processed = {}
     for split_name, split_data in splits.items():
@@ -249,7 +269,7 @@ def _process_spaccc_dataset(
             typer.echo(f"  • Skipping empty split: {split_name}")
             continue
         typer.echo(f"  • Processing split: {split_name}")
-        src, src_with_group, tgt = process_bigbio_dataset(
+        src, src_with_group, tgt, tsv_data = process_bigbio_dataset(
             split_data,
             start_entity,
             end_entity,
@@ -264,12 +284,13 @@ def _process_spaccc_dataset(
             language=language,
             selection_method="tfidf",
             best_syn_map=None,  # Not used for tfidf
+            ner_mode="ner" in split_name,
         )
-        processed[split_name] = (src, src_with_group, tgt)
+        processed[split_name] = (src, src_with_group, tgt, tsv_data)
 
     # Write outputs
     selection_method = "tfidf"
-    for split_name, (src, src_with_group, tgt) in processed.items():
+    for split_name, (src, src_with_group, tgt, tsv_data) in processed.items():
         typer.echo(f"  • Writing output for split: {split_name}")
         _dump(
             src,
@@ -282,6 +303,9 @@ def _process_spaccc_dataset(
         _dump(
             tgt,
             data_folder / f"{split_name}_{selection_method}_target.pkl",
+        )
+        pl.DataFrame(tsv_data).write_csv(
+            data_folder / f"{split_name}_{selection_method}_annotations.tsv"
         )
 
 

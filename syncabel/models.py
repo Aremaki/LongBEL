@@ -63,7 +63,7 @@ class _GENREHubInterface:
         text_to_id: dict[str, str] = None,  # type: ignore
         marginalize: bool = False,
         **kwargs,
-    ) -> list[str]:
+    ) -> list[dict[str, str]]:
         input_args = {
             k: v.to(self.device)  # type: ignore
             for k, v in self.tokenizer.batch_encode_plus(  # type: ignore
@@ -91,25 +91,19 @@ class _GENREHubInterface:
             self.tokenizer,  # type: ignore
         )
 
-        if num_return_sequences == 1:
-            if len(cleaned_output_sequences) == 1:
-                return cleaned_output_sequences[0]
-            else:
-                return cleaned_output_sequences
-        else:
-            outputs = chunk_it(
-                [
-                    {
-                        "text": text,
-                        "score": score,
-                    }
-                    for text, score in zip(
-                        cleaned_output_sequences,
-                        outputs.sequences_scores,
-                    )
-                ],
-                len(sentences),
-            )
+        outputs = chunk_it(
+            [
+                {
+                    "text": text,
+                    "score": score,
+                }
+                for text, score in zip(
+                    cleaned_output_sequences,
+                    outputs.sequences_scores,
+                )
+            ],
+            len(sentences),
+        )
 
         return outputs  # type: ignore
 

@@ -72,12 +72,14 @@ def resolve_entity_ambiguity(
     # Combine unambiguous entities
     all_unambiguous = pl.concat([unambiguous_entities, became_unambiguous])
 
+    assigned_pairs = set(all_unambiguous.select(["CUI", "GROUP"]).iter_rows())
+    assigned_pairs_entity = set(all_unambiguous.select(["Entity", "GROUP"]).iter_rows())
+
     # Stage 3: Handle remaining truly ambiguous entities
-    remaining_ambiguous = (
-        filtered_ambiguous.group_by(["Entity", "GROUP"])
-        .agg(pl.col("CUI").n_unique().alias("n_CUI"))
-        .join(filtered_ambiguous, on=["Entity", "GROUP"])
-        .filter(pl.col("n_CUI") > 1)
+    remaining_ambiguous = df.join(
+        all_unambiguous.select(["CUI", "GROUP", "Entity"]),
+        on=["CUI", "GROUP", "Entity"],
+        how="anti",
     )
 
     # Mark priority pairs and sort
@@ -106,12 +108,14 @@ def resolve_entity_ambiguity(
                 selected_row = row
                 assigned_pairs.add((row["CUI"], row["GROUP"]))
                 break
+            if (row["Entity"], row["GROUP"]) not in assigned_pairs_entity:
+                selected_row = row
+                assigned_pairs_entity.add((row["Entity"], row["GROUP"]))
+                break
 
         # Fallback: use first row (highest priority)
-        if selected_row is None:
-            selected_row = group_rows[0]
-
-        final_selections.append(selected_row)
+        if selected_row is not None:
+            final_selections.append(selected_row)
 
     # Create final ambiguous selections dataframe
     ambiguous_final = (
@@ -121,7 +125,7 @@ def resolve_entity_ambiguity(
     )
 
     # Combine all results
-    df_clean = pl.concat([all_unambiguous, ambiguous_final])
+    df_clean = pl.concat([all_unambiguous, ambiguous_final]).drop("ambiguous_level")
 
     # Create mapping from discarded CUIs to chosen CUIs
     original_triplets = df.select(["CUI", "Entity", "GROUP"])
@@ -239,7 +243,7 @@ def augment_with_missing_pairs(
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
     Duplicate CUIs for missing (CUI, GROUP) pairs using a single canonical row per CUI.
-    CATEGORY is derived from GROUP, and ambiguous_level=3 marks synthetic rows.
+    CATEGORY is derived from GROUP.
     """
 
     if not missing_pairs:
@@ -254,26 +258,27 @@ def augment_with_missing_pairs(
         pl.col("GROUP").str.slice(0, 4).alias("CATEGORY"),
     ])
 
-    # Pick one canonical row per CUI (prefer is_main=True, then lowest ambiguous_level)
+    # Pick one canonical row per CUI (prefer is_main=True)
     base_per_cui = (
         df_final.with_columns([
             pl.col("is_main").fill_null(False),
-            pl.col("ambiguous_level").fill_null(0),
         ])
         .sort(
-            ["CUI", "is_main", "ambiguous_level", "Entity"],
-            descending=[False, True, False, False],
+            ["CUI", "is_main", "Entity"],
+            descending=[False, True, False],
         )
         .unique(subset=["CUI"], keep="first")
         .select(["CUI", "Entity", "is_main"])
     )
 
     # Create duplicates by joining missing pairs with canonical rows
-    dup_df = (
-        missing_df.join(base_per_cui, on="CUI", how="left")
-        .with_columns(ambiguous_level=pl.lit(3))
-        .select(["CUI", "Entity", "CATEGORY", "GROUP", "is_main", "ambiguous_level"])
-    )
+    dup_df = missing_df.join(base_per_cui, on="CUI", how="left").select([
+        "CUI",
+        "Entity",
+        "CATEGORY",
+        "GROUP",
+        "is_main",
+    ])
 
     # If some CUI truly doesn't exist in df_final (edge case), keep but Entity will be null
     # Filter those out to avoid invalid rows
@@ -292,7 +297,6 @@ def augment_with_missing_pairs(
 def _complete_cui_entity_group_combinations(df: pl.DataFrame) -> pl.DataFrame:
     """
     For each CUI, ensure all its associated entities appear for all its associated groups.
-    This is a simplified approach.
     """
     logging.info("Completing CUI-Entity-GROUP combinations...")
 
@@ -389,15 +393,14 @@ def main(
         # Load terminology
         terminology_df = load_terminology(terminology_file)
 
+        # Complete CUI-Entity-GROUP combinations
+        terminology_df = _complete_cui_entity_group_combinations(terminology_df)
+
         # Resolve ambiguity
-        clean_terminology, mapping_df = resolve_entity_ambiguity(
-            terminology_df, priority_pairs
-        )
+        clean_terminology, _ = resolve_entity_ambiguity(terminology_df, priority_pairs)
 
         # Validate coverage (pre-augmentation)
         missing_pairs_pre = validate_coverage(clean_terminology, priority_pairs)
-
-        _ = validate_coverage(terminology_df, priority_pairs)
 
         # If some (CUI, GROUP) exist in train/test but are missing in the final set,
         # duplicate the CUI under the requested GROUP to ensure coverage
@@ -408,11 +411,14 @@ def main(
         else:
             added_rows_df = pl.DataFrame({})
 
-        # Re-validate after augmentation
-        missing_pairs = validate_coverage(clean_terminology, priority_pairs)
+        _ = validate_coverage(clean_terminology, priority_pairs)
 
-        # Complete CUI-Entity-GROUP combinations
-        clean_terminology = _complete_cui_entity_group_combinations(clean_terminology)
+        # Resolve ambiguity after augmentation
+        clean_terminology, mapping_df = resolve_entity_ambiguity(
+            clean_terminology, priority_pairs
+        )
+
+        missing_pairs = validate_coverage(clean_terminology, priority_pairs)
 
         # Filter mapping to only include missing priority pairs
         if missing_pairs:
@@ -440,30 +446,9 @@ def main(
             logging.info(f"Loaded {snomed_df.height} SNOMED FSN entries")
 
             # Join with clean_terminology on CUI
-            clean_terminology = (
-                clean_terminology.join(snomed_df, on="CUI", how="left")
-                .with_columns(
-                    pl.col("Entity")
-                    .str.replace_all("\xa0", " ", literal=True)
-                    .str.replace_all(r"\s*\(NOS\)\s*$", "")
-                    .str.replace_all(r",\sNOS\s*$", "")
-                    .str.replace_all(r"\sNOS\s*$", "")
-                    .str.replace_all(r"\s*\(SAI\)\s*$", "")
-                    .str.replace_all(r",\sSAI\s*$", "")
-                    .str.replace_all(r"\sSAI\s*$", "")
-                )
-                .with_columns(
-                    pl.col("Title")
-                    .str.replace_all("\xa0", " ", literal=True)
-                    .str.replace_all(r"\s*\(NOS\)\s*$", "")
-                    .str.replace_all(r",\sNOS\s*$", "")
-                    .str.replace_all(r"\sNOS\s*$", "")
-                    .str.replace_all(r"\s*\(SAI\)\s*$", "")
-                    .str.replace_all(r",\sSAI\s*$", "")
-                    .str.replace_all(r"\sSAI\s*$", "")
-                )
-                .unique()
-            )
+            clean_terminology = clean_terminology.join(
+                snomed_df, on="CUI", how="left"
+            ).unique()
 
             logging.info(
                 f"After joining with SNOMED_FSN: {clean_terminology.height} rows, "
@@ -487,9 +472,6 @@ def main(
         logging.info("📊 Final statistics:")
         logging.info(f"   - Unique entities: {clean_terminology['Entity'].n_unique()}")
         logging.info(f"   - Unique CUIs: {clean_terminology['CUI'].n_unique()}")
-        logging.info(
-            f"   - Ambiguity levels: {clean_terminology['ambiguous_level'].value_counts()}"
-        )
         if added_rows_df.height if hasattr(added_rows_df, "height") else 0:
             logging.info(
                 f"   - Added duplicates for coverage: {getattr(added_rows_df, 'height', 0)}"

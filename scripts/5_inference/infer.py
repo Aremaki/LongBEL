@@ -75,21 +75,90 @@ def load_model(
     return model, decoder_start_token_id
 
 
+def add_cui_column(df: pl.DataFrame, umls_df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Adds a 'CUI' column to the DataFrame by mapping composite 'Entity' strings to UMLS concepts.
+
+    The function performs the following steps:
+    1.  Cleans up special characters in the 'Entity' column of the UMLS DataFrame.
+    2.  Splits the 'Entity' column of the input DataFrame by '<SEP>' into individual terms.
+    3.  Explodes the DataFrame so that each row corresponds to a single term.
+    4.  Performs a left join with the UMLS DataFrame on the term and 'GROUP' to find the CUI for each term.
+    5.  Groups the data back by the original rows.
+    6.  Filters out rows where none of the constituent terms mapped to a CUI.
+    7.  Constructs the final CUI string by sorting the unique CUIs and joining them with '+'.
+    """
+    # 1) Prepare umls_df: clean Entity strings
+    umls_df_clean = umls_df.select(["CUI", "Entity", "GROUP"]).with_columns(
+        pl.col("Entity")
+        .str.replace_all("\xa0", " ", literal=True)
+        .str.replace_all(r"[\{\[]", "(", literal=False)
+        .str.replace_all(r"[\}\]]", ")", literal=False)
+    )
+
+    # Check if there are duplicated entries
+    if (
+        df.shape[0]
+        != df.unique(subset=["filename", "label", "start_span", "end_span"]).shape[0]
+    ):
+        print("There are duplicated entries. Keeping just the first one...")
+        df = df.unique(subset=["filename", "label", "start_span", "end_span"])
+
+    # 2) Explode df by splitting 'Entity' into multiple terms
+    df_exploded = df.with_columns(pl.col("Prediction").str.split("<SEP>")).explode(
+        "Prediction"
+    )
+
+    # 3) Join with UMLS data to get CUIs for each term
+    df_joined = df_exploded.join(
+        umls_df_clean,
+        left_on=["Prediction", "label"],
+        right_on=["Entity", "GROUP"],
+        how="left",
+    )
+
+    # 4) Group back, aggregate CUIs, and count nulls to find incomplete matches
+    df_grouped = df_joined.group_by([
+        "filename",
+        "label",
+        "start_span",
+        "end_span",
+    ]).agg(
+        pl.col("CUI").drop_nulls().unique().alias("cui_list"),
+    )
+
+    # 5) Filter for rows with at least one match and create final CUI string
+    result = (
+        df_grouped.filter(pl.col("cui_list").list.len() > 0)
+        .with_columns(
+            pl.col("cui_list").list.sort().list.join("+").alias("Predicted_CUI")
+        )
+        .select(["filename", "label", "start_span", "end_span", "Predicted_CUI"])
+    )
+
+    return df.join(
+        result, on=["filename", "label", "start_span", "end_span"], how="left"
+    )
+
+
 def main(
     model_name,
     num_beams,
     best,
     dataset_name,
     selection_method,
+    split_name="test",
     with_group=False,
     augmented_data="human_only",
     batch_size=64,
+    output_folder="results/inference_outputs",
 ):
     # Set device
     torch.cuda.empty_cache()
     gc.collect()
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # Load model
     model_path = (
         Path("models")
         / "NED"
@@ -109,20 +178,26 @@ def main(
     )
 
     # Load data
-    # Load and preprocess data
     with_group_extension = "_with_group" if with_group else ""
     data_folder = Path("data/final_data")
 
     test_source_data = load_pickle(
         data_folder
         / dataset_name
-        / f"test_{selection_method}_source{with_group_extension}.pkl"
+        / f"{split_name}_{selection_method}_source{with_group_extension}.pkl"
     )
-    test_target_data = load_pickle(
-        data_folder / dataset_name / f"test_{selection_method}_target.pkl"
+    test_data = pl.read_csv(
+        data_folder / dataset_name / f"{split_name}_{selection_method}_annotations.tsv",
+        separator="\t",
+        has_header=True,
     )
 
-    test_data = {"source": test_source_data, "target": test_target_data}
+    # Load UMLS data
+    dataset_short = "MM" if dataset_name == "MedMentions" else dataset_name
+    umls_path = (
+        Path("data") / "UMLS_processed" / dataset_short / "all_disambiguated.parquet"
+    )
+    umls_df = pl.read_parquet(umls_path)
 
     # Load candidate Trie
     tries_folder = Path("data/UMLS_tries")
@@ -179,30 +254,45 @@ def main(
 
     # Perform inference without constraint
     output_sentences = []
+    output_scores = []
     for i in tqdm(
-        range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
+        range(0, len(test_source_data), batch_size), desc="Processing Test Data"
     ):
-        batch_sources = test_data["source"][i : i + batch_size]
+        batch_sources = test_source_data[i : i + batch_size]
         with torch.no_grad():
             batch_output_sentences = model.sample(
                 batch_sources,
                 num_beams=num_beams,
                 num_return_sequences=1,
             )
-        output_sentences.extend(batch_output_sentences)  # type: ignore
-    print(f"Generated {len(output_sentences)} sentences without constraint.")
+        output_sentences.extend([d["text"] for d in batch_output_sentences])  # type: ignore
+        output_scores.extend([d["score"] for d in batch_output_sentences])  # type: ignore
+    no_constraint_df = test_data.with_columns(
+        pl.Series(name="Prediction", values=output_sentences),
+        pl.Series(name="Prediction_score", values=output_scores),
+    )
+    no_constraint_df = add_cui_column(no_constraint_df, umls_df=umls_df)
+    print(f"Generated {len(no_constraint_df)} sentences without constraint.")
 
     # Save results
-    output_path = f"{full_path}/pred_test_no_constraint_{num_beams}_beams.pkl"
-    with open(output_path, "wb") as file:
-        pickle.dump(output_sentences, file, protocol=-1)
+    output_folder = (
+        Path(output_folder)
+        / dataset_name
+        / f"{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
+        / model_name
+    )
+    output_folder.mkdir(parents=True, exist_ok=True)
+    no_constraint_df.write_csv(
+        output_folder / f"pred_{split_name}_no_constraint_{num_beams}_beams_typed.tsv"
+    )
 
     # Perform inference with constraint
     output_sentences = []
+    output_scores = []
     for i in tqdm(
-        range(0, len(test_data["source"]), batch_size), desc="Processing Test Data"
+        range(0, len(test_source_data), batch_size), desc="Processing Test Data"
     ):
-        batch_sources = test_data["source"][i : i + batch_size]
+        batch_sources = test_source_data[i : i + batch_size]
         prefix_allowed_tokens_fn = get_prefix_allowed_tokens_fn(
             model,
             decoder_start_token_id,
@@ -216,13 +306,26 @@ def main(
                 num_beams=num_beams,
                 num_return_sequences=1,
             )
-        output_sentences.extend(batch_output_sentences)  # type: ignore
-    print(f"Generated {len(output_sentences)} sentences with constraint.")
+        output_sentences.extend([d["text"] for d in batch_output_sentences])  # type: ignore
+        output_scores.extend([d["score"] for d in batch_output_sentences])  # type: ignore
+    constraint_df = test_data.with_columns(
+        pl.Series(name="Prediction", values=output_sentences),
+        pl.Series(name="Prediction_score", values=output_scores),
+    )
+    constraint_df = add_cui_column(constraint_df, umls_df=umls_df)
+    print(f"Generated {len(constraint_df)} sentences with constraint.")
 
     # Save results
-    output_path = f"{full_path}/pred_test_constraint_{num_beams}_beams_typed.pkl"
-    with open(output_path, "wb") as file:
-        pickle.dump(output_sentences, file, protocol=-1)
+    output_folder = (
+        Path(output_folder)
+        / dataset_name
+        / f"{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
+        / model_name
+    )
+    output_folder.mkdir(parents=True, exist_ok=True)
+    constraint_df.write_csv(
+        output_folder / f"pred_{split_name}_constraint_{num_beams}_beams_typed.tsv"
+    )
 
     print("Inference completed and results saved.")
 
@@ -253,6 +356,12 @@ if __name__ == "__main__":
         help="The selection method for training data",
     )
     parser.add_argument(
+        "--split-name",
+        type=str,
+        default="test",
+        help="The data split name for inference",
+    )
+    parser.add_argument(
         "--with-group",
         default=False,
         action="store_true",
@@ -270,6 +379,12 @@ if __name__ == "__main__":
         type=int,
         default=64,
         help="Batch size for inference",
+    )
+    parser.add_argument(
+        "--output-folder",
+        type=str,
+        default="results/inference_outputs",
+        help="Folder to save inference outputs",
     )
     # Parse the command-line arguments
     args = parser.parse_args()

@@ -12,75 +12,54 @@ logging.basicConfig(
 
 
 def add_cui_column(df: pl.DataFrame, umls_df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Adds a 'CUI' column to the DataFrame by mapping composite 'Entity' strings to UMLS concepts.
+
+    The function performs the following steps:
+    1.  Cleans up special characters in the 'Entity' column of the UMLS DataFrame.
+    2.  Splits the 'Entity' column of the input DataFrame by '<SEP>' into individual terms.
+    3.  Explodes the DataFrame so that each row corresponds to a single term.
+    4.  Performs a left join with the UMLS DataFrame on the term and 'GROUP' to find the CUI for each term.
+    5.  Groups the data back by the original rows.
+    6.  Filters out rows where none of the constituent terms mapped to a CUI.
+    7.  Constructs the final CUI string by sorting the unique CUIs and joining them with '+'.
+    """
     # 1) Prepare umls_df: clean Entity strings
-    umls_df = umls_df.select(["CUI", "Entity", "GROUP"]).with_columns(
+    umls_df_clean = umls_df.select(["CUI", "Entity", "GROUP"]).with_columns(
         pl.col("Entity")
         .str.replace_all("\xa0", " ", literal=True)
-        .str.replace_all("{", "(", literal=True)
-        .str.replace_all("}", ")", literal=True)
-        .str.replace_all("[", "(", literal=True)
-        .str.replace_all("]", ")", literal=True)
+        .str.replace_all(r"[\{\[]", "(", literal=False)
+        .str.replace_all(r"[\}\]]", ")", literal=False)
     )
 
-    # 2) Prepare df1: keep original, split into list, and compute number of terms
-    df_prep = (
-        df.with_row_index("row_idx")
-        .with_columns([
-            pl.col("Entity").alias("Entity_orig"),
-            pl.col("Entity").str.split("<SEP>").alias("Entity_split"),
-        ])
-        .with_columns(
-            pl.col("Entity_split")
-            .map_elements(
-                lambda lst: [{"pos": i, "term": t} for i, t in enumerate(lst)],
-                return_dtype=pl.List(
-                    pl.Struct([pl.Field("pos", pl.Int64), pl.Field("term", pl.Utf8)])
-                ),  # type: ignore
-            )
-            .alias("term_structs")
-        )
+    # 2) Explode df by splitting 'Entity' into multiple terms
+    df = df.with_row_index()
+    df_exploded = (
+        df.select(["row_index", "Entity", "GROUP"])
+        .with_columns(pl.col("Entity").str.split("<SEP>"))
+        .explode("Entity")
     )
 
-    # 3) explode the positional structs, then extract pos and term columns
-    df_exp = (
-        df_prep.explode("term_structs")
-        .with_columns([
-            # term_structs are Python dicts after apply; extract fields with .apply
-            pl.col("term_structs")
-            .map_elements(lambda d: d["term"], return_dtype=pl.Utf8)
-            .alias("term"),
-            pl.col("term_structs")
-            .map_elements(lambda d: d["pos"], return_dtype=pl.Int64)
-            .alias("pos"),
-        ])
-        .select(["row_idx", "Entity_orig", "GROUP", "term", "pos"])
+    # 3) Join with UMLS data to get CUIs for each term
+    df_joined = df_exploded.join(
+        umls_df_clean,
+        on=["Entity", "GROUP"],
+        how="left",
     )
 
-    # 4) join exploded terms with umls_df on term and GROUP
-    df_exp = df_exp.join(
-        umls_df, left_on=["term", "GROUP"], right_on=["Entity", "GROUP"], how="left"
+    # 4) Group back, aggregate CUIs, and count nulls to find incomplete matches
+    df_grouped = df_joined.group_by("row_idx").agg(
+        pl.col("CUI").drop_nulls().unique().alias("cui_list"),
     )
-    # 5) Group back by original row; collect CUIs in exploded order (including possible nulls),
-    #    count nulls and keep n_terms for comparison
 
-    df_exp = df_exp.group_by(["row_idx", "Entity_orig", "GROUP"]).agg([
-        # collect CUI values in the order of the exploded rows (pos order is preserved by explode)
-        pl.col("CUI").unique().alias("cu_list"),
-        # how many CUI values are null (i.e., missing mappings)
-        pl.col("CUI").is_null().sum().alias("n_nulls"),
-    ])
+    # 5) Filter for rows with at least one match and create final CUI string
+    result = (
+        df_grouped.filter(pl.col("cui_list").list.len() > 0)
+        .with_columns(pl.col("cui_list").list.sort().list.join("+").alias("CUI"))
+        .select(["CUI", "row_idx"])
+    )
 
-    # 6) keep only rows where there are zero nulls (every term matched)
-    df_exp = df_exp.filter(pl.col("n_nulls") == 0)
-
-    # 7) join the CUIs in order with '+'
-    result = df_exp.with_columns(pl.col("cu_list").list.join("+").alias("CUI")).select([
-        pl.col("Entity_orig").alias("Entity"),
-        "GROUP",
-        "CUI",
-        "row_idx",
-    ])
-    return result
+    return df.join(result, on="row_idx", how="left")
 
 
 def _extract_mention_and_type(text: str, transition_verb: str) -> tuple[str, str]:
@@ -350,11 +329,11 @@ def main(args) -> None:
 
     results_df = pl.DataFrame(all_results)
     # Ensure the parent directory exists before writing
-    output_path = Path(args.output)
-    if output_path.parent != Path(""):
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-    results_df.write_csv(str(output_path))
-    logging.info(f"Evaluation finished. Results saved to {output_path}")
+    output_folder = Path(args.output)
+    if output_folder.parent != Path(""):
+        output_folder.parent.mkdir(parents=True, exist_ok=True)
+    results_df.write_csv(str(output_folder))
+    logging.info(f"Evaluation finished. Results saved to {output_folder}")
 
 
 if __name__ == "__main__":
@@ -419,7 +398,7 @@ if __name__ == "__main__":
         "--output",
         "-o",
         type=str,
-        default="evaluation_results.csv",
+        default="results",
         help="Output CSV filename or path. Example: result_spaccc.csv",
     )
     parser.add_argument(
