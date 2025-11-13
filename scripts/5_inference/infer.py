@@ -264,8 +264,7 @@ def main(
     )
     output_folder.mkdir(parents=True, exist_ok=True)
     no_constraint_df.write_csv(
-        file=output_folder
-        / f"pred_{split_name}_no_constraint_{num_beams}_beams_typed.tsv",
+        file=output_folder / f"pred_{split_name}_no_constraint_{num_beams}_beams.tsv",
         separator="\t",
         include_header=True,
     )
@@ -311,8 +310,7 @@ def main(
     )
     output_folder.mkdir(parents=True, exist_ok=True)
     constraint_df.write_csv(
-        file=output_folder
-        / f"pred_{split_name}_constraint_{num_beams}_beams_typed.tsv",
+        file=output_folder / f"pred_{split_name}_constraint_{num_beams}_beams.tsv",
         separator="\t",
         include_header=True,
     )
