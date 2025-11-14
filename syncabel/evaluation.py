@@ -111,168 +111,101 @@ def calculate_fscore(gold_standard, predictions, task):
     return scores
 
 
-# HELPER
-def write_results(task, scores, output_path, verbose):
-    """
-    Helper function to write the results for each of the tasks
-    """
-    headers_dict = {
-        "ner": "MedProcNER Shared Task: Subtask 1 (Named Entity Recognition) Results",
-        "norm": "MedProcNER Shared Task: Subtask 2 (Entity Linking) Results",
-    }
+def calculate_ner_per_label(df_gs, df_preds):
+    print("Computing evaluation scores for Task 1 (ner) per label")
 
-    with open(output_path, "w") as f_out:
-        # This looks super ugly, but if we keep the indentation it will also appear in the output file
-        f_out.write(
-            f"""-------------------------------------------------------------------
-{headers_dict[task]}
--------------------------------------------------------------------
-"""
-        )
-        if verbose:
-            for k in scores.keys():
-                if k != "total":
-                    f_out.write(
-                        """-------------------------------------------------------------------
-Results for document: {}
--------------------------------------------------------------------
-Precision: {}
-Recall: {}
-F-score: {}
-""".format(k, scores[k]["precision"], scores[k]["recall"], scores[k]["f_score"])
-                    )
+    # All labels present in GS
+    labels = sorted(df_gs["label"].unique())
 
-        f_out.write(
-            """-------------------------------------------------------------------
-Overall results:
--------------------------------------------------------------------
-Micro-average precision: {}
-Micro-average recall: {}
-Micro-average F-score: {}
-""".format(
-                scores["total"]["precision"],
-                scores["total"]["recall"],
-                scores["total"]["f_score"],
+    scores_per_label = {}
+
+    for label in labels:
+        print(f" → Computing scores for label: {label}")
+
+        # Filter GS and predictions for the current label
+        df_gs_label = df_gs[df_gs["label"] == label]
+        df_preds_label = df_preds[df_preds["label"] == label]
+
+        # Group annotations by filename
+        list_gs_per_doc = (
+            df_gs_label.groupby("filename")
+            .apply(
+                lambda x: x[
+                    ["filename", "start_span", "end_span", "span", "label"]
+                ].values.tolist()
             )
+            .to_list()
         )
-    print(f"Written MedProcNER {task} scores to {output_path}")
 
-
-# def main(argv=None):
-#     """
-#     Parse options and call the appropriate evaluation scripts
-#     """
-#     # Parse options
-#     parser = ArgumentParser()
-#     parser.add_argument(
-#         "-r",
-#         "--reference",
-#         dest="reference",
-#         help=".TSV file with Gold Standard or reference annotations",
-#         required=True,
-#     )
-#     parser.add_argument(
-#         "-p",
-#         "--prediction",
-#         dest="prediction",
-#         help=".TSV file with your predictions",
-#         required=True,
-#     )
-#     parser.add_argument(
-#         "-t",
-#         "--task",
-#         dest="task",
-#         choices=["ner", "norm", "index"],
-#         help="Task that you want to evaluate (ner, norm or index)",
-#         required=True,
-#     )
-#     parser.add_argument(
-#         "-o",
-#         "--output",
-#         dest="output",
-#         help="Path to save the scoring results",
-#         required=True,
-#     )
-#     parser.add_argument(
-#         "-v",
-#         "--verbose",
-#         dest="verbose",
-#         action="store_true",
-#         help="Set to True to print the results for each individual file instead of just the final score",
-#     )
-#     args = parser.parse_args(argv)
-
-#     # Set output file name
-#     timedate = datetime.now().strftime("%Y%m%d_%H%M%S")
-#     out_file = os.path.join(
-#         args.output, "medprocner_results_{}_{}.txt".format(args.task, timedate)
-#     )
-
-#     # Read gold_standard and predictions
-#     print("Reading reference and prediction .tsv files")
-#     df_gs = pd.read_csv(args.reference, sep="\t")
-#     df_preds = pd.read_csv(args.prediction, sep="\t")
-#     if args.task in ["ner", "norm"]:
-#         df_preds = df_preds.drop_duplicates(
-#             subset=["filename", "label", "start_span", "end_span"]
-#         ).reset_index(drop=True)  # Remove any duplicate predictions
-
-#     if args.task == "ner":
-#         calculate_ner(df_gs, df_preds, out_file, args.verbose)
-#     elif args.task == "norm":
-#         calculate_norm(df_gs, df_preds, out_file, args.verbose)
-#     else:
-#         print("Please choose a valid task (ner, norm, index)")
-
-
-def calculate_ner(df_gs, df_preds, output_path, verbose=False):
-    print("Computing evaluation scores for Task 1 (ner)")
-    # Group annotations by filename
-    list_gs_per_doc = (
-        df_gs.groupby("filename")
-        .apply(
-            lambda x: x[
-                ["filename", "start_span", "end_span", "text", "label"]
-            ].values.tolist()
+        list_preds_per_doc = (
+            df_preds_label.groupby("filename")
+            .apply(
+                lambda x: x[
+                    ["filename", "start_span", "end_span", "span", "label"]
+                ].values.tolist()
+            )
+            .to_list()
         )
-        .to_list()
-    )
-    list_preds_per_doc = (
-        df_preds.groupby("filename")
-        .apply(
-            lambda x: x[
-                ["filename", "start_span", "end_span", "text", "label"]
-            ].values.tolist()
-        )
-        .to_list()
-    )
-    scores = calculate_fscore(list_gs_per_doc, list_preds_per_doc, "ner")
-    write_results("ner", scores, output_path, verbose)
+
+        # Call your existing scoring function
+        score = calculate_fscore(list_gs_per_doc, list_preds_per_doc, "ner")
+        scores_per_label[label] = score
+
+    return scores_per_label
+
+    # write_results("ner", scores, output_path, verbose)
 
 
 # Ajouter train mentions...Etc pour avoir les autres recalls
 
 
-def calculate_norm(df_gs, df_preds, output_path, verbose=False):
-    print("Computing evaluation scores for Task 2 (norm)")
-    # Group annotations by filename
-    list_gs_per_doc = (
-        df_gs.groupby("filename")
-        .apply(
-            lambda x: x[
-                ["filename", "start_span", "end_span", "text", "label", "code"]
-            ].values.tolist()
+def calculate_norm_per_label(df_gs, df_preds):
+    print("Computing evaluation scores for Task 2 (norm) per label")
+
+    # All labels present in GS
+    labels = sorted(df_gs["label"].unique())
+
+    scores_per_label = {}
+
+    for label in labels:
+        print(f" → Computing scores for label: {label}")
+
+        # Filter GS and predictions for this label
+        df_gs_label = df_gs[df_gs["label"] == label]
+        df_preds_label = df_preds[df_preds["label"] == label]
+
+        # Group annotations by filename
+        list_gs_per_doc = (
+            df_gs_label.groupby("filename")
+            .apply(
+                lambda x: x[
+                    ["filename", "start_span", "end_span", "span", "label", "code"]
+                ].values.tolist()
+            )
+            .to_list()
         )
-        .to_list()
-    )
-    list_preds_per_doc = (
-        df_preds.groupby("filename")
-        .apply(
-            lambda x: x[
-                ["filename", "start_span", "end_span", "text", "label", "code"]
-            ].values.tolist()
+
+        list_preds_per_doc = (
+            df_preds_label.groupby("filename")
+            .apply(
+                lambda x: x[
+                    [
+                        "filename",
+                        "start_span",
+                        "end_span",
+                        "span",
+                        "label",
+                        "Predicted_CUI",
+                    ]
+                ].values.tolist()
+            )
+            .to_list()
         )
-        .to_list()
-    )
-    scores = calculate_fscore(list_gs_per_doc, list_preds_per_doc, "norm")
-    write_results("norm", scores, output_path, verbose)
+
+        # Compute score using your existing function
+        score = calculate_fscore(list_gs_per_doc, list_preds_per_doc, "norm")
+
+        # Store score
+        scores_per_label[label] = score
+
+    return scores_per_label
