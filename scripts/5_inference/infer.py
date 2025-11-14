@@ -235,7 +235,7 @@ def main(
         Path(output_folder)
         / dataset_name
         / f"{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
-        / model_name
+        / f"{model_name}_{'best' if best else 'last'}"
     )
     output_folder.mkdir(parents=True, exist_ok=True)
 
