@@ -10,6 +10,8 @@ Core models for SynCABEL
 import logging
 import re
 
+import torch
+import torch.nn.functional as F
 from transformers import (
     AutoTokenizer,
     BartForConditionalGeneration,
@@ -21,6 +23,69 @@ from transformers import (
 from syncabel.utils import chunk_it
 
 logger = logging.getLogger(__name__)
+
+
+def compute_score(outputs, tokenizer) -> list[float]:
+    """
+    Compute a confidence score for each generated sequence in outputs.
+
+    Confidence = geometric mean of token probabilities,
+    ignoring PAD and EOS tokens.
+
+    Args:
+        outputs: HuggingFace generate() output with
+                 return_dict_in_generate=True and output_scores=True
+        tokenizer: tokenizer used to generate sequences
+
+    Returns:
+        List of confidence scores (float) in (0,1] for each sequence
+    """
+    sequences = outputs.sequences  # (batch*num_return_sequences, seq_len)
+    scores = outputs.scores  # list of logits per step
+
+    N, L = sequences.shape
+    T = len(scores)
+
+    if sequences.size(1) != T:
+        # This case can happen for causal LMs that have a BOS token,
+        # where the sequence length is T+1.
+        if sequences.size(1) == T + 1:
+            # The first token is the BOS token, which has no score.
+            # The scores correspond to predictions for tokens starting from the second one.
+            sequences = sequences[:, 1:]
+        else:
+            raise ValueError(
+                f"Length mismatch: sequences {sequences.size(1)} vs scores {T}"
+            )
+
+    # Create mask to ignore PAD/EOS tokens
+    mask = (
+        (sequences != tokenizer.pad_token_id)
+        & (sequences != tokenizer.eos_token_id)
+        & (sequences != tokenizer.bos_token_id)
+    )
+
+    # Compute log-probabilities for chosen tokens
+    logprob_steps = []
+    for t, logits in enumerate(scores):
+        log_probs_t = F.log_softmax(logits, dim=-1)  # (N, vocab)
+        token_t = sequences[:, t]
+        idx = torch.arange(N)
+        logprob_steps.append(log_probs_t[idx, token_t])
+
+    # Stack → (N, T)
+    logprobs = torch.stack(logprob_steps, dim=1)
+
+    # Apply mask to remove PAD/EOS/BOS tokens
+    logprobs.masked_fill_(~mask, 0)
+    lengths = mask.sum(dim=1)  # number of valid tokens per sequence
+
+    # Compute geometric mean → confidence
+    # Avoid division by zero
+    lengths = torch.clamp(lengths, min=1)
+    confidence = torch.exp(logprobs.sum(dim=1) / lengths)
+
+    return confidence.tolist()
 
 
 def skip_undesired_tokens(outputs, tokenizer):
@@ -59,7 +124,6 @@ class _GENREHubInterface:
         self,
         sentences: list[str],
         num_beams: int = 5,
-        num_return_sequences=5,
         text_to_id: dict[str, str] = None,  # type: ignore
         marginalize: bool = False,
         **kwargs,
@@ -76,7 +140,7 @@ class _GENREHubInterface:
             min_length=0,
             max_length=128,
             num_beams=num_beams,
-            num_return_sequences=num_return_sequences,
+            num_return_sequences=num_beams,
             output_scores=True,
             return_dict_in_generate=True,
             **kwargs,
@@ -91,6 +155,8 @@ class _GENREHubInterface:
             self.tokenizer,  # type: ignore
         )
 
+        scores = compute_score(outputs, self.tokenizer)  # type: ignore
+
         outputs = chunk_it(
             [
                 {
@@ -99,7 +165,7 @@ class _GENREHubInterface:
                 }
                 for text, score in zip(
                     cleaned_output_sequences,
-                    outputs.sequences_scores,
+                    scores,
                 )
             ],
             len(sentences),

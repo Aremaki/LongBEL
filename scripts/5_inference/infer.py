@@ -230,6 +230,15 @@ def main(
         with open(trie_path, "wb") as file:
             pickle.dump(trie_legal_tokens, file, protocol=-1)
 
+    # Init output folder
+    output_folder = (
+        Path(output_folder)
+        / dataset_name
+        / f"{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
+        / model_name
+    )
+    output_folder.mkdir(parents=True, exist_ok=True)
+
     # Perform inference without constraint
     output_sentences = []
     output_scores = []
@@ -241,11 +250,10 @@ def main(
             batch_output_sentences = model.sample(
                 batch_sources,
                 num_beams=num_beams,
-                num_return_sequences=1,
             )
         output_sentences.extend([batch[0]["text"] for batch in batch_output_sentences])  # type: ignore
         output_scores.extend([
-            1 + float(batch[0]["score"])  # type: ignore
+            batch[0]["score"]  # type: ignore
             for batch in batch_output_sentences
         ])
     no_constraint_df = test_data.with_columns(
@@ -256,13 +264,6 @@ def main(
     print(f"Generated {len(no_constraint_df)} sentences without constraint.")
 
     # Save results
-    output_folder = (
-        Path(output_folder)
-        / dataset_name
-        / f"{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
-        / model_name
-    )
-    output_folder.mkdir(parents=True, exist_ok=True)
     no_constraint_df.write_csv(
         file=output_folder / f"pred_{split_name}_no_constraint_{num_beams}_beams.tsv",
         separator="\t",
@@ -287,11 +288,10 @@ def main(
                 batch_sources,
                 prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
                 num_beams=num_beams,
-                num_return_sequences=1,
             )
         output_sentences.extend([batch[0]["text"] for batch in batch_output_sentences])  # type: ignore
         output_scores.extend([
-            1 + float(batch[0]["score"])  # type: ignore
+            batch[0]["score"]  # type: ignore
             for batch in batch_output_sentences
         ])
     constraint_df = test_data.with_columns(
@@ -302,13 +302,6 @@ def main(
     print(f"Generated {len(constraint_df)} sentences with constraint.")
 
     # Save results
-    output_folder = (
-        Path(output_folder)
-        / dataset_name
-        / f"{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
-        / model_name
-    )
-    output_folder.mkdir(parents=True, exist_ok=True)
     constraint_df.write_csv(
         file=output_folder / f"pred_{split_name}_constraint_{num_beams}_beams.tsv",
         separator="\t",
