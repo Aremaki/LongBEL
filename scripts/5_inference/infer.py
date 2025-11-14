@@ -264,7 +264,7 @@ def main(
     no_constraint_df = test_data.with_columns(
         pl.Series(name="Prediction", values=output_sentences),
         pl.Series(name="Prediction_score", values=output_scores),
-        pl.Series(name="Beam_score", values=output_beam_scores),
+        pl.Series(name="Prediction_beam_score", values=output_beam_scores),
     )
     no_constraint_df = add_cui_column(no_constraint_df, umls_df=umls_df)
     print(f"Generated {len(no_constraint_df)} sentences without constraint.")
@@ -308,7 +308,7 @@ def main(
     constraint_df = test_data.with_columns(
         pl.Series(name="Prediction", values=output_sentences),
         pl.Series(name="Prediction_score", values=output_scores),
-        pl.Series(name="Beam_score", values=output_beam_scores),
+        pl.Series(name="Prediction_beam_score", values=output_beam_scores),
     )
     constraint_df = add_cui_column(constraint_df, umls_df=umls_df)
     print(f"Generated {len(constraint_df)} sentences with constraint.")
