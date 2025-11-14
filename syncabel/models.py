@@ -156,16 +156,26 @@ class _GENREHubInterface:
         )
 
         scores = compute_score(outputs, self.tokenizer)  # type: ignore
+        beam_scores = [
+            float(torch.exp(s)) if num_beams > 1 else float("nan")
+            for s in (
+                outputs.sequences_scores
+                if num_beams > 1
+                else [torch.tensor(float("nan"))] * len(scores)
+            )
+        ]
 
         outputs = chunk_it(
             [
                 {
                     "text": text,
                     "score": score,
+                    "beam_score": beam_score,
                 }
-                for text, score in zip(
+                for text, score, beam_score in zip(
                     cleaned_output_sequences,
                     scores,
+                    beam_scores,
                 )
             ],
             len(sentences),
