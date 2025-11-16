@@ -72,21 +72,31 @@ def span_tokenize_with_trailing_newlines(text, nlp, entity_spans=None):
             avoided within these spans.
     """
     sent_spans = []
-    offset = 0
-    chunks = re.split(r"(\n+)", text)
-    current_chunk = ""
+    last_break = 0
 
-    for part in chunks:
-        if not part:
-            continue
-        if re.fullmatch(r"\n+", part):
-            _process_chunk(current_chunk, offset, text, sent_spans, nlp, entity_spans)
-            offset += len(current_chunk) + len(part)
-            current_chunk = ""
-        else:
-            current_chunk += part
+    # Find all potential break points (newlines)
+    break_points = [m.start() for m in re.finditer(r"\n+", text)]
+    break_points.append(len(text))
 
-    _process_chunk(current_chunk, offset, text, sent_spans, nlp, entity_spans)
+    for point in break_points:
+        is_in_entity = False
+        if entity_spans:
+            for estart, eend in entity_spans:
+                if estart <= point < eend:
+                    is_in_entity = True
+                    break
+
+        if not is_in_entity:
+            chunk = text[last_break:point]
+            offset = last_break
+            _process_chunk(chunk, offset, text, sent_spans, nlp, entity_spans)
+            last_break = point
+
+    # Process the final chunk if it wasn't handled
+    if last_break < len(text):
+        chunk = text[last_break:]
+        offset = last_break
+        _process_chunk(chunk, offset, text, sent_spans, nlp, entity_spans)
 
     return sent_spans
 
