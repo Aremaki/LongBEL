@@ -333,7 +333,7 @@ def run(
         help="UMLS semantic info parquet. Will be created if it doesn't exist.",
     ),
     spaccc_data_dir: Path = typer.Option(
-        Path("data/SPACCC"), help="SPACCC data directory"
+        Path("data/SPACCC/Normalization"), help="SPACCC data directory"
     ),
     corrected_cui_path: Path = typer.Option(
         Path("data/corrected_cui/SPACCC_adapted.csv"),

@@ -351,7 +351,7 @@ def _complete_cui_entity_group_combinations(df: pl.DataFrame) -> pl.DataFrame:
 @app.command()
 def main(
     spaccc_dir: Path = typer.Option(
-        Path("data/SPACCC"),
+        Path("data/SPACCC/Normalization"),
         "--spaccc-dir",
         "-i",
         help="Path to SPACCC data directory with terminology.tsv, train.tsv, test.tsv",
