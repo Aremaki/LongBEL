@@ -3,7 +3,7 @@
 #!/bin/bash
 
 model_names=('mt5-large' 'bart-large' 'mbart-large-50' 'ANGEL_pretrained_bart' 'biobart-v2-large')
-augmented_data_options=("human_only" "synth_only" "full")
+augmented_data_options=("human_only" "synth_only" "full" "human_only_ft" "full_upsampled")
 
 for model_name in "${model_names[@]}"; do
     for augmented_data in "${augmented_data_options[@]}"; do

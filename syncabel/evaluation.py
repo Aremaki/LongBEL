@@ -1,267 +1,140 @@
-"""
-MedProcNER evaluation library evaluation and util functions.
-Partially based on the DisTEMIST and MEDDOPLACE evaluation scripts.
-@author: salva
-"""
+# fast_medproc_eval.py
+# Ultra-fast MedProcNER evaluation using Polars
+# Equivalent results to the original pandas + Python-loop implementation
+# but MUCH faster and without per-document results.
+
+import polars as pl
+
+# ---------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------
 
 
-# METRICS
-def calculate_fscore(gold_standard, predictions, task):
+def normalize_codes(col: pl.Expr) -> pl.Expr:
     """
-    Calculate micro-averaged precision, recall and f-score from two pandas dataframe
-    Depending on the task, do some different pre-processing to the data
+    Normalize composite CUIs (e.g. "A+B") by:
+    - splitting
+    - trimming
+    - sorting
+    - joining deterministically
     """
-    # Cumulative true positives, false positives, false negatives
-    total_tp, total_fp, total_fn = 0, 0, 0
-    # Dictionary to store files in gold and prediction data.
-    gs_files = {}
-    pred_files = {}
-    for document in gold_standard:
-        document_id = document[0][0]
-        gs_files[document_id] = document
-    for document in predictions:
-        document_id = document[0][0]
-        pred_files[document_id] = document
+    return (
+        col.str.split("+")
+        .list.eval(pl.element().str.strip_chars())
+        .list.sort()
+        .list.join("+")
+    )
 
-    # Dictionary to store scores
-    scores = {}
 
-    # Iterate through documents in the Gold Standard
-    for document_id in gs_files.keys():
-        doc_tp, doc_fp, doc_fn = 0, 0, 0
-        gold_doc = gs_files[document_id]
-        #  Check if there are predictions for the current document, default to empty document if false
-        if document_id not in pred_files.keys():
-            predicted_doc = []
-        else:
-            predicted_doc = pred_files[document_id]
-        # Iterate through a copy of our gold mentions
-        for gold_annotation in gold_doc[:]:
-            # Iterate through predictions looking for a match
-            for prediction in predicted_doc[:]:
-                # Separate possible composite normalizations
-                if task == "norm":
-                    separate_prediction = prediction[:-1] + [
-                        code.rstrip() for code in sorted(str(prediction[-1]).split("+"))
-                    ]  # Need to sort
-                    separate_gold_annotation = gold_annotation[:-1] + [
-                        code.rstrip() for code in str(gold_annotation[-1]).split("+")
-                    ]
-                    if set(separate_gold_annotation) == set(separate_prediction):
-                        # Add a true positive
-                        doc_tp += 1
-                        # Remove elements from list to calculate later false positives and false negatives
-                        predicted_doc.remove(prediction)
-                        gold_doc.remove(gold_annotation)
-                        break
-                if set(gold_annotation) == set(prediction):
-                    # Add a true positive
-                    doc_tp += 1
-                    # Remove elements from list to calculate later false positives and false negatives
-                    predicted_doc.remove(prediction)
-                    gold_doc.remove(gold_annotation)
-                    break
-        # Get the number of false positives and false negatives from the items remaining in our lists
-        doc_fp += len(predicted_doc)
-        doc_fn += len(gold_doc)
-        # Calculate document score
-        try:
-            precision = doc_tp / (doc_tp + doc_fp)
-        except ZeroDivisionError:
-            precision = 0
-        try:
-            recall = doc_tp / (doc_tp + doc_fn)
-        except ZeroDivisionError:
-            recall = 0
-        if precision == 0 or recall == 0:
-            f_score = 0
-        else:
-            f_score = 2 * precision * recall / (precision + recall)
-        # Add to dictionary
-        scores[document_id] = {
-            "recall": round(recall, 4),
-            "precision": round(precision, 4),
-            "f_score": round(f_score, 4),
-        }
-        # Update totals
-        total_tp += doc_tp
-        total_fn += doc_fn
-        total_fp += doc_fp
+# ---------------------------------------------------------
+# Core TP matching
+# ---------------------------------------------------------
 
-    # Now let's calculate the micro-averaged score using the cumulative TP, FP, FN
-    try:
-        precision = total_tp / (total_tp + total_fp)
-    except ZeroDivisionError:
-        precision = 0
-    try:
-        recall = total_tp / (total_tp + total_fn)
-    except ZeroDivisionError:
-        recall = 0
-    if precision == 0 or recall == 0:
-        f_score = 0
+
+def match_true_positives(
+    df_gs: pl.DataFrame, df_pred: pl.DataFrame, task: str
+) -> pl.DataFrame:
+    """
+    Return a DF of true positives via fast Polars join.
+    """
+
+    if task == "ner":
+        # Matching keys for NER
+        join_cols = ["filename", "start_span", "end_span", "label"]
+
+        gs_df = df_gs.with_columns([pl.col("span").alias("span_norm")])
+
+        pred_df = df_pred.with_columns([pl.col("text").alias("span_norm")])
+
+    elif task == "norm":
+        # Matching keys for NORM
+        join_cols = ["filename", "start_span", "end_span", "label"]
+
+        gs_df = df_gs.with_columns([
+            pl.col("span").alias("span_norm"),
+            normalize_codes(pl.col("code")).alias("code_norm"),
+        ])
+
+        pred_df = df_pred.with_columns([
+            pl.col("span").alias("span_norm"),
+            normalize_codes(pl.col("Predicted_CUI")).alias("code_norm"),
+        ])
+
+        join_cols.append("code_norm")
+
     else:
-        f_score = 2 * precision * recall / (precision + recall)
+        raise ValueError("task must be 'ner' or 'norm'")
 
-    scores["total"] = {
-        "recall": round(recall, 4),
+    # Inner join = true positives
+    tp = gs_df.join(pred_df, on=join_cols + ["span_norm"], how="inner")
+
+    return tp
+
+
+# ---------------------------------------------------------
+# Compute TP / FP / FN (no per-document breakdown)
+# ---------------------------------------------------------
+
+
+def compute_micro_metrics(
+    df_gs: pl.DataFrame, df_pred: pl.DataFrame, task: str
+) -> dict:
+    """
+    Compute micro-averaged TP/FP/FN + precision, recall, f1.
+    """
+
+    # True Positives
+    tp = match_true_positives(df_gs, df_pred, task)
+    tp_count = tp.height
+
+    gold_count = df_gs.height
+    pred_count = df_pred.height
+
+    fp_count = pred_count - tp_count
+    fn_count = gold_count - tp_count
+
+    # Precision, Recall, F1
+    precision = tp_count / (tp_count + fp_count) if (tp_count + fp_count) > 0 else 0.0
+    recall = tp_count / (tp_count + fn_count) if (tp_count + fn_count) > 0 else 0.0
+    f1 = (
+        0.0
+        if (precision == 0 or recall == 0)
+        else (2 * precision * recall / (precision + recall))
+    )
+
+    return {
         "precision": round(precision, 4),
-        "f_score": round(f_score, 4),
+        "recall": round(recall, 4),
+        "f_score": round(f1, 4),
     }
 
-    return scores
+
+# ---------------------------------------------------------
+# Per-label + overall evaluation
+# ---------------------------------------------------------
 
 
-def calculate_ner_per_label(df_gs, df_preds):
-    # All labels present in GS
+def evaluate(df_gs: pl.DataFrame, df_pred: pl.DataFrame, task: str) -> dict:
+    """
+    Compute:
+        - per-label micro-averaged scores
+        - overall micro-averaged scores
+    """
+
     labels = sorted(df_gs["label"].unique())
-
-    scores_per_label = {}
+    scores = {}
 
     for label in labels:
-        # Filter GS and predictions for the current label
-        df_gs_label = df_gs[df_gs["label"] == label]
-        df_preds_label = df_preds[df_preds["label"] == label]
+        gs_lb = df_gs.filter(pl.col("label") == label)
+        pred_lb = df_pred.filter(pl.col("label") == label)
 
-        # Group annotations by filename
-        list_gs_per_doc = (
-            df_gs_label.groupby("filename")
-            .apply(
-                lambda x: x[
-                    ["filename", "start_span", "end_span", "span", "label"]
-                ].values.tolist()
-            )
-            .to_list()
-        )
-
-        list_preds_per_doc = (
-            df_preds_label.groupby("filename")
-            .apply(
-                lambda x: x[
-                    ["filename", "start_span", "end_span", "text", "label"]
-                ].values.tolist()
-            )
-            .to_list()
-        )
-
-        # Call your existing scoring function
-        score = calculate_fscore(list_gs_per_doc, list_preds_per_doc, "ner")
-        scores_per_label[label] = score
-
-    # Overall score
-    list_gs_per_doc = (
-        df_gs.groupby("filename")
-        .apply(
-            lambda x: x[
-                ["filename", "start_span", "end_span", "span", "label"]
-            ].values.tolist()
-        )
-        .to_list()
-    )
-
-    list_preds_per_doc = (
-        df_preds.groupby("filename")
-        .apply(
-            lambda x: x[
-                ["filename", "start_span", "end_span", "text", "label"]
-            ].values.tolist()
-        )
-        .to_list()
-    )
-    score = calculate_fscore(list_gs_per_doc, list_preds_per_doc, "ner")
-    scores_per_label["overall"] = score
-
-    return scores_per_label
-
-    # write_results("ner", scores, output_path, verbose)
-
-
-# Ajouter train mentions...Etc pour avoir les autres recalls
-
-
-def calculate_norm_per_label(df_gs, df_preds):
-    # All labels present in GS
-    labels = sorted(df_gs["label"].unique())
-
-    scores_per_label = {}
-
-    for label in labels:
-        # Filter GS and predictions for this label
-        df_gs_label = df_gs[df_gs["label"] == label]
-        df_preds_label = df_preds[df_preds["label"] == label]
-
-        # Group annotations by filename
-        list_gs_per_doc = (
-            df_gs_label.groupby("filename")
-            .apply(
-                lambda x: x[
-                    ["filename", "start_span", "end_span", "span", "label", "code"]
-                ].values.tolist()
-            )
-            .to_list()
-        )
-
-        # chcek if df_preds_label is empty
-        if df_preds_label.empty:
-            score = {"total": {"recall": 0.0, "precision": 0.0, "f_score": 0.0}}
-            scores_per_label[label] = score
+        if pred_lb.height == 0:
+            scores[label] = {"total": {"precision": 0.0, "recall": 0.0, "f_score": 0.0}}
             continue
-        else:
-            list_preds_per_doc = (
-                df_preds_label.groupby("filename")
-                .apply(
-                    lambda x: x[
-                        [
-                            "filename",
-                            "start_span",
-                            "end_span",
-                            "span",
-                            "label",
-                            "Predicted_CUI",
-                        ]
-                    ].values.tolist()
-                )
-                .to_list()
-            )
 
-        # Compute score using your existing function
-        score = calculate_fscore(list_gs_per_doc, list_preds_per_doc, "norm")
+        scores[label] = {"total": compute_micro_metrics(gs_lb, pred_lb, task)}
 
-        # Store score
-        scores_per_label[label] = score
+    # Overall micro score
+    scores["overall"] = {"total": compute_micro_metrics(df_gs, df_pred, task)}
 
-    # Overall score
-    list_gs_per_doc = (
-        df_gs.groupby("filename")
-        .apply(
-            lambda x: x[
-                ["filename", "start_span", "end_span", "span", "label", "code"]
-            ].values.tolist()
-        )
-        .to_list()
-    )
-    # Check if df_preds is empty
-    if df_preds.empty:
-        score = {"total": {"recall": 0.0, "precision": 0.0, "f_score": 0.0}}
-        scores_per_label["overall"] = score
-        return scores_per_label
-
-    list_preds_per_doc = (
-        df_preds.groupby("filename")
-        .apply(
-            lambda x: x[
-                [
-                    "filename",
-                    "start_span",
-                    "end_span",
-                    "span",
-                    "label",
-                    "Predicted_CUI",
-                ]
-            ].values.tolist()
-        )
-        .to_list()
-    )
-    score = calculate_fscore(list_gs_per_doc, list_preds_per_doc, "norm")
-    scores_per_label["overall"] = score
-
-    return scores_per_label
+    return scores
