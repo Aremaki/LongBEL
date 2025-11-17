@@ -419,10 +419,19 @@ def main(args) -> None:
         # Ensure the parent directory exists before writing
         output_folder = Path(args.output)
         output_folder.mkdir(parents=True, exist_ok=True)
-        bel_results_df.write_csv(output_folder / "bel_evaluation_results.csv")
-        logging.info(
-            f"Evaluation finished. Results saved to {output_folder / 'bel_evaluation_results.csv'}"
-        )
+        if len(args.model_names) == 1 and len(args.augmented_data) == 1:
+            bel_results_df.write_csv(
+                output_folder
+                / f"bel_evaluation_results_{args.model_names[0]}_{args.augmented_data[0]}.csv"
+            )
+            logging.info(
+                f"Evaluation finished. Results saved to {output_folder / f'bel_evaluation_results_{args.model_names[0]}_{args.augmented_data[0]}.csv'}"
+            )
+        else:
+            bel_results_df.write_csv(output_folder / "bel_evaluation_results.csv")
+            logging.info(
+                f"Evaluation finished. Results saved to {output_folder / 'bel_evaluation_results.csv'}"
+            )
 
 
 if __name__ == "__main__":
