@@ -112,16 +112,12 @@ def calculate_fscore(gold_standard, predictions, task):
 
 
 def calculate_ner_per_label(df_gs, df_preds):
-    print("Computing evaluation scores for Task 1 (ner) per label")
-
     # All labels present in GS
     labels = sorted(df_gs["label"].unique())
 
     scores_per_label = {}
 
     for label in labels:
-        print(f" → Computing scores for label: {label}")
-
         # Filter GS and predictions for the current label
         df_gs_label = df_gs[df_gs["label"] == label]
         df_preds_label = df_preds[df_preds["label"] == label]
@@ -141,7 +137,7 @@ def calculate_ner_per_label(df_gs, df_preds):
             df_preds_label.groupby("filename")
             .apply(
                 lambda x: x[
-                    ["filename", "start_span", "end_span", "span", "label"]
+                    ["filename", "start_span", "end_span", "text", "label"]
                 ].values.tolist()
             )
             .to_list()
@@ -150,6 +146,29 @@ def calculate_ner_per_label(df_gs, df_preds):
         # Call your existing scoring function
         score = calculate_fscore(list_gs_per_doc, list_preds_per_doc, "ner")
         scores_per_label[label] = score
+
+    # Overall score
+    list_gs_per_doc = (
+        df_gs.groupby("filename")
+        .apply(
+            lambda x: x[
+                ["filename", "start_span", "end_span", "span", "label"]
+            ].values.tolist()
+        )
+        .to_list()
+    )
+
+    list_preds_per_doc = (
+        df_preds.groupby("filename")
+        .apply(
+            lambda x: x[
+                ["filename", "start_span", "end_span", "text", "label"]
+            ].values.tolist()
+        )
+        .to_list()
+    )
+    score = calculate_fscore(list_gs_per_doc, list_preds_per_doc, "ner")
+    scores_per_label["overall"] = score
 
     return scores_per_label
 
@@ -160,16 +179,12 @@ def calculate_ner_per_label(df_gs, df_preds):
 
 
 def calculate_norm_per_label(df_gs, df_preds):
-    print("Computing evaluation scores for Task 2 (norm) per label")
-
     # All labels present in GS
     labels = sorted(df_gs["label"].unique())
 
     scores_per_label = {}
 
     for label in labels:
-        print(f" → Computing scores for label: {label}")
-
         # Filter GS and predictions for this label
         df_gs_label = df_gs[df_gs["label"] == label]
         df_preds_label = df_preds[df_preds["label"] == label]
@@ -185,27 +200,68 @@ def calculate_norm_per_label(df_gs, df_preds):
             .to_list()
         )
 
-        list_preds_per_doc = (
-            df_preds_label.groupby("filename")
-            .apply(
-                lambda x: x[
-                    [
-                        "filename",
-                        "start_span",
-                        "end_span",
-                        "span",
-                        "label",
-                        "Predicted_CUI",
-                    ]
-                ].values.tolist()
+        # chcek if df_preds_label is empty
+        if df_preds_label.empty:
+            score = {"total": {"recall": 0.0, "precision": 0.0, "f_score": 0.0}}
+            scores_per_label[label] = score
+            continue
+        else:
+            list_preds_per_doc = (
+                df_preds_label.groupby("filename")
+                .apply(
+                    lambda x: x[
+                        [
+                            "filename",
+                            "start_span",
+                            "end_span",
+                            "span",
+                            "label",
+                            "Predicted_CUI",
+                        ]
+                    ].values.tolist()
+                )
+                .to_list()
             )
-            .to_list()
-        )
 
         # Compute score using your existing function
         score = calculate_fscore(list_gs_per_doc, list_preds_per_doc, "norm")
 
         # Store score
         scores_per_label[label] = score
+
+    # Overall score
+    list_gs_per_doc = (
+        df_gs.groupby("filename")
+        .apply(
+            lambda x: x[
+                ["filename", "start_span", "end_span", "span", "label", "code"]
+            ].values.tolist()
+        )
+        .to_list()
+    )
+    # Check if df_preds is empty
+    if df_preds.empty:
+        score = {"total": {"recall": 0.0, "precision": 0.0, "f_score": 0.0}}
+        scores_per_label["overall"] = score
+        return scores_per_label
+
+    list_preds_per_doc = (
+        df_preds.groupby("filename")
+        .apply(
+            lambda x: x[
+                [
+                    "filename",
+                    "start_span",
+                    "end_span",
+                    "span",
+                    "label",
+                    "Predicted_CUI",
+                ]
+            ].values.tolist()
+        )
+        .to_list()
+    )
+    score = calculate_fscore(list_gs_per_doc, list_preds_per_doc, "norm")
+    scores_per_label["overall"] = score
 
     return scores_per_label

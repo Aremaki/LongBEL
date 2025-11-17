@@ -364,7 +364,13 @@ if __name__ == "__main__":
         "--augmented-data",
         type=str,
         default="human_only",
-        choices=["human_only", "synth_only", "full"],
+        choices=[
+            "human_only",
+            "synth_only",
+            "full",
+            "full_upsampled",
+            "human_only_ft",
+        ],
         help="Whether to use augmented data for training",
     )
     parser.add_argument(
