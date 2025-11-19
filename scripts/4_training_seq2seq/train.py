@@ -230,6 +230,9 @@ def main(
         elif dataset_name == "SPACCC":
             tokenizer.src_lang = "es_XX"
             tokenizer.tgt_lang = "es_XX"
+        elif dataset_name == "SPACCC_UMLS":
+            tokenizer.src_lang = "es_XX"
+            tokenizer.tgt_lang = "es_XX"
         else:
             tokenizer.src_lang = "fr_XX"
             tokenizer.tgt_lang = "fr_XX"
@@ -310,7 +313,7 @@ def main(
             synth_train_target_data = load_pickle(
                 data_folder / "SynthQUAERO" / f"train_{selection_method}_target.pkl"
             )
-        else:  # SPACCC
+        elif dataset_name == "SPACCC":
             synth_train_source_data = load_pickle(
                 data_folder
                 / "SynthSPACCC"
@@ -318,6 +321,17 @@ def main(
             )
             synth_train_target_data = load_pickle(
                 data_folder / "SynthSPACCC" / f"train_{selection_method}_target.pkl"
+            )
+        else:  # SPACCC_UMLS
+            synth_train_source_data = load_pickle(
+                data_folder
+                / "SynthSPACCC_UMLS"
+                / f"train_{selection_method}_source{with_group_extension}.pkl"
+            )
+            synth_train_target_data = load_pickle(
+                data_folder
+                / "SynthSPACCC_UMLS"
+                / f"train_{selection_method}_target.pkl"
             )
         synth_train_data = {
             "source": synth_train_source_data,

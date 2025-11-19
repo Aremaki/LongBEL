@@ -51,10 +51,14 @@ def codes(
     """Extract unique CUIs to umls_codes.parquet."""
     _ensure_out_dir(out_dir)
     cuis: list[str] = []
+    codes: list[str] = []
     for parts in tqdm(_iter_rrf(umls_zip, "MRCONSO.RRF"), desc="CUIs"):
         if parts and parts[0]:
             cuis.append(parts[0])
-    pl.DataFrame({"CUI": cuis}).unique().write_parquet(out_dir / "umls_codes.parquet")
+            codes.append(parts[13])
+    pl.DataFrame({"CUI": cuis, "code": codes}).unique().write_parquet(
+        out_dir / "umls_codes.parquet"
+    )
     typer.echo(f"Saved {out_dir / 'umls_codes.parquet'}")
 
 
@@ -136,12 +140,14 @@ def synonyms(
 ) -> None:
     """Extract preferred titles (EN/FR/Main) and synonyms into umls_title_syn.parquet."""
     _ensure_out_dir(out_dir)
-    preferred_title = {"code": [], "CUI": [], "UMLS_Title_preferred": []}
-    main_title = {"code": [], "CUI": [], "UMLS_Title_main": []}
-    fr_title = {"code": [], "CUI": [], "UMLS_Title_fr": []}
-    en_title = {"code": [], "CUI": [], "UMLS_Title_en": []}
-    fr_syn = {"code": [], "CUI": [], "UMLS_alias_fr": []}
-    en_syn = {"code": [], "CUI": [], "UMLS_alias_en": []}
+    preferred_title = {"CUI": [], "UMLS_Title_preferred": []}
+    main_title = {"CUI": [], "UMLS_Title_main": []}
+    fr_title = {"CUI": [], "UMLS_Title_fr": []}
+    en_title = {"CUI": [], "UMLS_Title_en": []}
+    es_title = {"CUI": [], "UMLS_Title_es": []}
+    fr_syn = {"CUI": [], "UMLS_alias_fr": []}
+    en_syn = {"CUI": [], "UMLS_alias_en": []}
+    es_syn = {"CUI": [], "UMLS_alias_es": []}
     for parts in tqdm(_iter_rrf(umls_zip, "MRCONSO.RRF"), desc="Synonyms"):
         if len(parts) < 15:
             continue
@@ -171,35 +177,48 @@ def synonyms(
             else:
                 en_syn["CUI"].append(cui)
                 en_syn["UMLS_alias_en"].append(term)
+        elif lat == "SPA":
+            if ts == "P":
+                es_title["CUI"].append(cui)
+                es_title["UMLS_Title_es"].append(term)
+            else:
+                es_syn["CUI"].append(cui)
+                es_syn["UMLS_alias_es"].append(term)
 
     fr_syn_df = pl.DataFrame(fr_syn).unique()
     en_syn_df = pl.DataFrame(en_syn).unique()
+    es_syn_df = pl.DataFrame(es_syn).unique()
     fr_title_df = pl.DataFrame(fr_title).unique()
     en_title_df = pl.DataFrame(en_title).unique()
+    es_title_df = pl.DataFrame(es_title).unique()
     main_title_df = pl.DataFrame(main_title).unique()
     preferred_title_df = pl.DataFrame(preferred_title).unique()
 
     title_df = (
-        fr_title_df.join(en_title_df, how="full", on=["CUI", "code"], coalesce=True)
-        .join(main_title_df, how="full", on=["CUI", "code"], coalesce=True)
-        .join(preferred_title_df, how="full", on=["CUI", "code"], coalesce=True)
-        .group_by(["CUI", "code"])
+        fr_title_df.join(en_title_df, how="full", on=["CUI"], coalesce=True)
+        .join(es_title_df, how="full", on=["CUI"], coalesce=True)
+        .join(main_title_df, how="full", on=["CUI"], coalesce=True)
+        .join(preferred_title_df, how="full", on=["CUI"], coalesce=True)
+        .group_by(["CUI"])
         .agg([
             pl.col("UMLS_Title_main").unique(),
             pl.col("UMLS_Title_fr").unique(),
             pl.col("UMLS_Title_en").unique(),
+            pl.col("UMLS_Title_es").unique(),
             pl.col("UMLS_Title_preferred").unique(),
         ])
     )
     syn_df = (
-        fr_syn_df.join(en_syn_df, how="full", on=["CUI", "code"], coalesce=True)
-        .group_by(["CUI", "code"])
+        fr_syn_df.join(en_syn_df, how="full", on=["CUI"], coalesce=True)
+        .join(es_syn_df, how="full", on=["CUI"], coalesce=True)
+        .group_by(["CUI"])
         .agg([
             pl.col("UMLS_alias_fr").unique(),
             pl.col("UMLS_alias_en").unique(),
+            pl.col("UMLS_alias_es").unique(),
         ])
     )
-    title_syn_df = title_df.join(syn_df, how="full", on=["CUI", "code"], coalesce=True)
+    title_syn_df = title_df.join(syn_df, how="full", on=["CUI"], coalesce=True)
 
     # Process best title
     # Prefer the shortest title; if lengths are equal, prefer one starting with uppercase.
@@ -278,6 +297,11 @@ def synonyms(
             & (pl.col("UMLS_Title_fr").list.get(0).is_not_null())
         )
         .then(pl.col("UMLS_Title_fr").list.get(0))
+        .when(
+            (pl.col("UMLS_Title_es").list.len() == 1)
+            & (pl.col("UMLS_Title_es").list.get(0).is_not_null())
+        )
+        .then(pl.col("UMLS_Title_es").list.get(0))
         .otherwise(None)
         .alias("Title")
     ).drop("shortest_title_main", "shortest_title", "UMLS_Title_preferred")

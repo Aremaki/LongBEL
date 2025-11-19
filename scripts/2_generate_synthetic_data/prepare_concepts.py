@@ -150,6 +150,12 @@ def run(
     spaccc_path: Path = typer.Option(
         None, help="Path to SPACCC concepts parquet (no definitions)"
     ),
+    spaccc_umls_path: Path = typer.Option(
+        None, help="Path to SPACCC_UMLS concepts parquet"
+    ),
+    spaccc_umls_def: Path = typer.Option(
+        None, help="Path to SPACCC_UMLS definitions parquet"
+    ),
     out_mm_def: Path = typer.Option(
         Path("data/synthetic_data/SynthMM/user_prompts_def"),
         help="Output dir for MM prompts with definitions",
@@ -168,6 +174,14 @@ def run(
     ),
     out_spaccc_no_def: Path = typer.Option(
         Path("data/synthetic_data/SynthSPACCC/user_prompts_no_def"),
+        help="Output dir for SPACCC prompts (no definitions)",
+    ),
+    out_spaccc_umls_def: Path = typer.Option(
+        Path("data/synthetic_data/SynthSPACCC_UMLS/user_prompts_def"),
+        help="Output dir for SPACCC prompts (with definitions)",
+    ),
+    out_spaccc_umls_no_def: Path = typer.Option(
+        Path("data/synthetic_data/SynthSPACCC_UMLS/user_prompts_no_def"),
         help="Output dir for SPACCC prompts (no definitions)",
     ),
     shuffle: bool = typer.Option(True, help="Shuffle concepts (sample fraction=1)"),
@@ -228,6 +242,28 @@ def run(
         user_prompt_spaccc = build_templates(spaccc_df, include_definitions=False)
         _write_chunks(user_prompt_spaccc, out_spaccc_no_def, chunk_size)
         typer.echo(f"SPACCC concepts written to {out_spaccc_no_def}")
+
+    # --- SPACCC UMLS dataset ---
+    if spaccc_umls_path:
+        spaccc_joined = _load_join(spaccc_umls_path, spaccc_umls_def)
+        if "DEF" in spaccc_joined.columns:
+            spaccc_filtered = spaccc_joined.filter(pl.col("DEF").is_not_null())
+            if shuffle:
+                spaccc_filtered = spaccc_filtered.sample(fraction=1)
+            user_prompt_spaccc_umls = build_templates(spaccc_filtered)
+            _write_chunks(user_prompt_spaccc_umls, out_spaccc_umls_def, chunk_size)
+            typer.echo(f"SPACCC UMLS concepts written to {out_spaccc_umls_def}")
+
+            spaccc_no_def = spaccc_joined.filter(pl.col("DEF").is_null())
+            if shuffle:
+                spaccc_no_def = spaccc_no_def.sample(fraction=1)
+            user_prompt_spaccc_umls_no_def = build_templates(spaccc_no_def)
+            _write_chunks(
+                user_prompt_spaccc_umls_no_def, out_spaccc_umls_no_def, chunk_size
+            )
+            typer.echo(
+                f"SPACCC UMLS concepts without definitions written to {out_spaccc_umls_no_def}"
+            )
 
 
 if __name__ == "__main__":

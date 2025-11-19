@@ -25,7 +25,7 @@ EXTRACT_SCRIPT = Path("scripts/1_preprocess_UMLS/extract_umls_data.py")
 PREPARE_SCRIPT = Path("scripts/1_preprocess_UMLS/prepare_umls_data.py")
 
 # You may edit this list to add more releases.
-RELEASES = [("2014AB", "QUAERO"), ("2017AA", "MM"), ("2022AB", "SPACCC")]
+RELEASES = [("2014AB", "QUAERO"), ("2017AA", "MM"), ("2023AA", "SPACCC_UMLS")]
 
 
 def run(cmd: list[str]) -> None:
@@ -82,6 +82,8 @@ def main() -> None:
     for release in RELEASES:
         out_dir = extract(release)
         if out_dir is None:
+            continue
+        if release[1] == "SPACCC_UMLS":
             continue
         prepare(release, out_dir)
 

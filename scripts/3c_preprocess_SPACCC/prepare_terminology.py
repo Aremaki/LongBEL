@@ -118,12 +118,45 @@ def resolve_entity_ambiguity(
             final_selections.append(selected_row)
 
     # Create final ambiguous selections dataframe
-    ambiguous_final = (
-        pl.DataFrame(final_selections)
-        .with_columns(ambiguous_level=pl.lit(2))
-        .select(["CUI", "Entity", "CATEGORY", "GROUP", "is_main", "ambiguous_level"])
-    )
+    if len(final_selections) > 0:
+        ambiguous_final = (
+            pl.DataFrame(final_selections)
+            .with_columns(ambiguous_level=pl.lit(2))
+            .select([
+                "CUI",
+                "Entity",
+                "CATEGORY",
+                "GROUP",
+                "is_main",
+                "ambiguous_level",
+            ])
+        )
+    else:
+        # explicit empty dataframe with expected schema so later selects/concats won't fail
+        ambiguous_final = pl.DataFrame(
+            schema=[
+                ("CUI", pl.Utf8),
+                ("Entity", pl.Utf8),
+                ("CATEGORY", pl.Utf8),
+                ("GROUP", pl.Utf8),
+                ("is_main", pl.Boolean),
+                ("ambiguous_level", pl.Int32),
+            ]
+        )
 
+    # Combine all results
+    # Ensure all_unambiguous has same columns as ambiguous_final (if empty ensure schema)
+    if all_unambiguous.height == 0:
+        all_unambiguous = pl.DataFrame(
+            schema=[
+                ("CUI", pl.Utf8),
+                ("Entity", pl.Utf8),
+                ("CATEGORY", pl.Utf8),
+                ("GROUP", pl.Utf8),
+                ("is_main", pl.Boolean),
+                ("ambiguous_level", pl.Int32),
+            ]
+        )
     # Combine all results
     df_clean = pl.concat([all_unambiguous, ambiguous_final]).drop("ambiguous_level")
 
@@ -203,6 +236,121 @@ def load_terminology(terminology_file: Path) -> pl.DataFrame:
 
     logging.info(f"Loaded {df_clean.height} terminology entries")
     return df_clean
+
+
+def load_terminology_umls(terminology_file: Path) -> pl.DataFrame:
+    """Load and preprocess the terminology UMLS file."""
+
+    df = pl.read_csv(
+        terminology_file,
+        separator="\t",
+        null_values=["NO_CODE"],
+        schema_overrides={
+            "code": pl.Utf8,
+            "CUI": pl.Utf8,
+            "term": pl.Utf8,
+            "semantic_tag": pl.Utf8,
+        },
+    )
+
+    df_clean = (
+        df.filter(pl.col("code").is_not_null())
+        .with_columns([
+            pl.col("code").alias("CUI").cast(pl.Utf8),
+            pl.col("CUI").alias("CUI_UMLS").cast(pl.Utf8),
+            pl.col("term").alias("Entity"),
+            pl.col("semantic_tag").alias("GROUP"),
+            pl.col("semantic_tag").str.slice(0, 4).alias("CATEGORY"),
+            pl.col("mainterm").cast(pl.Boolean).alias("is_main"),
+        ])
+        .select(["CUI", "Entity", "CATEGORY", "GROUP", "is_main", "CUI_UMLS"])
+    )
+
+    logging.info(f"Loaded {df_clean.height} terminology entries")
+    return df_clean
+
+
+def augment_with_umls_cui(terminology_umls_df, umls_synonyms_file):
+    """Augment terminology with UMLS CUIs using synonyms file."""
+    terminology_umls_df = terminology_umls_df.with_columns(lang=pl.lit("es"))
+    umls_syn = pl.read_parquet(umls_synonyms_file).rename({"CUI": "CUI_UMLS"})
+    filtered_syn = umls_syn.join(
+        terminology_umls_df.select(["CUI_UMLS", "CATEGORY", "GROUP", "CUI"]).unique(),
+        on="CUI_UMLS",
+        how="inner",
+    )
+    exploded_syn = (
+        _explode_language_frames(filtered_syn)
+        .rename({"Syn": "Entity"})
+        .unique(subset=["CUI_UMLS", "Entity"])
+    )
+
+    additional_terms = exploded_syn.join(
+        terminology_umls_df.select(["CUI_UMLS", "CATEGORY", "GROUP", "CUI"]).unique(),
+        on="CUI_UMLS",
+    ).unique(subset=["CUI_UMLS", "CUI", "Entity"])
+    return pl.concat([terminology_umls_df, additional_terms], how="align")
+
+
+def _explode_language_frames(base: pl.DataFrame) -> pl.DataFrame:
+    # Split language columns and explode synonyms / titles
+    fr = (
+        base.select([
+            "CUI_UMLS",
+            "UMLS_Title_fr",
+            "UMLS_alias_fr",
+        ])
+        .with_columns(pl.lit("fr").alias("lang"))
+        .explode("UMLS_Title_fr")
+        .explode("UMLS_alias_fr")
+    )
+
+    en = base.select([
+        "CUI_UMLS",
+        "UMLS_Title_main",
+        "UMLS_Title_en",
+        "UMLS_alias_en",
+    ]).with_columns(pl.lit("en").alias("lang"))
+    en = en.explode("UMLS_Title_main").explode("UMLS_Title_en").explode("UMLS_alias_en")
+
+    es = base.select([
+        "CUI_UMLS",
+        "UMLS_Title_es",
+        "UMLS_alias_es",
+    ]).with_columns(pl.lit("es").alias("lang"))
+    es = es.explode("UMLS_Title_es").explode("UMLS_alias_es")
+
+    # Build unified rows for each type source (mark main True appropriately)
+    parts = []
+
+    def _mk(df: pl.DataFrame, col: str, is_main: bool) -> pl.DataFrame:
+        return (
+            df.select([
+                "CUI_UMLS",
+                "lang",
+                pl.col(col).alias("Syn"),
+            ])
+            .filter((pl.col("Syn") != "") & (pl.col("Syn").is_not_null()))
+            .with_columns(is_main=pl.lit(is_main))
+        )
+
+    # Titles and aliases
+    if "UMLS_Title_main" in en.columns:  # main (English main title)
+        parts.append(_mk(en, "UMLS_Title_main", is_main=True))
+    if "UMLS_Title_fr" in fr.columns:
+        parts.append(_mk(fr, "UMLS_Title_fr", is_main=False))
+    if "UMLS_Title_en" in en.columns:
+        parts.append(_mk(en, "UMLS_Title_en", is_main=False))
+    if "UMLS_alias_fr" in fr.columns:
+        parts.append(_mk(fr, "UMLS_alias_fr", is_main=False))
+    if "UMLS_alias_en" in en.columns:
+        parts.append(_mk(en, "UMLS_alias_en", is_main=False))
+    if "UMLS_Title_es" in es.columns:
+        parts.append(_mk(es, "UMLS_Title_es", is_main=False))
+    if "UMLS_alias_es" in es.columns:
+        parts.append(_mk(es, "UMLS_alias_es", is_main=False))
+
+    return pl.concat(parts)
 
 
 def validate_coverage(
@@ -356,6 +504,12 @@ def main(
         "-i",
         help="Path to SPACCC data directory with terminology.tsv, train.tsv, test.tsv",
     ),
+    umls_dir: Path = typer.Option(
+        Path("data/UMLS_processed/SPACCC_UMLS"),
+        "--umls-dir",
+        "-u",
+        help="Path to preprocessed UMLS data for SPACCC",
+    ),
     corrected_dir: Path = typer.Option(
         Path("data/corrected_cui"),
         "--corrected-dir",
@@ -368,6 +522,12 @@ def main(
         "-t",
         help="Directory for filtered terminology file",
     ),
+    terminology_umls_dir: Path = typer.Option(
+        Path("data/UMLS_processed/SPACCC_UMLS"),
+        "--terminology-umls-dir",
+        "-m",
+        help="Directory for filtered UMLS-augmented terminology file",
+    ),
 ):
     """Preprocess SPACCC terminology to resolve ambiguous entities."""
 
@@ -375,11 +535,14 @@ def main(
 
     # Define file paths
     terminology_file = spaccc_dir / "terminology.tsv"
+    terminology_umls_file = spaccc_dir / "terminology_umls.tsv"
+    umls_synonyms_file = umls_dir / "umls_title_syn.parquet"
     train_file = spaccc_dir / "train.tsv"
     test_file = spaccc_dir / "test.tsv"
     corrected_cui_file = corrected_dir / "SPACCC_adapted.csv"
+    corrected_umls_cui_file = corrected_dir / "SPACCC_adapted_umls.csv"
     clean_terminology_file = terminology_dir / "all_disambiguated.parquet"
-
+    clean_terminology_umls_file = terminology_umls_dir / "all_disambiguated.parquet"
     # Create output directory
     corrected_dir.mkdir(exist_ok=True)
     terminology_dir.mkdir(exist_ok=True)
@@ -392,15 +555,28 @@ def main(
 
         # Load terminology
         terminology_df = load_terminology(terminology_file)
+        terminology_umls_df = load_terminology_umls(terminology_umls_file)
+
+        # Augment terminology with UMLS CUIs
+        augmented_umls_df = augment_with_umls_cui(
+            terminology_umls_df, umls_synonyms_file
+        )
 
         # Complete CUI-Entity-GROUP combinations
         terminology_df = _complete_cui_entity_group_combinations(terminology_df)
+        augmented_umls_df = _complete_cui_entity_group_combinations(augmented_umls_df)
 
         # Resolve ambiguity
         clean_terminology, _ = resolve_entity_ambiguity(terminology_df, priority_pairs)
+        clean_terminology_umls, _ = resolve_entity_ambiguity(
+            augmented_umls_df, priority_pairs
+        )
 
         # Validate coverage (pre-augmentation)
         missing_pairs_pre = validate_coverage(clean_terminology, priority_pairs)
+        missing_pairs_pre_umls = validate_coverage(
+            clean_terminology_umls, priority_pairs
+        )
 
         # If some (CUI, GROUP) exist in train/test but are missing in the final set,
         # duplicate the CUI under the requested GROUP to ensure coverage
@@ -410,15 +586,26 @@ def main(
             )
         else:
             added_rows_df = pl.DataFrame({})
+        if missing_pairs_pre_umls:
+            clean_terminology_umls, added_rows_df_umls = augment_with_missing_pairs(
+                clean_terminology_umls, missing_pairs_pre_umls
+            )
+        else:
+            added_rows_df_umls = pl.DataFrame({})
 
         _ = validate_coverage(clean_terminology, priority_pairs)
+        _ = validate_coverage(clean_terminology_umls, priority_pairs)
 
         # Resolve ambiguity after augmentation
         clean_terminology, mapping_df = resolve_entity_ambiguity(
             clean_terminology, priority_pairs
         )
+        clean_terminology_umls, mapping_umls_df = resolve_entity_ambiguity(
+            clean_terminology_umls, priority_pairs
+        )
 
         missing_pairs = validate_coverage(clean_terminology, priority_pairs)
+        missing_pairs_umls = validate_coverage(clean_terminology_umls, priority_pairs)
 
         # Filter mapping to only include missing priority pairs
         if missing_pairs:
@@ -426,6 +613,18 @@ def main(
                 mapping_df.filter(
                     pl.struct(["CUI", "GROUP"]).map_elements(
                         lambda x: (x["CUI"], x["GROUP"]) in missing_pairs,
+                        return_dtype=pl.Boolean,
+                    )
+                )
+                .unique(subset=["CUI", "GROUP"])
+                .select(["CUI", "chosen_CUI"])
+            )
+
+        if missing_pairs_umls:
+            mapping_umls_df = (
+                mapping_umls_df.filter(
+                    pl.struct(["CUI", "GROUP"]).map_elements(
+                        lambda x: (x["CUI"], x["GROUP"]) in missing_pairs_umls,
                         return_dtype=pl.Boolean,
                     )
                 )
@@ -450,9 +649,17 @@ def main(
                 snomed_df, on="CUI", how="left"
             ).unique()
 
+            clean_terminology_umls = clean_terminology_umls.join(
+                snomed_df, on="CUI", how="left"
+            ).unique()
+
             logging.info(
                 f"After joining with SNOMED_FSN: {clean_terminology.height} rows, "
                 f"columns: {clean_terminology.columns}"
+            )
+            logging.info(
+                f"After joining with SNOMED_FSN (UMLS): {clean_terminology_umls.height} rows, "
+                f"columns: {clean_terminology_umls.columns}"
             )
         else:
             logging.warning(
@@ -465,9 +672,18 @@ def main(
         mapping_df.write_csv(corrected_cui_file)
 
         logging.info(
+            f"💾 Saving {mapping_umls_df.height} UMLS mapping entries to {corrected_umls_cui_file}"
+        )
+        mapping_umls_df.write_csv(corrected_umls_cui_file)
+
+        logging.info(
             f"💾 Saving {clean_terminology.height} clean terminology entries to {clean_terminology_file}"
         )
         clean_terminology.write_parquet(clean_terminology_file)
+        logging.info(
+            f"💾 Saving {clean_terminology_umls.height} clean UMLS terminology entries to {clean_terminology_umls_file}"
+        )
+        clean_terminology_umls.write_parquet(clean_terminology_umls_file)
 
         logging.info("📊 Final statistics:")
         logging.info(f"   - Unique entities: {clean_terminology['Entity'].n_unique()}")
@@ -475,6 +691,15 @@ def main(
         if added_rows_df.height if hasattr(added_rows_df, "height") else 0:
             logging.info(
                 f"   - Added duplicates for coverage: {getattr(added_rows_df, 'height', 0)}"
+            )
+        logging.info("📊 Final UMLS statistics:")
+        logging.info(
+            f"   - Unique entities: {clean_terminology_umls['Entity'].n_unique()}"
+        )
+        logging.info(f"   - Unique CUIs: {clean_terminology_umls['CUI'].n_unique()}")
+        if added_rows_df_umls.height if hasattr(added_rows_df_umls, "height") else 0:
+            logging.info(
+                f"   - Added UMLS duplicates for coverage: {getattr(added_rows_df_umls, 'height', 0)}"
             )
 
         logging.info("✅ Processing completed successfully")

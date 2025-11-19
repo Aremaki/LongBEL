@@ -1,0 +1,112 @@
+Tu trabajo es generar ejemplos sintéticos para la vinculación de entidades, imitando el estilo lingüístico encontrado en las notas clínicas del conjunto de datos SPACCC.
+
+# Formato de Entrada
+- **CUI**:
+Un ID único de concepto.
+- **Title**:
+El nombre preferido o título del concepto.
+- **Semantic group**:
+El grupo semántico de UMLS.
+- **Semantic type**:
+El tipo semántico específico.
+- **Mentions**:
+Una lista de menciones (puede incluir términos técnicos o poco naturales).
+
+# Tareas
+Realiza las siguientes tareas:
+
+1.  **Selección y Generación de Menciones:**
+    - Primero, evalúa qué menciones existentes suenan más naturales en la redacción clínica profesional (contexto de historiales médicos, informes de urgencias, etc.).
+   - Genera menciones adicionales de alta calidad que:
+        * Añadan variaciones naturales que los clínicos usarían (sinónimos, abreviaturas comunes, formas coloquiales dentro del ámbito médico).
+        * Cubran diferentes convenciones (acrónimos, nombres completos, nombres por su función o síntoma).
+        * Complementen las menciones existentes.
+    - El total debe ser de **5 menciones** (una mezcla de las existentes conservadas y las newly generated).
+    - **Evita**:
+        - Puntos y coma (`;`), paréntesis.
+        - Términos en MAYÚSCULAS o con guiones bajos (ej., `HEMOGLOBINA_GLICADA`).
+        - Nombres químicos complejos.
+        - Términos en otros idiomas.
+
+2.  **Ejemplos de Uso Contextual:**
+    Para cada una de las 5 menciones finales:
+    - Escribe una oración clara (de 10 a 25 palabras) con la mención entre corchetes, imitando el estilo de una nota clínica.
+    - Cada oración debe:
+        - Incluir el concepto en `[corchetes]`.
+        - Empezar con `ejemplo: `.
+        - Ser **distinta en contexto** (ej., diferentes escenarios clínicos, quejas del paciente, hallazgos exploratorios, planes de tratamiento).
+        - Imitar el tono y el vocabulario típicos de las **notas clínicas en español** (SPACCC).
+
+# Ejemplos de Estilo de Notas Clínicas (SPACCC)
+- Paciente acude por fiebre y tos productiva de 3 días de evolución, a la auscultación se evidencian crepitantes basales derechas.
+- Refiere dolor torácico opresivo de horas de evolución, se descarta síndrome coronario agudo con troponinas negativas.
+- Hallazgo incidental de nódulo pulmonar solitario en TAC torácico realizado por traumatismo, se programa para seguimiento.
+- Antecedentes personales: HTA y dislipemia en tratamiento con enalapril y atorvastatina.
+
+# Formato de Salida
+## Conjunto Final de Menciones
+1. Mención 1
+2. Mención 2
+3. Mención 3
+4. Mención 4
+5. Mención 5
+
+## Ejemplos de Uso
+ejemplo: Oración con [mención 1] en contexto...
+ejemplo: Oración con [mención 2] en contexto...
+ejemplo: Oración con [mención 3] en contexto...
+ejemplo: Oración con [mención 4] en contexto...
+ejemplo: Oración con [mención 5] en contexto...
+
+# Ejemplos Ilustrativos
+## Caso 1
+- **CUI**:
+293591000
+- **Title**:
+alergia a dextromoramida (hallazgo)
+- **Semantic group**:
+SINTOMA
+- **Semantic type**:
+hallazgo
+- **Mentions**:
+'alergia a dextromoramida'
+
+## Conjunto Final de Menciones  
+1. alergia a dextromoramida  
+2. hipersensibilidad a dextromoramida  
+3. reacción alérgica a dextromoramida  
+4. antecedente de alergia a dextromoramida  
+5. intolerancia a dextromoramida  
+
+## Ejemplos de Uso  
+ejemplo: Se recoge en antecedentes personales [alergia a dextromoramida], por lo que se contraindica su uso en el perioperatorio.  
+ejemplo: El paciente refiere [hipersensibilidad a dextromoramida], con aparición previa de exantema pruriginoso tras administración oral.  
+ejemplo: Se suspende el tratamiento por [reacción alérgica a dextromoramida] con cuadro de urticaria y edema periorbitario.  
+ejemplo: Se documenta en la historia clínica [antecedente de alergia a dextromoramida], sin requerimiento de atención hospitalaria previa.  
+ejemplo: Informa el paciente de episodios de náuseas y prurito atribuidos a [intolerancia a dextromoramida], descartándose otras etiologías.
+
+## Caso 2
+- **CUI**:
+83445009
+- **Title**:
+cambio en la longitud de los huesos tarsianos y metatarsianos (procedimiento)
+- **Semantic group**:
+PROCEDIMIENTO
+- **Semantic type**:
+procedimiento
+- **Mentions**:
+'cambio en la longitud de los huesos tarsianos y metatarsianos', 'cambio en la longitud de huesos de tarso y metatarso'
+
+## Conjunto Final de Menciones
+1. cambio en la longitud de los huesos tarsianos y metatarsianos  
+2. alargamiento de huesos tarso-metatarsianos  
+3. acortamiento de huesos del pie  
+4. modificación de la longitud de tarso y metatarso  
+5. cirugía de alargamiento óseo del pie  
+
+## Ejemplos de Uso
+ejemplo: Durante la intervención se realizó un [cambio en la longitud de los huesos tarsianos y metatarsianos] por deformidad congénita.  
+ejemplo: Paciente ingresada para [alargamiento de huesos tarso-metatarsianos] debido a discrepancia de longitud en ambos pies.  
+ejemplo: Se programó [acortamiento de huesos del pie] para mejorar la funcionalidad tras fractura previa.  
+ejemplo: El equipo indica [modificación de la longitud de tarso y metatarso] como tratamiento ante la presencia de pie plano severo.  
+ejemplo: Valorado por traumatología, se decide [cirugía de alargamiento óseo del pie] para corregir malformación estructural.

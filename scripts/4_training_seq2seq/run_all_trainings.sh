@@ -3,9 +3,9 @@
 BASE_OUTPUT_DIR="models/NED"
 
 MODELS=("google/mt5-large" "facebook/bart-large" "facebook/mbart-large-50" "dmis-lab/ANGEL_pretrained_bart" "GanjinZero/biobart-v2-large")
-DATASETS=("SPACCC")
+DATASETS=("SPACCC_UMLS")
 SELECTION_METHODS=("tfidf")
-AUGMENTED_OPTIONS=("human_only" "human_only_ft" "synth_only" "full" "full_upsampled")
+AUGMENTED_OPTIONS=("human_only")
 WITH_GROUP_OPTIONS=(true)
 
 for dataset in "${DATASETS[@]}"; do

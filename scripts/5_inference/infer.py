@@ -55,6 +55,9 @@ def load_model(
         elif dataset_name == "SPACCC":
             model.tokenizer.src_lang = "es_XX"  # type: ignore
             model.tokenizer.tgt_lang = "es_XX"  # type: ignore
+        elif dataset_name == "SPACCC_UMLS":
+            model.tokenizer.src_lang = "es_XX"  # type: ignore
+            model.tokenizer.tgt_lang = "es_XX"  # type: ignore
         else:
             model.tokenizer.src_lang = "fr_XX"  # type: ignore
             model.tokenizer.tgt_lang = "fr_XX"  # type: ignore

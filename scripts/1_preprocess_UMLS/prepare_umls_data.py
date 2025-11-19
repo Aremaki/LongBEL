@@ -265,6 +265,17 @@ def _explode_language_frames(base: pl.DataFrame) -> pl.DataFrame:
     ]).with_columns(pl.lit("en").alias("lang"))
     en = en.explode("UMLS_Title_main").explode("UMLS_Title_en").explode("UMLS_alias_en")
 
+    es = base.select([
+        "CUI",
+        "SEM_NAME",
+        "CATEGORY",
+        "GROUP",
+        "Title",
+        "UMLS_Title_es",
+        "UMLS_alias_es",
+    ]).with_columns(pl.lit("es").alias("lang"))
+    es = es.explode("UMLS_Title_es").explode("UMLS_alias_es")
+
     # Build unified rows for each type source (mark main True appropriately)
     parts = []
 
@@ -294,6 +305,10 @@ def _explode_language_frames(base: pl.DataFrame) -> pl.DataFrame:
         parts.append(_mk(fr, "UMLS_alias_fr", is_main=False))
     if "UMLS_alias_en" in en.columns:
         parts.append(_mk(en, "UMLS_alias_en", is_main=False))
+    if "UMLS_Title_es" in es.columns:
+        parts.append(_mk(es, "UMLS_Title_es", is_main=False))
+    if "UMLS_alias_es" in es.columns:
+        parts.append(_mk(es, "UMLS_alias_es", is_main=False))
 
     return pl.concat(parts)
 
