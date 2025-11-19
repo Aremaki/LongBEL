@@ -24,8 +24,8 @@ if [[ -z "${DATASET}" || -z "${VARIANT}" || -z "${CHUNK}" ]]; then
   exit 1
 fi
 
-if [[ "${DATASET}" != "MM" && "${DATASET}" != "QUAERO" && "${DATASET}" != "SPACCC" ]]; then
-  echo "DATASET must be MM, QUAERO, or SPACCC"
+if [[ "${DATASET}" != "MM" && "${DATASET}" != "QUAERO" && "${DATASET}" != "SPACCC" && "${DATASET}" != "SPACCC_UMLS" ]]; then
+  echo "DATASET must be MM, QUAERO, SPACCC, or SPACCC_UMLS"
   exit 1
 fi
 
@@ -62,6 +62,10 @@ elif [[ "${DATASET}" == "QUAERO" ]]; then
   BASE_DIR="data/synthetic_data/SynthQUAERO"
   DATASET_PREFIX="SynthQUAERO"
   SYSTEM_PROMPT_PATH="scripts/2_generate_synthetic_data/prompts/system_prompt_quaero.txt"
+elif [[ "${DATASET}" == "SPACCC_UMLS" ]]; then
+  BASE_DIR="data/synthetic_data/SynthSPACCC_UMLS"
+  DATASET_PREFIX="SynthSPACCC_UMLS"
+  SYSTEM_PROMPT_PATH="scripts/2_generate_synthetic_data/prompts/system_prompt_spaccc_umls.txt"
 else
   BASE_DIR="data/synthetic_data/SynthSPACCC"
   DATASET_PREFIX="SynthSPACCC"

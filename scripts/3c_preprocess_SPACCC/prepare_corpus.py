@@ -243,9 +243,9 @@ def _process_spaccc_dataset(
     train_annotations_path = spaccc_data_dir / "train.tsv"
     test_annotations_path = spaccc_data_dir / "test.tsv"
     test_ner_annotations_path = spaccc_data_dir / "test_ner.tsv"
-    train_raw_files_folder = spaccc_data_dir / "raw_txt" / "train"
-    test_raw_files_folder = spaccc_data_dir / "raw_txt" / "test"
-    test_ner_raw_files_folder = spaccc_data_dir / "raw_txt" / "test"
+    train_raw_files_folder = spaccc_data_dir.parent / "raw_txt" / "train"
+    test_raw_files_folder = spaccc_data_dir.parent / "raw_txt" / "test"
+    test_ner_raw_files_folder = spaccc_data_dir.parent / "raw_txt" / "test"
 
     if train_annotations_path.exists():
         typer.echo(f"  • Loading train split from {train_annotations_path}")

@@ -184,7 +184,12 @@ def load_priority_pairs(train_file: Path, test_file: Path) -> set[tuple[str, str
     """
 
     def extract_pairs_from_file(file_path: Path) -> set[tuple[str, str]]:
-        df = pl.read_csv(file_path, separator="\t", quote_char=None)
+        df = pl.read_csv(
+            file_path,
+            separator="\t",
+            quote_char=None,
+            schema_overrides={"code": str},  # type: ignore
+        )
         pairs = set()
 
         for code, label in zip(df["code"], df["label"]):
@@ -568,7 +573,7 @@ def main(
 
         # Resolve ambiguity
         clean_terminology, _ = resolve_entity_ambiguity(terminology_df, priority_pairs)
-        clean_terminology_umls, _ = resolve_entity_ambiguity(
+        clean_terminology_umls, mapping_umls_df = resolve_entity_ambiguity(
             augmented_umls_df, priority_pairs
         )
 
@@ -600,7 +605,7 @@ def main(
         clean_terminology, mapping_df = resolve_entity_ambiguity(
             clean_terminology, priority_pairs
         )
-        clean_terminology_umls, mapping_umls_df = resolve_entity_ambiguity(
+        clean_terminology_umls, _ = resolve_entity_ambiguity(
             clean_terminology_umls, priority_pairs
         )
 

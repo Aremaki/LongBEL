@@ -45,4 +45,8 @@ submit_for_dir QUAERO no_def "data/synthetic_data/SynthQUAERO/user_prompts_no_de
 # SPACCC
 submit_for_dir SPACCC no_def "data/synthetic_data/SynthSPACCC/user_prompts_no_def" 5
 
+# SPACCC_UMLS
+submit_for_dir SPACCC_UMLS def    "data/synthetic_data/SynthSPACCC_UMLS/user_prompts_def" 5
+submit_for_dir SPACCC_UMLS no_def "data/synthetic_data/SynthSPACCC_UMLS/user_prompts_no_def" 5
+
 echo "All jobs submitted."

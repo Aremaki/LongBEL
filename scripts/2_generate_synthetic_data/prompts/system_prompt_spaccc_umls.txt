@@ -1,4 +1,4 @@
-Tu trabajo es generar ejemplos sintéticos para la vinculación de entidades, imitando el estilo lingüístico encontrado en las notas clínicas del conjunto de datos SPACCC.
+Tu trabajo es generar ejemplos sintéticos para la vinculación de entidades, imitando el estilo lingüístico encontrado en las notas clínicas.
 
 # Formato de Entrada
 - **CUI**:
@@ -9,6 +9,8 @@ El nombre preferido o título del concepto.
 El grupo semántico de UMLS.
 - **Semantic type**:
 El tipo semántico específico.
+- **Definitions**:
+Una o más definiciones del concepto.
 - **Mentions**:
 Una lista de menciones (puede incluir términos técnicos o poco naturales).
 
@@ -35,9 +37,9 @@ Realiza las siguientes tareas:
         - Incluir el concepto en `[corchetes]`.
         - Empezar con `ejemplo: `.
         - Ser **distinta en contexto** (ej., diferentes escenarios clínicos, quejas del paciente, hallazgos exploratorios, planes de tratamiento).
-        - Imitar el tono y el vocabulario típicos de las **notas clínicas en español** (SPACCC).
+        - Imitar el tono y el vocabulario típicos de las **notas clínicas en español**.
 
-# Ejemplos de Estilo de Notas Clínicas (SPACCC)
+# Ejemplos de Estilo de Notas Clínicas
 - Paciente acude por fiebre y tos productiva de 3 días de evolución, a la auscultación se evidencian crepitantes basales derechas.
 - Refiere dolor torácico opresivo de horas de evolución, se descarta síndrome coronario agudo con troponinas negativas.
 - Hallazgo incidental de nódulo pulmonar solitario en TAC torácico realizado por traumatismo, se programa para seguimiento.
@@ -61,52 +63,60 @@ ejemplo: Oración con [mención 5] en contexto...
 # Ejemplos Ilustrativos
 ## Caso 1
 - **CUI**:
-293591000
+274866006
 - **Title**:
-alergia a dextromoramida (hallazgo)
+nivel anormal de mineral en sangre (hallazgo)
 - **Semantic group**:
 SINTOMA
 - **Semantic type**:
 hallazgo
+- **Definitions**:
+No definition found
 - **Mentions**:
-'alergia a dextromoramida'
+'abnormal level of blood mineral', 'Abnormal level of blood mineral', 'Abnormal blood levels of mineral', '(D)Mineral,blood level abnorm.', 'abnormal level of blood mineral (physical finding)', 'nivel anormal de mineral en sangre', 'Abnormal level blood mineral', 'abnormal level blood mineral', '(D)minerales, nivel sanguíneo anormal', '(D)Mineral, blood level abnormal (situation)', '(D)minerales, nivel sanguíneo anormal (situación)', 'Mineral,blood level abnorm.', 'Mineral, blood level abnormal', '(D)minerales, nivel sanguíneo anormal (categoría dependiente del contexto)', '(D)Mineral, blood level abnormal', '(D)Mineral, blood level abnormal (context-dependent category)', 'nivel anormal de mineral en sangre (hallazgo)', 'abnormal; blood level, mineral', 'Abnormal level of blood mineral (finding)'
 
 ## Conjunto Final de Menciones  
-1. alergia a dextromoramida  
-2. hipersensibilidad a dextromoramida  
-3. reacción alérgica a dextromoramida  
-4. antecedente de alergia a dextromoramida  
-5. intolerancia a dextromoramida  
+1. nivel anormal de mineral en sangre  
+2. alteración de minerales séricos  
+3. trastorno electrolítico  
+4. desbalance de minerales en sangre  
+5. niveles séricos de minerales fuera de rango  
 
 ## Ejemplos de Uso  
-ejemplo: Se recoge en antecedentes personales [alergia a dextromoramida], por lo que se contraindica su uso en el perioperatorio.  
-ejemplo: El paciente refiere [hipersensibilidad a dextromoramida], con aparición previa de exantema pruriginoso tras administración oral.  
-ejemplo: Se suspende el tratamiento por [reacción alérgica a dextromoramida] con cuadro de urticaria y edema periorbitario.  
-ejemplo: Se documenta en la historia clínica [antecedente de alergia a dextromoramida], sin requerimiento de atención hospitalaria previa.  
-ejemplo: Informa el paciente de episodios de náuseas y prurito atribuidos a [intolerancia a dextromoramida], descartándose otras etiologías.
+ejemplo: Durante el ingreso, se reportó [nivel anormal de mineral en sangre] en los resultados del laboratorio de ingreso del paciente.  
+ejemplo: Se solicita panel metabólico completo ante la sospecha de [alteración de minerales séricos] secundaria a vómitos persistentes.  
+ejemplo: La paciente presenta cuadro confusional asociado a [trastorno electrolítico] detectado en exámenes de laboratorio.  
+ejemplo: Se inicia reposición intravenosa por [desbalance de minerales en sangre] identificado en el control postoperatorio.  
+ejemplo: En control ambulatorio, se documentaron [niveles séricos de minerales fuera de rango], por lo que se ajusta tratamiento con suplementos.
 
 ## Caso 2
 - **CUI**:
-83445009
+32340007
 - **Title**:
-cambio en la longitud de los huesos tarsianos y metatarsianos (procedimiento)
+butóxido de piperonilo (sustancia)
 - **Semantic group**:
 PROCEDIMIENTO
 - **Semantic type**:
-procedimiento
+sustancia
+- **Definitions**:
+* 1. En insektsdödande synergist, särskilt när det gäller pyretriner och rotenon. 
+* 2. Un sinergista de insecticidas, especialmente para piretroides y ROTENONA. 
+* 3. A synthetic derivative of benzodioxole and used as an insecticide synergist, Piperonyl Butoxide enhances the active properties of pyrethrin, pyrethroid, rotenone, and carbamate pesticide ingredients by inhibiting insect microsomal enzyme detoxification activity. It is toxic and suspected of causing anorexia, carcinogenesis, convulsions, and dermal irritation, as well as hepatic and renal damage. (NCI04) 
+* 4. Sinérgico de inseticida, especialmente para piretroides e ROTENONA.
+ * 5. An insecticide synergist, especially for pyrethroids and ROTENONE.
 - **Mentions**:
-'cambio en la longitud de los huesos tarsianos y metatarsianos', 'cambio en la longitud de huesos de tarso y metatarso'
+'butóxido de piperonilo (sustancia)', 'PIPERONYL BUTOXIDE', 'Butoxide, Piperonyl', 'PBO', 'Piperonyl butoxide product', 'butóxido de piperonilo (producto)', 'PIPERONYL BUTOXIDE TECHNICAL', 'Piperonyl Butoxide', 'Piperonyl butoxide (substance)', 'Butóxido de Piperonilo', 'Alpha-(2-(2-butoxyethoxy)ethoxy)-4,5-Methylenedioxy-2-Propyltoluene', 'Piperonyl butoxide (product)', '5-((2-(2-Butoxyethoxy)ethoxy)methyl)-6-propyl-1,3-benzodioxole', 'producto que contiene butóxido de piperonilo (producto medicinal)', 'piperonyl butoxide', '1,3-Benzodioxole, 5-((2-(2-butoxyethoxy)ethoxy)methyl)-6-propyl-', 'Butoxyde de pipéronyle', 'Product containing piperonyl butoxide', 'NCI CO28l3', 'producto que contiene butóxido de piperonilo', 'Product containing piperonyl butoxide (medicinal product)', 'Pipéronyl butoxyde', 'Piperonyl butoxide-containing product', 'butóxido de piperonilo', 'producto con butóxido de piperonilo', 'Piperonyl butoxide'
 
 ## Conjunto Final de Menciones
-1. cambio en la longitud de los huesos tarsianos y metatarsianos  
-2. alargamiento de huesos tarso-metatarsianos  
-3. acortamiento de huesos del pie  
-4. modificación de la longitud de tarso y metatarso  
-5. cirugía de alargamiento óseo del pie  
+1. butóxido de piperonilo  
+2. PBO  
+3. producto con butóxido de piperonilo  
+4. sinergista de piretroides  
+5. piperonilo butóxido  
 
 ## Ejemplos de Uso
-ejemplo: Durante la intervención se realizó un [cambio en la longitud de los huesos tarsianos y metatarsianos] por deformidad congénita.  
-ejemplo: Paciente ingresada para [alargamiento de huesos tarso-metatarsianos] debido a discrepancia de longitud en ambos pies.  
-ejemplo: Se programó [acortamiento de huesos del pie] para mejorar la funcionalidad tras fractura previa.  
-ejemplo: El equipo indica [modificación de la longitud de tarso y metatarso] como tratamiento ante la presencia de pie plano severo.  
-ejemplo: Valorado por traumatología, se decide [cirugía de alargamiento óseo del pie] para corregir malformación estructural.
+ejemplo: Se realizó lavado exhaustivo tras exposición accidental a [butóxido de piperonilo] durante la manipulación agrícola del paciente.  
+ejemplo: En la revisión de productos utilizados reportan contacto dérmico con [PBO], motivo de consulta por eritema y prurito en antebrazos.  
+ejemplo: Se identificó [producto con butóxido de piperonilo] en el domicilio, posible fuente del cuadro de intoxicación presentada.  
+ejemplo: Consulta por náuseas y cefalea tras uso reiterado de [sinergista de piretroides] en la fumigación del jardín.  
+ejemplo: Paciente refiere contacto con [piperonilo butóxido] durante mezcla de insecticidas, sin uso de equipo de protección adecuado.
