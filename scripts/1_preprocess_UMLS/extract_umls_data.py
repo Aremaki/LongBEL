@@ -66,8 +66,8 @@ def semantic(
         readable=True,
         help="Path to UMLS release zip containing MRSTY.RRF",
     ),
-    semantic_group_path: Path = typer.Option(
-        ..., exists=True, readable=True, help="Path to semantic_group.csv"
+    semantic_group_path: Path | None = typer.Option(
+        None, exists=True, readable=True, help="Path to semantic_group.csv"
     ),
     out_dir: Path = typer.Option(Path("data/UMLS"), help="Output directory"),
 ) -> None:
@@ -81,16 +81,17 @@ def semantic(
             rows["TREE_CODE"].append(parts[2])
             rows["SEM_NAME"].append(parts[3])
     df = pl.DataFrame(rows, orient="row").unique()
-    df_sem_info = pl.read_csv(
-        semantic_group_path,
-        separator="|",
-        has_header=False,
-        new_columns=["CATEGORY", "GROUP", "SEM_CODE", "SEM_NAME"],
-    )
-    df_sem_info.write_parquet(
-        out_dir / "semantic_info.parquet"
-    )  # save standalone mapping
-    df = df.join(df_sem_info, on=["SEM_CODE", "SEM_NAME"], how="left")
+    if semantic_group_path:
+        df_sem_info = pl.read_csv(
+            semantic_group_path,
+            separator="|",
+            has_header=False,
+            new_columns=["CATEGORY", "GROUP", "SEM_CODE", "SEM_NAME"],
+        )
+        df_sem_info.write_parquet(
+            out_dir / "semantic_info.parquet"
+        )  # save standalone mapping
+        df = df.join(df_sem_info, on=["SEM_CODE", "SEM_NAME"], how="left")
     out_file = out_dir / "umls_semantic.parquet"
     df.write_parquet(out_file)
     typer.echo(f"Saved {out_file}")
@@ -135,12 +136,12 @@ def synonyms(
 ) -> None:
     """Extract preferred titles (EN/FR/Main) and synonyms into umls_title_syn.parquet."""
     _ensure_out_dir(out_dir)
-    preferred_title = {"CUI": [], "UMLS_Title_preferred": []}
-    main_title = {"CUI": [], "UMLS_Title_main": []}
-    fr_title = {"CUI": [], "UMLS_Title_fr": []}
-    en_title = {"CUI": [], "UMLS_Title_en": []}
-    fr_syn = {"CUI": [], "UMLS_alias_fr": []}
-    en_syn = {"CUI": [], "UMLS_alias_en": []}
+    preferred_title = {"code": [], "CUI": [], "UMLS_Title_preferred": []}
+    main_title = {"code": [], "CUI": [], "UMLS_Title_main": []}
+    fr_title = {"code": [], "CUI": [], "UMLS_Title_fr": []}
+    en_title = {"code": [], "CUI": [], "UMLS_Title_en": []}
+    fr_syn = {"code": [], "CUI": [], "UMLS_alias_fr": []}
+    en_syn = {"code": [], "CUI": [], "UMLS_alias_en": []}
     for parts in tqdm(_iter_rrf(umls_zip, "MRCONSO.RRF"), desc="Synonyms"):
         if len(parts) < 15:
             continue
@@ -179,10 +180,10 @@ def synonyms(
     preferred_title_df = pl.DataFrame(preferred_title).unique()
 
     title_df = (
-        fr_title_df.join(en_title_df, how="full", on="CUI", coalesce=True)
-        .join(main_title_df, how="full", on="CUI", coalesce=True)
-        .join(preferred_title_df, how="full", on="CUI", coalesce=True)
-        .group_by("CUI")
+        fr_title_df.join(en_title_df, how="full", on=["CUI", "code"], coalesce=True)
+        .join(main_title_df, how="full", on=["CUI", "code"], coalesce=True)
+        .join(preferred_title_df, how="full", on=["CUI", "code"], coalesce=True)
+        .group_by(["CUI", "code"])
         .agg([
             pl.col("UMLS_Title_main").unique(),
             pl.col("UMLS_Title_fr").unique(),
@@ -191,14 +192,14 @@ def synonyms(
         ])
     )
     syn_df = (
-        fr_syn_df.join(en_syn_df, how="full", on="CUI", coalesce=True)
-        .group_by("CUI")
+        fr_syn_df.join(en_syn_df, how="full", on=["CUI", "code"], coalesce=True)
+        .group_by(["CUI", "code"])
         .agg([
             pl.col("UMLS_alias_fr").unique(),
             pl.col("UMLS_alias_en").unique(),
         ])
     )
-    title_syn_df = title_df.join(syn_df, how="full", on="CUI", coalesce=True)
+    title_syn_df = title_df.join(syn_df, how="full", on=["CUI", "code"], coalesce=True)
 
     # Process best title
     # Prefer the shortest title; if lengths are equal, prefer one starting with uppercase.
@@ -293,8 +294,8 @@ def all(
         readable=True,
         help="Path to UMLS release zip (MRCONSO.RRF & MRSTY.RRF)",
     ),
-    semantic_group_path: Path = typer.Option(
-        ..., exists=True, readable=True, help="Path to semantic_group.csv"
+    semantic_group_path: Path | None = typer.Option(
+        None, exists=True, readable=True, help="Path to semantic_group.csv"
     ),
     out_dir: Path = typer.Option(Path("data/UMLS"), help="Output directory"),
 ) -> None:

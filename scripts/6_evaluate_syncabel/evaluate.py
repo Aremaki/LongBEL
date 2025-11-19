@@ -267,6 +267,7 @@ def evaluate_ned(args, task) -> None:
             separator="\t",
             has_header=True,
             schema_overrides={
+                "code": str,  # force as string
                 "Predicted_CUI": str,  # force as string
             },  # type: ignore
         ).unique(
