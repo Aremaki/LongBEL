@@ -185,6 +185,7 @@ def main(
         data_folder / dataset_name / f"{split_name}_{selection_method}_annotations.tsv",
         separator="\t",
         has_header=True,
+        schema_overrides={"code": str},  # type: ignore
     )
 
     # Load UMLS data

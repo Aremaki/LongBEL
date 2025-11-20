@@ -144,7 +144,7 @@ def _process_hf_dataset(
     for split_name, split_data in splits.items():
         if not split_data:
             continue
-        src, src_with_group, tgt = process_bigbio_dataset(
+        src, src_with_group, tgt, tsv_data = process_bigbio_dataset(
             split_data,
             start_entity,
             end_entity,
@@ -161,10 +161,10 @@ def _process_hf_dataset(
             selection_method=selection_method,
             best_syn_map=best_syn_map,
         )
-        processed[split_name] = (src, src_with_group, tgt)
+        processed[split_name] = (src, src_with_group, tgt, tsv_data)
 
     # Write outputs
-    for split_name, (src, src_with_group, tgt) in processed.items():
+    for split_name, (src, src_with_group, tgt, tsv_data) in processed.items():
         _dump(
             src,
             data_folder / f"{split_name}_{selection_method}_source.pkl",
@@ -176,6 +176,11 @@ def _process_hf_dataset(
         _dump(
             tgt,
             data_folder / f"{split_name}_{selection_method}_target.pkl",
+        )
+        pl.DataFrame(tsv_data).write_csv(
+            file=data_folder / f"{split_name}_{selection_method}_annotations.tsv",
+            separator="\t",
+            include_header=True,
         )
 
 
@@ -216,7 +221,7 @@ def _process_synth_dataset(
         )
 
     typer.echo(f"  • Processing synthetic dataset {name} ...")
-    src, src_with_group, tgt = process_bigbio_dataset(
+    src, src_with_group, tgt, _ = process_bigbio_dataset(
         synth_pages,
         start_entity,
         end_entity,
