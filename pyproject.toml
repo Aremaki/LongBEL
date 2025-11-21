@@ -36,15 +36,15 @@ dependencies = [
     "nltk>=3.7",
     "tqdm>=4.64.0",
     # CLI and utilities
-    "typer==0.16.0",
+    "typer>=0.3.0",
     # Development tools
-    "ruff==0.12.7",
+    "ruff>=0.12.7",
     "polars>=1.32.0",
     "pip>=25.2",
     "altair>=5.5.0",
-    "scispacy>=0.5.5",
     "unidecode>=1.4.0",
     "nvidia-ml-py>=13.580.65",
+    "keycare @ git+https://github.com/Aremaki/KeyCARE.git"
 ]
 
 [project.optional-dependencies]
@@ -78,3 +78,6 @@ line-length = 88
 
 [tool.ruff.isort]
 known-first-party = ["syncabel"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

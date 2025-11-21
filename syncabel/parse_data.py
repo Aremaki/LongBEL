@@ -389,7 +389,7 @@ def parse_text(
                 "filename": data.get("id", ""),
                 "label": group_annotation,
                 "start_span": entity["offsets"][0][0],
-                "end_span": entity["offsets"][0][1],
+                "end_span": entity["offsets"][-1][1],
                 "span": entity_text,
                 "code": "+".join(normalized_ids),
                 "semantic_rel": "EXACT" if len(normalized_ids) == 1 else "COMPOSITE",

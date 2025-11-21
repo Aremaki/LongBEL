@@ -189,7 +189,12 @@ def main(
     )
 
     # Load UMLS data
-    dataset_short = "MM" if dataset_name == "MedMentions" else dataset_name
+    if dataset_name == "MedMentions":
+        dataset_short = "MM"
+    elif dataset_name in ["EMEA", "MEDLINE"]:
+        dataset_short = "QUAERO"
+    else:
+        dataset_short = dataset_name
     umls_path = (
         Path("data") / "UMLS_processed" / dataset_short / "all_disambiguated.parquet"
     )

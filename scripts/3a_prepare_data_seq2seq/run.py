@@ -113,7 +113,7 @@ def _process_hf_dataset(
     def _iter_pages_all():
         for split_key in ("train", "validation", "test"):
             if split_key in ds:
-                yield from ds[split_key]
+                yield from ds[split_key]  # type: ignore
 
     # Optional: corrected CUI mapping for QUAERO (from manual review)
     corrected_cui = None
@@ -135,11 +135,11 @@ def _process_hf_dataset(
         )
     typer.echo(f"Processing dataset {name} ...")
     # Build splits dict only for existing keys
-    splits = {"train": ds["train"]}
+    splits = {"train": ds["train"]}  # type: ignore
     if "validation" in ds:
-        splits["validation"] = ds["validation"]
+        splits["validation"] = ds["validation"]  # type: ignore
     if "test" in ds:
-        splits["test"] = ds["test"]
+        splits["test"] = ds["test"]  # type: ignore
     processed = {}
     for split_name, split_data in splits.items():
         if not split_data:
