@@ -39,6 +39,15 @@ def load_predictions(prediction_path: Path, dataset: str, relextractor) -> pl.Da
             "end_span",
         ]
     )
+    df = df.with_columns(
+        normalize_codes(pl.col("code")), normalize_codes(pl.col("Predicted_CUI"))
+    )
+    df = df.with_columns(
+        pl.when(pl.col("Predicted_CUI").is_null())
+        .then(pl.lit(""))  # replace Prediction with empty string
+        .otherwise(pl.col("Prediction"))
+        .alias("Prediction")
+    )
     if "semantic_rel_pred" in df.columns:
         return df  # already processed
     else:

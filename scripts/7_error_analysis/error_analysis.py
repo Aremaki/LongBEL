@@ -80,8 +80,8 @@ def main(datasets: list[str]):
                         }
                     all_scores[label][
                         "no_constraint" if not constraint else "constraint"
-                    ][f"recall_strict_strict_{dataset}_{aug_data}"] = scores[label][
-                        "recall"
+                    ][f"recall_strict_{dataset}_{aug_data}"] = scores[label][
+                        "recall_strict"
                     ]
                     all_scores[label][
                         "no_constraint" if not constraint else "constraint"
