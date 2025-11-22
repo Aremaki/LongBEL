@@ -440,7 +440,7 @@ def augment_with_missing_pairs(
     if dup_df.is_empty():
         return df_final, pl.DataFrame({})
 
-    augmented = pl.concat([df_final, dup_df])
+    augmented = pl.concat([df_final, dup_df], how="align")
     logging.info(
         f"➕ Added {dup_df.height} duplicated rows to cover missing priority pairs"
     )
@@ -553,137 +553,138 @@ def main(
 
     logging.info(f"Processing data from: {spaccc_dir}")
 
-    try:
-        # Load priority pairs
-        priority_pairs = load_priority_pairs(train_file, test_file)
+    # Load priority pairs
+    priority_pairs = load_priority_pairs(train_file, test_file)
 
-        # Load terminology
-        terminology_df = load_terminology(terminology_file)
-        terminology_umls_df = load_terminology_umls(terminology_umls_file)
+    # Load terminology
+    terminology_df = load_terminology(terminology_file)
+    terminology_umls_df = load_terminology_umls(terminology_umls_file)
 
-        # Augment terminology with UMLS CUIs
-        augmented_umls_df = augment_with_umls_cui(
-            terminology_umls_df, umls_synonyms_file
+    # Augment terminology with UMLS CUIs
+    augmented_umls_df = augment_with_umls_cui(
+        terminology_umls_df, umls_synonyms_file
+    ).select([
+        "CUI",
+        "Entity",
+        "CATEGORY",
+        "GROUP",
+        "is_main",
+    ])
+
+    # Complete CUI-Entity-GROUP combinations
+    terminology_df = _complete_cui_entity_group_combinations(terminology_df)
+    augmented_umls_df = _complete_cui_entity_group_combinations(augmented_umls_df)
+
+    # Resolve ambiguity
+    clean_terminology, _ = resolve_entity_ambiguity(terminology_df, priority_pairs)
+
+    # Validate coverage (pre-augmentation)
+    missing_pairs_pre = validate_coverage(clean_terminology, priority_pairs)
+    missing_pairs_pre_umls = validate_coverage(augmented_umls_df, priority_pairs)
+
+    # If some (CUI, GROUP) exist in train/test but are missing in the final set,
+    # duplicate the CUI under the requested GROUP to ensure coverage
+    if missing_pairs_pre:
+        clean_terminology, added_rows_df = augment_with_missing_pairs(
+            clean_terminology, missing_pairs_pre
         )
-
-        # Complete CUI-Entity-GROUP combinations
-        terminology_df = _complete_cui_entity_group_combinations(terminology_df)
-        augmented_umls_df = _complete_cui_entity_group_combinations(augmented_umls_df)
-
-        # Resolve ambiguity
-        clean_terminology, _ = resolve_entity_ambiguity(terminology_df, priority_pairs)
-
-        # Validate coverage (pre-augmentation)
-        missing_pairs_pre = validate_coverage(clean_terminology, priority_pairs)
-        missing_pairs_pre_umls = validate_coverage(augmented_umls_df, priority_pairs)
-
-        # If some (CUI, GROUP) exist in train/test but are missing in the final set,
-        # duplicate the CUI under the requested GROUP to ensure coverage
-        if missing_pairs_pre:
-            clean_terminology, added_rows_df = augment_with_missing_pairs(
-                clean_terminology, missing_pairs_pre
-            )
-        else:
-            added_rows_df = pl.DataFrame({})
-        if missing_pairs_pre_umls:
-            augmented_umls_df, added_rows_df_umls = augment_with_missing_pairs(
-                augmented_umls_df, missing_pairs_pre_umls
-            )
-        else:
-            added_rows_df_umls = pl.DataFrame({})
-
-        _ = validate_coverage(clean_terminology, priority_pairs)
-        _ = validate_coverage(augmented_umls_df, priority_pairs)
-
-        # Resolve ambiguity after augmentation
-        clean_terminology, mapping_df = resolve_entity_ambiguity(
-            clean_terminology, priority_pairs
+    else:
+        added_rows_df = pl.DataFrame({})
+    if missing_pairs_pre_umls:
+        augmented_umls_df, added_rows_df_umls = augment_with_missing_pairs(
+            augmented_umls_df, missing_pairs_pre_umls
         )
+    else:
+        added_rows_df_umls = pl.DataFrame({})
 
-        missing_pairs = validate_coverage(clean_terminology, priority_pairs)
-        _ = validate_coverage(augmented_umls_df, priority_pairs)
+    _ = validate_coverage(clean_terminology, priority_pairs)
+    _ = validate_coverage(augmented_umls_df, priority_pairs)
 
-        # Filter mapping to only include missing priority pairs
-        if missing_pairs:
-            mapping_df = (
-                mapping_df.filter(
-                    pl.struct(["CUI", "GROUP"]).map_elements(
-                        lambda x: (x["CUI"], x["GROUP"]) in missing_pairs,
-                        return_dtype=pl.Boolean,
-                    )
+    # Resolve ambiguity after augmentation
+    clean_terminology, mapping_df = resolve_entity_ambiguity(
+        clean_terminology, priority_pairs
+    )
+
+    missing_pairs = validate_coverage(clean_terminology, priority_pairs)
+    _ = validate_coverage(augmented_umls_df, priority_pairs)
+
+    # Filter mapping to only include missing priority pairs
+    if missing_pairs:
+        mapping_df = (
+            mapping_df.filter(
+                pl.struct(["CUI", "GROUP"]).map_elements(
+                    lambda x: (x["CUI"], x["GROUP"]) in missing_pairs,
+                    return_dtype=pl.Boolean,
                 )
-                .unique(subset=["CUI", "GROUP"])
-                .select(["CUI", "chosen_CUI"])
             )
-
-        # --- Load SNOMED_FSN.tsv ---
-        snomed_fsn_file = spaccc_dir / "SNOMED_FSN.tsv"
-        if snomed_fsn_file.exists():
-            snomed_df = pl.read_csv(
-                snomed_fsn_file,
-                separator="\t",
-                has_header=True,
-                quote_char=None,
-                schema_overrides=[pl.Utf8, pl.Utf8, pl.Utf8],
-            )
-            logging.info(f"Loaded {snomed_df.height} SNOMED FSN entries")
-
-            # Join with clean_terminology on CUI
-            clean_terminology = clean_terminology.join(
-                snomed_df, on="CUI", how="left"
-            ).unique()
-
-            augmented_umls_df = augmented_umls_df.join(
-                snomed_df, on="CUI", how="left"
-            ).unique()
-
-            logging.info(
-                f"After joining with SNOMED_FSN: {clean_terminology.height} rows, "
-                f"columns: {clean_terminology.columns}"
-            )
-            logging.info(
-                f"After joining with SNOMED_FSN (UMLS): {augmented_umls_df.height} rows, "
-                f"columns: {augmented_umls_df.columns}"
-            )
-        else:
-            logging.warning(
-                f"SNOMED_FSN.tsv file not found at {snomed_fsn_file}, skipping join."
-            )
-        # Save results
-        logging.info(
-            f"💾 Saving {mapping_df.height} mapping entries to {corrected_cui_file}"
+            .unique(subset=["CUI", "GROUP"])
+            .select(["CUI", "chosen_CUI"])
         )
-        mapping_df.write_csv(corrected_cui_file)
+
+    # --- Load SNOMED_FSN.tsv ---
+    snomed_fsn_file = spaccc_dir / "SNOMED_FSN.tsv"
+    if snomed_fsn_file.exists():
+        snomed_df = pl.read_csv(
+            snomed_fsn_file,
+            separator="\t",
+            has_header=True,
+            quote_char=None,
+            schema_overrides=[pl.Utf8, pl.Utf8, pl.Utf8],
+        )
+        logging.info(f"Loaded {snomed_df.height} SNOMED FSN entries")
+
+        # Join with clean_terminology on CUI
+        clean_terminology = clean_terminology.join(
+            snomed_df, on="CUI", how="left"
+        ).unique()
+
+        augmented_umls_df = augmented_umls_df.join(
+            snomed_df, on="CUI", how="left"
+        ).unique()
 
         logging.info(
-            f"💾 Saving {clean_terminology.height} clean terminology entries to {clean_terminology_file}"
+            f"After joining with SNOMED_FSN: {clean_terminology.height} rows, "
+            f"columns: {clean_terminology.columns}"
         )
-        clean_terminology.write_parquet(clean_terminology_file)
         logging.info(
-            f"💾 Saving {augmented_umls_df.height} clean UMLS terminology entries to {clean_terminology_umls_file}"
+            f"After joining with SNOMED_FSN (UMLS): {augmented_umls_df.height} rows, "
+            f"columns: {augmented_umls_df.columns}"
         )
-        augmented_umls_df.write_parquet(clean_terminology_umls_file)
+    else:
+        logging.warning(
+            f"SNOMED_FSN.tsv file not found at {snomed_fsn_file}, skipping join."
+        )
+    # Save results
+    logging.info(
+        f"💾 Saving {mapping_df.height} mapping entries to {corrected_cui_file}"
+    )
+    mapping_df.write_csv(corrected_cui_file)
 
-        logging.info("📊 Final statistics:")
-        logging.info(f"   - Unique entities: {clean_terminology['Entity'].n_unique()}")
-        logging.info(f"   - Unique CUIs: {clean_terminology['CUI'].n_unique()}")
-        if added_rows_df.height if hasattr(added_rows_df, "height") else 0:
-            logging.info(
-                f"   - Added duplicates for coverage: {getattr(added_rows_df, 'height', 0)}"
-            )
-        logging.info("📊 Final UMLS statistics:")
-        logging.info(f"   - Unique entities: {augmented_umls_df['Entity'].n_unique()}")
-        logging.info(f"   - Unique CUIs: {augmented_umls_df['CUI'].n_unique()}")
-        if added_rows_df_umls.height if hasattr(added_rows_df_umls, "height") else 0:
-            logging.info(
-                f"   - Added UMLS duplicates for coverage: {getattr(added_rows_df_umls, 'height', 0)}"
-            )
+    logging.info(
+        f"💾 Saving {clean_terminology.height} clean terminology entries to {clean_terminology_file}"
+    )
+    clean_terminology.write_parquet(clean_terminology_file)
+    logging.info(
+        f"💾 Saving {augmented_umls_df.height} clean UMLS terminology entries to {clean_terminology_umls_file}"
+    )
+    augmented_umls_df.write_parquet(clean_terminology_umls_file)
 
-        logging.info("✅ Processing completed successfully")
+    logging.info("📊 Final statistics:")
+    logging.info(f"   - Unique entities: {clean_terminology['Entity'].n_unique()}")
+    logging.info(f"   - Unique CUIs: {clean_terminology['CUI'].n_unique()}")
+    if added_rows_df.height if hasattr(added_rows_df, "height") else 0:
+        logging.info(
+            f"   - Added duplicates for coverage: {getattr(added_rows_df, 'height', 0)}"
+        )
+    logging.info("📊 Final UMLS statistics:")
+    logging.info(f"   - Unique entities: {augmented_umls_df['Entity'].n_unique()}")
+    logging.info(f"   - Unique CUIs: {augmented_umls_df['CUI'].n_unique()}")
+    if added_rows_df_umls.height if hasattr(added_rows_df_umls, "height") else 0:
+        logging.info(
+            f"   - Added UMLS duplicates for coverage: {getattr(added_rows_df_umls, 'height', 0)}"
+        )
 
-    except Exception as e:
-        logging.error(f"❌ Processing failed: {e}")
-        raise typer.Exit(code=1) from e
+    logging.info("✅ Processing completed successfully")
 
 
 if __name__ == "__main__":
