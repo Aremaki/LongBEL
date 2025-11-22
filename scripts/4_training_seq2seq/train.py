@@ -346,6 +346,16 @@ def main(
                 / f"train_{selection_method}_target.pkl"
             )
             synth_train_target_data = [*target_no_def, *target_def]
+            synth_def = {
+                "source": source_def,
+                "target": target_def,
+            }
+            synth_no_def = {
+                "source": source_no_def,
+                "target": target_no_def,
+            }
+            synth_def_dataset = Dataset.from_dict(synth_def)
+            synth_no_def_dataset = Dataset.from_dict(synth_no_def)
         synth_train_data = {
             "source": synth_train_source_data,
             "target": synth_train_target_data,
@@ -369,11 +379,18 @@ def main(
                 synth_train_dataset,  # type: ignore
             ])
         else:  # full_upsampled
-            train_dataset = interleave_datasets(
-                [human_train_dataset, synth_train_dataset],  # type: ignore
-                stopping_strategy="all_exhausted",
-                seed=42,
-            )
+            if dataset_name == "SPACCC_UMLS":
+                train_dataset = interleave_datasets(
+                    [human_train_dataset, synth_def_dataset, synth_no_def_dataset],  # type: ignore
+                    stopping_strategy="all_exhausted",
+                    seed=42,
+                )
+            else:
+                train_dataset = interleave_datasets(
+                    [human_train_dataset, synth_train_dataset],  # type: ignore
+                    stopping_strategy="all_exhausted",
+                    seed=42,
+                )
     else:
         save_strategy = "epoch"
         save_steps = 0  # Not used when strategy is epoch
