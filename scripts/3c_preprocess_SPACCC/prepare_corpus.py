@@ -325,19 +325,11 @@ def run(
         Path("data/UMLS_processed/SPACCC/all_disambiguated.parquet"),
         help="UMLS SPACCC parquet",
     ),
-    terminology_umls_parquet: Path = typer.Option(
-        Path("data/UMLS_processed/SPACCC_UMLS/all_disambiguated.parquet"),
-        help="UMLS SPACCC parquet",
-    ),
     out_root: Path = typer.Option(
         Path("data/final_data"), help="Root output directory"
     ),
     semantic_info_parquet: Path = typer.Option(
         Path("data/UMLS_processed/SPACCC/semantic_info.parquet"),
-        help="UMLS semantic info parquet. Will be created if it doesn't exist.",
-    ),
-    semantic_info_umls_parquet: Path = typer.Option(
-        Path("data/UMLS_processed/SPACCC_UMLS/semantic_info.parquet"),
         help="UMLS semantic info parquet. Will be created if it doesn't exist.",
     ),
     spaccc_data_dir: Path = typer.Option(
@@ -346,10 +338,6 @@ def run(
     corrected_cui_path: Path = typer.Option(
         Path("data/corrected_cui/SPACCC_adapted.csv"),
         help="Corrected CUI mapping file",
-    ),
-    corrected_cui_umls_path: Path = typer.Option(
-        Path("data/corrected_cui/SPACCC_adapted_umls.csv"),
-        help="Corrected CUI mapping file for UMLS",
     ),
     synth_spaccc_data_dir: Path = typer.Option(
         Path("data/synthetic_data/SynthSPACCC/SynthSPACCC_bigbio_no_def.json"),
@@ -370,9 +358,6 @@ def run(
     # Load UMLS mapping resources
     typer.echo("Building UMLS mappings...")
     cui_to_syn, cui_to_title, cui_to_groups = _build_mappings(terminology_parquet)
-    cui_to_syn_umls, cui_to_title_umls, cui_to_groups_umls = _build_mappings(
-        terminology_umls_parquet
-    )
 
     # Create semantic_info if it doesn't exist
     if not semantic_info_parquet.exists():
@@ -384,36 +369,8 @@ def run(
             pl.col("CATEGORY").first(),
         ])
         semantic_info.write_parquet(semantic_info_parquet)
-    if not semantic_info_umls_parquet.exists():
-        typer.echo(
-            f"Semantic info UMLS file not found. Creating at {semantic_info_umls_parquet}"
-        )
-        df = pl.read_parquet(terminology_umls_parquet)
-        semantic_info_umls = df.group_by("CUI").agg([
-            pl.col("GROUP").first(),
-            pl.col("CATEGORY").first().alias("SEM_CODE"),
-            pl.col("CATEGORY").first(),
-        ])
-        semantic_info_umls.write_parquet(semantic_info_umls_parquet)
 
     semantic_info = pl.read_parquet(semantic_info_parquet)
-    semantic_info_umls = pl.read_parquet(semantic_info_umls_parquet)
-
-    _process_spaccc_dataset(
-        "SPACCC_UMLS",
-        cui_to_title_umls,
-        cui_to_syn_umls,
-        cui_to_groups_umls,
-        semantic_info_umls,
-        tfidf_vectorizer_path,
-        start_entity,
-        end_entity,
-        start_group,
-        end_group,
-        out_root,
-        spaccc_data_dir,
-        corrected_cui_umls_path,
-    )
 
     _process_spaccc_dataset(
         "SPACCC",
@@ -451,10 +408,10 @@ def run(
     if synth_spaccc_umls_def_data_dir.exists():
         _process_synth_dataset(
             "SynthSPACCC_UMLS_Def",
-            cui_to_title_umls,
-            cui_to_syn_umls,
-            cui_to_groups_umls,
-            semantic_info_umls,
+            cui_to_title,
+            cui_to_syn,
+            cui_to_groups,
+            semantic_info,
             tfidf_vectorizer_path,
             start_entity,
             end_entity,
@@ -462,16 +419,16 @@ def run(
             end_group,
             out_root,
             synth_spaccc_umls_def_data_dir,
-            corrected_cui_umls_path,
+            corrected_cui_path,
         )
 
     if synth_spaccc_umls_no_def_data_dir.exists():
         _process_synth_dataset(
             "SynthSPACCC_UMLS_No_Def",
-            cui_to_title_umls,
-            cui_to_syn_umls,
-            cui_to_groups_umls,
-            semantic_info_umls,
+            cui_to_title,
+            cui_to_syn,
+            cui_to_groups,
+            semantic_info,
             tfidf_vectorizer_path,
             start_entity,
             end_entity,
@@ -479,7 +436,7 @@ def run(
             end_group,
             out_root,
             synth_spaccc_umls_no_def_data_dir,
-            corrected_cui_umls_path,
+            corrected_cui_path,
         )
 
     typer.echo("✅ Preprocessing complete.")

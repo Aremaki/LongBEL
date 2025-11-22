@@ -545,7 +545,6 @@ def main(
     train_file = spaccc_dir / "train.tsv"
     test_file = spaccc_dir / "test.tsv"
     corrected_cui_file = corrected_dir / "SPACCC_adapted.csv"
-    corrected_umls_cui_file = corrected_dir / "SPACCC_adapted_umls.csv"
     clean_terminology_file = terminology_dir / "all_disambiguated.parquet"
     clean_terminology_umls_file = terminology_umls_dir / "all_disambiguated.parquet"
     # Create output directory
@@ -573,15 +572,10 @@ def main(
 
         # Resolve ambiguity
         clean_terminology, _ = resolve_entity_ambiguity(terminology_df, priority_pairs)
-        clean_terminology_umls, mapping_umls_df = resolve_entity_ambiguity(
-            augmented_umls_df, priority_pairs
-        )
 
         # Validate coverage (pre-augmentation)
         missing_pairs_pre = validate_coverage(clean_terminology, priority_pairs)
-        missing_pairs_pre_umls = validate_coverage(
-            clean_terminology_umls, priority_pairs
-        )
+        missing_pairs_pre_umls = validate_coverage(augmented_umls_df, priority_pairs)
 
         # If some (CUI, GROUP) exist in train/test but are missing in the final set,
         # duplicate the CUI under the requested GROUP to ensure coverage
@@ -592,25 +586,22 @@ def main(
         else:
             added_rows_df = pl.DataFrame({})
         if missing_pairs_pre_umls:
-            clean_terminology_umls, added_rows_df_umls = augment_with_missing_pairs(
-                clean_terminology_umls, missing_pairs_pre_umls
+            augmented_umls_df, added_rows_df_umls = augment_with_missing_pairs(
+                augmented_umls_df, missing_pairs_pre_umls
             )
         else:
             added_rows_df_umls = pl.DataFrame({})
 
         _ = validate_coverage(clean_terminology, priority_pairs)
-        _ = validate_coverage(clean_terminology_umls, priority_pairs)
+        _ = validate_coverage(augmented_umls_df, priority_pairs)
 
         # Resolve ambiguity after augmentation
         clean_terminology, mapping_df = resolve_entity_ambiguity(
             clean_terminology, priority_pairs
         )
-        clean_terminology_umls, _ = resolve_entity_ambiguity(
-            clean_terminology_umls, priority_pairs
-        )
 
         missing_pairs = validate_coverage(clean_terminology, priority_pairs)
-        missing_pairs_umls = validate_coverage(clean_terminology_umls, priority_pairs)
+        _ = validate_coverage(augmented_umls_df, priority_pairs)
 
         # Filter mapping to only include missing priority pairs
         if missing_pairs:
@@ -618,18 +609,6 @@ def main(
                 mapping_df.filter(
                     pl.struct(["CUI", "GROUP"]).map_elements(
                         lambda x: (x["CUI"], x["GROUP"]) in missing_pairs,
-                        return_dtype=pl.Boolean,
-                    )
-                )
-                .unique(subset=["CUI", "GROUP"])
-                .select(["CUI", "chosen_CUI"])
-            )
-
-        if missing_pairs_umls:
-            mapping_umls_df = (
-                mapping_umls_df.filter(
-                    pl.struct(["CUI", "GROUP"]).map_elements(
-                        lambda x: (x["CUI"], x["GROUP"]) in missing_pairs_umls,
                         return_dtype=pl.Boolean,
                     )
                 )
@@ -654,7 +633,7 @@ def main(
                 snomed_df, on="CUI", how="left"
             ).unique()
 
-            clean_terminology_umls = clean_terminology_umls.join(
+            augmented_umls_df = augmented_umls_df.join(
                 snomed_df, on="CUI", how="left"
             ).unique()
 
@@ -663,8 +642,8 @@ def main(
                 f"columns: {clean_terminology.columns}"
             )
             logging.info(
-                f"After joining with SNOMED_FSN (UMLS): {clean_terminology_umls.height} rows, "
-                f"columns: {clean_terminology_umls.columns}"
+                f"After joining with SNOMED_FSN (UMLS): {augmented_umls_df.height} rows, "
+                f"columns: {augmented_umls_df.columns}"
             )
         else:
             logging.warning(
@@ -677,18 +656,13 @@ def main(
         mapping_df.write_csv(corrected_cui_file)
 
         logging.info(
-            f"💾 Saving {mapping_umls_df.height} UMLS mapping entries to {corrected_umls_cui_file}"
-        )
-        mapping_umls_df.write_csv(corrected_umls_cui_file)
-
-        logging.info(
             f"💾 Saving {clean_terminology.height} clean terminology entries to {clean_terminology_file}"
         )
         clean_terminology.write_parquet(clean_terminology_file)
         logging.info(
-            f"💾 Saving {clean_terminology_umls.height} clean UMLS terminology entries to {clean_terminology_umls_file}"
+            f"💾 Saving {augmented_umls_df.height} clean UMLS terminology entries to {clean_terminology_umls_file}"
         )
-        clean_terminology_umls.write_parquet(clean_terminology_umls_file)
+        augmented_umls_df.write_parquet(clean_terminology_umls_file)
 
         logging.info("📊 Final statistics:")
         logging.info(f"   - Unique entities: {clean_terminology['Entity'].n_unique()}")
@@ -698,10 +672,8 @@ def main(
                 f"   - Added duplicates for coverage: {getattr(added_rows_df, 'height', 0)}"
             )
         logging.info("📊 Final UMLS statistics:")
-        logging.info(
-            f"   - Unique entities: {clean_terminology_umls['Entity'].n_unique()}"
-        )
-        logging.info(f"   - Unique CUIs: {clean_terminology_umls['CUI'].n_unique()}")
+        logging.info(f"   - Unique entities: {augmented_umls_df['Entity'].n_unique()}")
+        logging.info(f"   - Unique CUIs: {augmented_umls_df['CUI'].n_unique()}")
         if added_rows_df_umls.height if hasattr(added_rows_df_umls, "height") else 0:
             logging.info(
                 f"   - Added UMLS duplicates for coverage: {getattr(added_rows_df_umls, 'height', 0)}"

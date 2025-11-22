@@ -66,6 +66,16 @@ python scripts/2_generate_synthetic_data/convert_to_bigbio.py convert \
   --parquet data/synthetic_data/SynthSPACCC/generated_no_def \
   --json-out data/synthetic_data/SynthSPACCC/SynthSPACCC_bigbio_no_def.json
 ```
+```bash
+python scripts/2_generate_synthetic_data/convert_to_bigbio.py convert \
+  --parquet data/synthetic_data/SynthSPACCC_UMLS/generated_def \
+  --json-out data/synthetic_data/SynthSPACCC_UMLS/SynthSPACCC_UMLS_bigbio_def.json
+```
+```bash
+python scripts/2_generate_synthetic_data/convert_to_bigbio.py convert \
+  --parquet data/synthetic_data/SynthSPACCC_UMLS/generated_no_def \
+  --json-out data/synthetic_data/SynthSPACCC_UMLS/SynthSPACCC_UMLS_bigbio_no_def.json
+```
 Options: `--limit` (row cap), `--fail-pattern` (default FAIL).
 
 ### b. Directly from HuggingFace Hub dataset

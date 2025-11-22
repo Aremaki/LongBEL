@@ -273,13 +273,14 @@ def main(
     validation_dataset = dev_dataset.select(split_val)
 
     if augmented_data in ["human_only", "full", "human_only_ft", "full_upsampled"]:
+        human_dataset_name = "SPACCC" if "SPACCC" in dataset_name else dataset_name
         human_train_source_data = load_pickle(
             data_folder
-            / dataset_name
+            / human_dataset_name
             / f"train_{selection_method}_source{with_group_extension}.pkl"
         )
         human_train_target_data = load_pickle(
-            data_folder / dataset_name / f"train_{selection_method}_target.pkl"
+            data_folder / human_dataset_name / f"train_{selection_method}_target.pkl"
         )
         human_train_data = {
             "source": human_train_source_data,
@@ -323,16 +324,28 @@ def main(
                 data_folder / "SynthSPACCC" / f"train_{selection_method}_target.pkl"
             )
         else:  # SPACCC_UMLS
-            synth_train_source_data = load_pickle(
+            source_no_def = load_pickle(
                 data_folder
-                / "SynthSPACCC_UMLS"
+                / "SynthSPACCC_UMLS_No_Def"
                 / f"train_{selection_method}_source{with_group_extension}.pkl"
             )
-            synth_train_target_data = load_pickle(
+            source_def = load_pickle(
                 data_folder
-                / "SynthSPACCC_UMLS"
+                / "SynthSPACCC_UMLS_Def"
+                / f"train_{selection_method}_source{with_group_extension}.pkl"
+            )
+            synth_train_source_data = [*source_no_def, *source_def]
+            target_no_def = load_pickle(
+                data_folder
+                / "SynthSPACCC_UMLS_No_Def"
                 / f"train_{selection_method}_target.pkl"
             )
+            target_def = load_pickle(
+                data_folder
+                / "SynthSPACCC_UMLS_Def"
+                / f"train_{selection_method}_target.pkl"
+            )
+            synth_train_target_data = [*target_no_def, *target_def]
         synth_train_data = {
             "source": synth_train_source_data,
             "target": synth_train_target_data,
