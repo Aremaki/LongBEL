@@ -15,8 +15,12 @@ Create chunked parquet files (`sample_{i}.parquet`) containing columns: `CUI`, `
 
 ```bash
 python scripts/2_generate_synthetic_data/prepare_concepts.py \
+  --mm-train-path data/final_data/MedMentions/train_tfidf_annotations.tsv \
   --mm-path data/UMLS_processed/MM/all_disambiguated.parquet \
+  --medline-train-path data/final_data/MEDLINE/train_tfidf_annotations.tsv \
+  --emea-train-path data/final_data/EMEA/train_tfidf_annotations.tsv \
   --quaero-path data/UMLS_processed/QUAERO/all_disambiguated.parquet \
+  --spaccc-train-path data/final_data/SPACCC/train_tfidf_annotations.tsv \
   --spaccc-path data/UMLS_processed/SPACCC/all_disambiguated.parquet \
   --spaccc-umls-path  data/UMLS_processed/SPACCC_UMLS/all_disambiguated.parquet \
   --spaccc-umls-def data/UMLS_processed/SPACCC_UMLS/umls_def.parquet \

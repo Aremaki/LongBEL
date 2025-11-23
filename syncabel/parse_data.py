@@ -381,8 +381,6 @@ def parse_text(
                     + end_entity
                     + marked_sent_text[end_in_sent:]
                 )
-            marked_sent_text += f"<SEP>{entity_text} {transition_verb}"
-            marked_with_group_text += f"<SEP>{entity_text} {transition_verb}"
 
             # Emit the pair
             tsv_line = {
@@ -394,8 +392,11 @@ def parse_text(
                 "code": "+".join(normalized_ids),
                 "semantic_rel": "EXACT" if len(normalized_ids) == 1 else "COMPOSITE",
                 "annotation": annotation,
+                "sentence": marked_sent_text,
             }
             tsv_lines.append(tsv_line)
+            marked_sent_text += f"<SEP>{entity_text} {transition_verb}"
+            marked_with_group_text += f"<SEP>{entity_text} {transition_verb}"
             source_sentences.append(marked_sent_text)
             source_with_group_sentences.append(marked_with_group_text)
             target_sentences.append(annotation)

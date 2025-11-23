@@ -56,12 +56,21 @@ def load_model_and_tokenizer(model_path):
     return model, tokenizer
 
 
-def apply_chat_template(tokenizer, batch_user_prompts, system_prompt):
+def apply_chat_template(
+    tokenizer,
+    batch_user_prompts,
+    batch_train_examples,
+    system_prompt_before,
+    system_prompt_after,
+):
     """Apply chat template in batch and return a list of serialized prompts."""
     batch_chat = []
-    for user_prompt in batch_user_prompts:
+    for i in range(len(batch_user_prompts)):
+        user_prompt = batch_user_prompts[i]
+        train_example = batch_train_examples[i]
+        full_system_prompt = system_prompt_before + train_example + system_prompt_after
         batch_chat.append([
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": full_system_prompt},
             {"role": "user", "content": user_prompt},
         ])
     prompts = tokenizer.apply_chat_template(
@@ -84,10 +93,20 @@ def generate_batches(
 ):
     if lang == "fr":
         template_answer = "exemple : "
+        template_example = "# Exemples de Style de Notes Cliniques"
     elif lang == "es":
         template_answer = "ejemplo: "
+        template_example = "# Ejemplos de Estilo de Notas Clínicas"
     else:
         template_answer = "example: "
+        template_example = "# PubMed Abstract Style Examples"
+
+    # Split system prompt into 2 parts: before and after examples
+    system_prompt_before, system_prompt_after = system_prompt.split(
+        template_example, maxsplit=1
+    )
+    system_prompt_before = system_prompt_before.strip() + "\n" + template_example + "\n"
+    train_examples = user_prompts_df["train_example"].to_list()
     user_prompts = user_prompts_df["user_prompt"].to_list()
     cui_codes = user_prompts_df["CUI"].to_list()
     sem_cats = user_prompts_df["CATEGORY"].to_list()
@@ -106,13 +125,20 @@ def generate_batches(
     for batch_start in tqdm(
         range(0, len(user_prompts), batch_size), desc="Generating in batches"
     ):
+        batch_train_examples = train_examples[batch_start : batch_start + batch_size]
         batch_user_prompts = user_prompts[batch_start : batch_start + batch_size]
         batch_cui_codes = cui_codes[batch_start : batch_start + batch_size]
         batch_sem_cats = sem_cats[batch_start : batch_start + batch_size]
         batch_sem_types = sem_types[batch_start : batch_start + batch_size]
 
         # Apply chat template and prepare batch prompts
-        batch_inputs = apply_chat_template(tokenizer, batch_user_prompts, system_prompt)
+        batch_inputs = apply_chat_template(
+            tokenizer,
+            batch_user_prompts,
+            batch_train_examples,
+            system_prompt_before,
+            system_prompt_after,
+        )
 
         # Tokenize as batch (truncate to fit context window to avoid kv-cache bloat)
         inputs = tokenizer(
