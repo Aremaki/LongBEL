@@ -1,6 +1,7 @@
 """Prepare model-specific source/target datasets from SPACCC corpora (Typer CLI)."""
 
 import json
+import logging
 import pickle
 from pathlib import Path
 
@@ -81,7 +82,7 @@ def _load_spaccc_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dat
         )
     except pl.ShapeError:
         # Handle empty file
-        typer.echo(f"Warning: Annotation file {annotation_file} is empty.")
+        logging.warning(f"Warning: Annotation file {annotation_file} is empty.")
         return Dataset.from_dict({
             "id": [],
             "document_id": [],
@@ -99,7 +100,7 @@ def _load_spaccc_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dat
                 text = raw_file.read()
         else:
             # Skip documents with no corresponding text file
-            typer.echo(f"Warning: Raw text file {raw_text_path} not found.")
+            logging.warning(f"Warning: Raw text file {raw_text_path} not found.")
             continue
 
         page = {
@@ -140,7 +141,7 @@ def _load_spaccc_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dat
         ])
 
     # Convert to Hugging Face Dataset
-    typer.echo(f"Loaded {len(pages)} pages from {annotation_file}")
+    logging.info(f"Loaded {len(pages)} pages from {annotation_file}")
     return Dataset.from_list(pages)
 
 
@@ -160,7 +161,7 @@ def _process_synth_dataset(
     corrected_cui_path: Path,
 ):
     """Process a synthetic dataset already in BigBio format."""
-    typer.echo(f"→ Loading synthetic dataset {name} ...")
+    logging.info(f"→ Loading synthetic dataset {name} ...")
     data_folder = out_root / name
     _ensure_dir(data_folder)
 
@@ -169,10 +170,10 @@ def _process_synth_dataset(
 
     corrected_cui = None
 
-    typer.echo(f"Processing dataset {name} ...")
+    logging.info(f"Processing dataset {name} ...")
     dataset = _load_json_if_exists(synth_data_dir)
     if dataset is None:
-        typer.echo(f"Error loading dataset from {synth_data_dir}: File not found.")
+        logging.error(f"Error loading dataset from {synth_data_dir}: File not found.")
         return
     src, src_with_group, tgt, _ = process_bigbio_dataset(
         dataset,
@@ -193,7 +194,7 @@ def _process_synth_dataset(
     )
 
     # Write outputs
-    typer.echo("Writing output")
+    logging.info("Writing output")
     _dump(
         src,
         data_folder / f"train_{selection_method}_source.pkl",
@@ -223,7 +224,7 @@ def _process_spaccc_dataset(
     spaccc_data_dir: Path,
     corrected_cui_path: Path,
 ):
-    typer.echo(f"→ Loading dataset {name} ...")
+    logging.info(f"→ Loading dataset {name} ...")
     data_folder = out_root / name
     _ensure_dir(data_folder)
 
@@ -231,13 +232,13 @@ def _process_spaccc_dataset(
 
     corrected_cui = None
     if corrected_cui_path.exists():
-        typer.echo(f"  • Using corrected CUI mapping from {corrected_cui_path}...")
+        logging.info(f"  • Using corrected CUI mapping from {corrected_cui_path}...")
         corrected_cui = {
             str(row[0]): str(row[1])
             for row in pl.read_csv(corrected_cui_path).iter_rows()
         }
 
-    typer.echo(f"Processing dataset {name} ...")
+    logging.info(f"Processing dataset {name} ...")
 
     splits = {}
     train_annotations_path = spaccc_data_dir / "train.tsv"
@@ -248,17 +249,17 @@ def _process_spaccc_dataset(
     test_ner_raw_files_folder = spaccc_data_dir.parent / "raw_txt" / "test"
 
     if train_annotations_path.exists():
-        typer.echo(f"  • Loading train split from {train_annotations_path}")
+        logging.info(f"  • Loading train split from {train_annotations_path}")
         splits["train"] = _load_spaccc_as_bigbio(
             train_annotations_path, train_raw_files_folder
         )
     if test_annotations_path.exists():
-        typer.echo(f"  • Loading test split from {test_annotations_path}")
+        logging.info(f"  • Loading test split from {test_annotations_path}")
         splits["test"] = _load_spaccc_as_bigbio(
             test_annotations_path, test_raw_files_folder
         )
     if test_ner_annotations_path.exists():
-        typer.echo(f"  • Loading test_ner split from {test_ner_annotations_path}")
+        logging.info(f"  • Loading test_ner split from {test_ner_annotations_path}")
         splits["test_ner"] = _load_spaccc_as_bigbio(
             test_ner_annotations_path, test_ner_raw_files_folder
         )
@@ -266,9 +267,9 @@ def _process_spaccc_dataset(
     processed = {}
     for split_name, split_data in splits.items():
         if not split_data or len(split_data) == 0:
-            typer.echo(f"  • Skipping empty split: {split_name}")
+            logging.info(f"  • Skipping empty split: {split_name}")
             continue
-        typer.echo(f"  • Processing split: {split_name}")
+        logging.info(f"  • Processing split: {split_name}")
         src, src_with_group, tgt, tsv_data = process_bigbio_dataset(
             split_data,
             start_entity,
@@ -291,7 +292,7 @@ def _process_spaccc_dataset(
     # Write outputs
     selection_method = "tfidf"
     for split_name, (src, src_with_group, tgt, tsv_data) in processed.items():
-        typer.echo(f"  • Writing output for split: {split_name}")
+        logging.info(f"  • Writing output for split: {split_name}")
         _dump(
             src,
             data_folder / f"{split_name}_{selection_method}_source.pkl",
@@ -356,12 +357,15 @@ def run(
 ) -> None:
     """Run preprocessing pipeline for SPACCC dataset."""
     # Load UMLS mapping resources
-    typer.echo("Building UMLS mappings...")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    logging.info("Building UMLS mappings...")
     cui_to_syn, cui_to_title, cui_to_groups = _build_mappings(terminology_parquet)
 
     # Create semantic_info if it doesn't exist
     if not semantic_info_parquet.exists():
-        typer.echo(f"Semantic info file not found. Creating at {semantic_info_parquet}")
+        logging.info(
+            f"Semantic info file not found. Creating at {semantic_info_parquet}"
+        )
         df = pl.read_parquet(terminology_parquet)
         semantic_info = df.group_by("CUI").agg([
             pl.col("GROUP").first(),
@@ -439,7 +443,7 @@ def run(
             corrected_cui_path,
         )
 
-    typer.echo("✅ Preprocessing complete.")
+    logging.info("✅ Preprocessing complete.")
 
 
 if __name__ == "__main__":  # pragma: no cover

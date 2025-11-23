@@ -45,18 +45,29 @@ def compute_score(outputs, tokenizer) -> list[float]:
 
     N, L = sequences.shape
     T = len(scores)
+    seq_len = sequences.size(1)
 
-    if sequences.size(1) != T:
-        # This case can happen for causal LMs that have a BOS token,
-        # where the sequence length is T+1.
-        if sequences.size(1) == T + 1:
-            # The first token is the BOS token, which has no score.
-            # The scores correspond to predictions for tokens starting from the second one.
-            sequences = sequences[:, 1:]
-        else:
-            raise ValueError(
-                f"Length mismatch: sequences {sequences.size(1)} vs scores {T}"
-            )
+    # Case 1: causal LM → sequences include a BOS token that has no score
+    if seq_len == T + 1:
+        # Drop BOS
+        sequences = sequences[:, 1:]
+        seq_len = sequences.size(1)
+
+    # Case 2: sequences shorter than scores (common in encoder-decoder models)
+    if seq_len < T:
+        # Truncate scores to match sequence length
+        scores = scores[:seq_len]
+        T = len(scores)
+
+    # Case 3: sequences longer than scores (rare but possible with padding)
+    elif seq_len > T:
+        # Truncate sequences
+        sequences = sequences[:, :T]
+        seq_len = sequences.size(1)
+
+    # If still inconsistent
+    if seq_len != T:
+        raise ValueError(f"Unrecoverable mismatch: sequences {seq_len} vs scores {T}")
 
     # Create mask to ignore PAD/EOS tokens
     mask = (

@@ -276,6 +276,12 @@ def main(
         pl.Series(name="Prediction_beam_score", values=output_beam_scores),
     )
     no_constraint_df = add_cui_column(no_constraint_df, umls_df=umls_df)
+
+    # Compute recall
+    true = no_constraint_df.filter(pl.col("code") == pl.col("Predicted_CUI")).shape[0]
+    total = no_constraint_df.shape[0]
+    recall = true / total if total > 0 else 0.0
+    print(f"No Constraint Inference Recall: {recall:.4f} ({true}/{total})")
     print(f"Generated {len(no_constraint_df)} sentences without constraint.")
 
     # Save results
@@ -320,6 +326,12 @@ def main(
         pl.Series(name="Prediction_beam_score", values=output_beam_scores),
     )
     constraint_df = add_cui_column(constraint_df, umls_df=umls_df)
+
+    # Compute recall
+    true = constraint_df.filter(pl.col("code") == pl.col("Predicted_CUI")).shape[0]
+    total = constraint_df.shape[0]
+    recall = true / total if total > 0 else 0.0
+    print(f"Constraint Inference Recall: {recall:.4f} ({true}/{total})")
     print(f"Generated {len(constraint_df)} sentences with constraint.")
 
     # Save results
