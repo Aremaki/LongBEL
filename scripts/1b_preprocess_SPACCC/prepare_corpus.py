@@ -22,10 +22,16 @@ def _build_mappings(umls_parquet: Path):
     # Let's use 'Entity' as a fallback.
     if "Title" not in df.columns:
         df = df.with_columns(pl.col("Entity").alias("Title"))
-    cui_to_title = dict(df.group_by("CUI").agg([pl.col("Title").first()]).iter_rows())
-    cui_to_syn = dict(df.group_by("CUI").agg([pl.col("Entity").unique()]).iter_rows())
-    cui_to_groups = dict(df.group_by("CUI").agg([pl.col("GROUP").unique()]).iter_rows())
-    return cui_to_syn, cui_to_title, cui_to_groups
+    code_to_title = dict(
+        df.group_by("SNOMED_code").agg([pl.col("Title").first()]).iter_rows()
+    )
+    code_to_syn = dict(
+        df.group_by("SNOMED_code").agg([pl.col("Entity").unique()]).iter_rows()
+    )
+    code_to_groups = dict(
+        df.group_by("SNOMED_code").agg([pl.col("GROUP").unique()]).iter_rows()
+    )
+    return code_to_syn, code_to_title, code_to_groups
 
 
 def _ensure_dir(path: Path):
@@ -48,7 +54,7 @@ def _load_spaccc_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dat
     """
     Load a SPACCC TSV annotation file and corresponding raw text files, and format them as a Hugging Face Dataset in BigBio format.
 
-    The `annotation_file` should be a TSV file with columns: doc_id, entity_type, start_span, end_span, entity_text, cui, cui_type.
+    The `annotation_file` should be a TSV file with columns: doc_id, entity_type, start_span, end_span, entity_text, snomed_code, label.
     The `raw_files_folder` should be a directory containing raw text files named as <doc_id>.txt for each document referenced in the TSV.
     Each passage will include the full raw text and annotated entities with their offsets.
     """
@@ -68,8 +74,8 @@ def _load_spaccc_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dat
             "start_span",
             "end_span",
             "entity_text",
-            "cui",
-            "cui_type",
+            "code",
+            "semantic_type",
         ]
 
         # If fewer than expected columns exist, add missing ones as null columns
@@ -115,7 +121,7 @@ def _load_spaccc_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dat
                 "text": [record["entity_text"]],
                 "offsets": [[int(record["start_span"]), int(record["end_span"])]],
                 "type": record["entity_type"],
-                "normalized": [{"db_name": "SNOMED_CT", "db_id": record["cui"]}],
+                "normalized": [{"db_name": "SNOMED_CT", "db_id": record["code"]}],
             }
             entities.append(entity)
         page["entities"] = entities
@@ -147,9 +153,9 @@ def _load_spaccc_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dat
 
 def _process_synth_dataset(
     name: str,
-    cui_to_title,
-    cui_to_syn,
-    cui_to_groups,
+    code_to_title,
+    code_to_syn,
+    code_to_groups,
     semantic_info,
     tfidf_vectorizer_path: Path,
     start_entity: str,
@@ -181,9 +187,9 @@ def _process_synth_dataset(
         end_entity,
         start_group,
         end_group,
-        CUI_to_Title=cui_to_title,
-        CUI_to_Syn=cui_to_syn,
-        CUI_to_GROUP=cui_to_groups,
+        CUI_to_Title=code_to_title,
+        CUI_to_Syn=code_to_syn,
+        CUI_to_GROUP=code_to_groups,
         semantic_info=semantic_info,
         tfidf_vectorizer_path=tfidf_vectorizer_path,
         corrected_code=corrected_code,
@@ -207,9 +213,9 @@ def _process_synth_dataset(
 
 def _process_spaccc_dataset(
     name: str,
-    cui_to_title,
-    cui_to_syn,
-    cui_to_groups,
+    code_to_title,
+    code_to_syn,
+    code_to_groups,
     semantic_info,
     tfidf_vectorizer_path: Path,
     start_entity: str,
@@ -228,7 +234,7 @@ def _process_spaccc_dataset(
 
     corrected_code = None
     if corrected_code_path.exists():
-        logging.info(f"  • Using corrected CUI mapping from {corrected_code_path}...")
+        logging.info(f"  • Using corrected code mapping from {corrected_code_path}...")
         corrected_code = {
             str(row[0]): str(row[1])
             for row in pl.read_csv(corrected_code_path).iter_rows()
@@ -272,9 +278,9 @@ def _process_spaccc_dataset(
             end_entity,
             start_group,
             end_group,
-            CUI_to_Title=cui_to_title,
-            CUI_to_Syn=cui_to_syn,
-            CUI_to_GROUP=cui_to_groups,
+            CUI_to_Title=code_to_title,
+            CUI_to_Syn=code_to_syn,
+            CUI_to_GROUP=code_to_groups,
             semantic_info=semantic_info,
             tfidf_vectorizer_path=tfidf_vectorizer_path,
             corrected_code=corrected_code,
@@ -330,28 +336,22 @@ def run(
     ),
     corrected_code_path: Path = typer.Option(
         Path("data/corrected_code/SPACCC_adapted.csv"),
-        help="Corrected CUI mapping file",
+        help="Corrected SNOMED mapping file",
     ),
-    synth_spaccc_data_dir: Path = typer.Option(
+    synth_spaccc_def_data_dir: Path = typer.Option(
+        Path("data/synthetic_data/SynthSPACCC/SynthSPACCC_bigbio_def.json"),
+        help="SynthSPACCC definitions directory (BigBio format)",
+    ),
+    synth_spaccc_no_def_data_dir: Path = typer.Option(
         Path("data/synthetic_data/SynthSPACCC/SynthSPACCC_bigbio_no_def.json"),
-        help="SynthSPACCC data directory (BigBio format)",
-    ),
-    synth_spaccc_umls_def_data_dir: Path = typer.Option(
-        Path("data/synthetic_data/SynthSPACCC_UMLS/SynthSPACCC_UMLS_bigbio_def.json"),
-        help="SynthSPACCC_UMLS definitions directory (BigBio format)",
-    ),
-    synth_spaccc_umls_no_def_data_dir: Path = typer.Option(
-        Path(
-            "data/synthetic_data/SynthSPACCC_UMLS/SynthSPACCC_UMLS_bigbio_no_def.json"
-        ),
-        help="SynthSPACCC_UMLS no definitions directory (BigBio format)",
+        help="SynthSPACCC no definitions directory (BigBio format)",
     ),
 ) -> None:
     """Run preprocessing pipeline for SPACCC dataset."""
     # Load UMLS mapping resources
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     logging.info("Building UMLS mappings...")
-    cui_to_syn, cui_to_title, cui_to_groups = _build_mappings(terminology_parquet)
+    code_to_syn, code_to_title, code_to_groups = _build_mappings(terminology_parquet)
 
     # Create semantic_info if it doesn't exist
     if not semantic_info_parquet.exists():
@@ -359,7 +359,7 @@ def run(
             f"Semantic info file not found. Creating at {semantic_info_parquet}"
         )
         df = pl.read_parquet(terminology_parquet)
-        semantic_info = df.group_by("CUI").agg([
+        semantic_info = df.group_by("SNOMED_code").agg([
             pl.col("GROUP").first(),
             pl.col("CATEGORY").first().alias("SEM_CODE"),
             pl.col("CATEGORY").first(),
@@ -370,9 +370,9 @@ def run(
 
     _process_spaccc_dataset(
         "SPACCC",
-        cui_to_title,
-        cui_to_syn,
-        cui_to_groups,
+        code_to_title,
+        code_to_syn,
+        code_to_groups,
         semantic_info,
         tfidf_vectorizer_path,
         start_entity,
@@ -384,12 +384,12 @@ def run(
         corrected_code_path,
     )
 
-    if synth_spaccc_data_dir.exists():
+    if synth_spaccc_def_data_dir.exists():
         _process_synth_dataset(
-            "SynthSPACCC",
-            cui_to_title,
-            cui_to_syn,
-            cui_to_groups,
+            "SynthSPACCC_Def",
+            code_to_title,
+            code_to_syn,
+            code_to_groups,
             semantic_info,
             tfidf_vectorizer_path,
             start_entity,
@@ -397,16 +397,16 @@ def run(
             start_group,
             end_group,
             out_root,
-            synth_spaccc_data_dir,
+            synth_spaccc_def_data_dir,
             corrected_code_path,
         )
 
-    if synth_spaccc_umls_def_data_dir.exists():
+    if synth_spaccc_no_def_data_dir.exists():
         _process_synth_dataset(
-            "SynthSPACCC_UMLS_Def",
-            cui_to_title,
-            cui_to_syn,
-            cui_to_groups,
+            "SynthSPACCC_No_Def",
+            code_to_title,
+            code_to_syn,
+            code_to_groups,
             semantic_info,
             tfidf_vectorizer_path,
             start_entity,
@@ -414,24 +414,7 @@ def run(
             start_group,
             end_group,
             out_root,
-            synth_spaccc_umls_def_data_dir,
-            corrected_code_path,
-        )
-
-    if synth_spaccc_umls_no_def_data_dir.exists():
-        _process_synth_dataset(
-            "SynthSPACCC_UMLS_No_Def",
-            cui_to_title,
-            cui_to_syn,
-            cui_to_groups,
-            semantic_info,
-            tfidf_vectorizer_path,
-            start_entity,
-            end_entity,
-            start_group,
-            end_group,
-            out_root,
-            synth_spaccc_umls_no_def_data_dir,
+            synth_spaccc_no_def_data_dir,
             corrected_code_path,
         )
 
