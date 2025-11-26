@@ -31,7 +31,7 @@ for dataset in "${DATASETS[@]}"; do
                 # Submit job
                 echo "Submitting training job (missing): ${MODEL_DIR}"
                 echo "  ARGS=${ARGS}"
-                sbatch --export=ALL,SCRIPT_ARGS="${ARGS}" -A ssq@h100 scripts/4_training_seq2seq/run.slurm
+                sbatch --export=ALL,SCRIPT_ARGS="${ARGS}" -A ssq@h100 scripts/4a_training_seq2seq/run.slurm
                 sleep 1
 
             done

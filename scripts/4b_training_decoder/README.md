@@ -26,7 +26,7 @@ This script trains a model with the specified parameters.
 **Example:**
 
 ```bash
-python scripts/4_training/train.py --model-name google/mt5-large --dataset-name MedMentions --augmented-data --with-group --selection-method embedding
+python scripts/4b_training_decoder/train.py --model-name google/mt5-large --dataset-name MedMentions --augmented-data --with-group --selection-method embedding
 ```
 
 ### `run.slurm`
@@ -42,7 +42,7 @@ This script automates running multiple training experiments. It iterates through
 **To run all training configurations:**
 
 ```bash
-bash scripts/4_training/run_all_trainings.sh
+bash scripts/4b_training_decoder/run_all_trainings.sh
 ```
 
 This will submit multiple jobs to the Slurm scheduler based on the configurations defined in the script.

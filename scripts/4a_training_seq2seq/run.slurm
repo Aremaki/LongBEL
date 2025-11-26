@@ -31,6 +31,6 @@ GPUS_PER_NODE=${SLURM_GPUS_ON_NODE:-1}
 torchrun --nproc_per_node=$GPUS_PER_NODE \
          --master-addr=$(hostname) \
          --master-port=$((10000 + $RANDOM % 50000)) \
-         scripts/4_training_seq2seq/train.py $SCRIPT_ARGS
+         scripts/4a_training_seq2seq/train.py $SCRIPT_ARGS
 
 echo "SCRIPT FINISHED"

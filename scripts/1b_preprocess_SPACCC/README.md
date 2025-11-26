@@ -13,7 +13,7 @@ This directory contains scripts to preprocess the SPACCC dataset, including term
 To run the complete preprocessing pipeline, execute the `run.sh` script from the root of the repository:
 
 ```bash
-bash scripts/3c_preprocess_SPACCC/run.sh
+bash scripts/1b_preprocess_SPACCC/run.sh
 ```
 
 This will:
