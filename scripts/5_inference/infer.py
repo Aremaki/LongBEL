@@ -175,14 +175,17 @@ def main(
     # Load data
     with_group_extension = "_with_group" if with_group else ""
     data_folder = Path("data/final_data")
+    human_dataset_name = "SPACCC" if "SPACCC" in dataset_name else dataset_name
 
     test_source_data = load_pickle(
         data_folder
-        / dataset_name
+        / human_dataset_name
         / f"{split_name}_{selection_method}_source{with_group_extension}.pkl"
     )
     test_data = pl.read_csv(
-        data_folder / dataset_name / f"{split_name}_{selection_method}_annotations.tsv",
+        data_folder
+        / human_dataset_name
+        / f"{split_name}_{selection_method}_annotations.tsv",
         separator="\t",
         has_header=True,
         schema_overrides={"code": str},  # type: ignore
@@ -193,6 +196,8 @@ def main(
         dataset_short = "MM"
     elif dataset_name in ["EMEA", "MEDLINE"]:
         dataset_short = "QUAERO"
+    elif "SPACCC" in dataset_name:
+        dataset_short = "SPACCC"
     else:
         dataset_short = dataset_name
     umls_path = (
@@ -277,11 +282,24 @@ def main(
     )
     no_constraint_df = add_cui_column(no_constraint_df, umls_df=umls_df)
 
-    # Compute recall
-    true = no_constraint_df.filter(pl.col("code") == pl.col("Predicted_CUI")).shape[0]
-    total = no_constraint_df.shape[0]
-    recall = true / total if total > 0 else 0.0
-    print(f"No Constraint Inference Recall: {recall:.4f} ({true}/{total})")
+    # Compute recall per label
+    for label in no_constraint_df["label"].unique().to_list():
+        label_df = no_constraint_df.filter(pl.col("label") == label)
+        true_label = label_df.filter(pl.col("code") == pl.col("Predicted_CUI")).shape[0]
+        total_label = label_df.shape[0]
+        recall_label = true_label / total_label if total_label > 0 else 0.0
+        print(
+            f"Label: {label} - No Constraint Inference Recall: {recall_label:.4f} ({true_label}/{total_label})"
+        )
+    # Compute recall overall
+    true_overall = no_constraint_df.filter(
+        pl.col("code") == pl.col("Predicted_CUI")
+    ).shape[0]
+    total_overall = no_constraint_df.shape[0]
+    recall_overall = true_overall / total_overall if total_overall > 0 else 0.0
+    print(
+        f"Overall - No Constraint Inference Recall: {recall_overall:.4f} ({true_overall}/{total_overall})"
+    )
     print(f"Generated {len(no_constraint_df)} sentences without constraint.")
 
     # Save results
@@ -327,11 +345,24 @@ def main(
     )
     constraint_df = add_cui_column(constraint_df, umls_df=umls_df)
 
-    # Compute recall
-    true = constraint_df.filter(pl.col("code") == pl.col("Predicted_CUI")).shape[0]
-    total = constraint_df.shape[0]
-    recall = true / total if total > 0 else 0.0
-    print(f"Constraint Inference Recall: {recall:.4f} ({true}/{total})")
+    # Compute recall per label
+    for label in constraint_df["label"].unique().to_list():
+        label_df = constraint_df.filter(pl.col("label") == label)
+        true_label = label_df.filter(pl.col("code") == pl.col("Predicted_CUI")).shape[0]
+        total_label = label_df.shape[0]
+        recall_label = true_label / total_label if total_label > 0 else 0.0
+        print(
+            f"Label: {label} - Constraint Inference Recall: {recall_label:.4f} ({true_label}/{total_label})"
+        )
+    # Compute recall overall
+    true_overall = constraint_df.filter(
+        pl.col("code") == pl.col("Predicted_CUI")
+    ).shape[0]
+    total_overall = constraint_df.shape[0]
+    recall_overall = true_overall / total_overall if total_overall > 0 else 0.0
+    print(
+        f"Overall - Constraint Inference Recall: {recall_overall:.4f} ({true_overall}/{total_overall})"
+    )
     print(f"Generated {len(constraint_df)} sentences with constraint.")
 
     # Save results

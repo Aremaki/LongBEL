@@ -132,7 +132,7 @@ def parse_text(
     cat_to_group,
     sem_to_group,
     transition_verb,
-    corrected_cui=None,
+    corrected_code=None,
     selection_method: str = "levenshtein",
     encoder: Optional[TextEncoder] = None,
     tfidf_vectorizer=None,
@@ -147,7 +147,6 @@ def parse_text(
         if available (or the normalized id otherwise).
     """
     source_sentences: list[str] = []
-    source_with_group_sentences: list[str] = []
     target_sentences: list[str] = []
     tsv_lines: list[dict[str, str]] = []
 
@@ -206,8 +205,8 @@ def parse_text(
                 annotations = []
                 group_annotations = []
                 for i, normalized_id in enumerate(normalized_ids):
-                    if corrected_cui and normalized_id in corrected_cui:
-                        normalized_id = corrected_cui[normalized_id]
+                    if corrected_code and normalized_id in corrected_code:
+                        normalized_id = corrected_code[normalized_id]
                         normalized_ids[i] = normalized_id
                         logging.info(
                             f"Corrected CUI {entity['normalized'][0]['db_id']} -> {normalized_id} for entity '{entity_text}'"
@@ -353,34 +352,26 @@ def parse_text(
             # Sort spans in reverse to mark from the end, preventing offset shifts
             all_spans_in_sent.sort(key=lambda x: x[0], reverse=True)
 
-            marked_with_group_text = marked_sent_text
             for i, (start_in_sent, end_in_sent) in enumerate(all_spans_in_sent):
                 if i == 0:
-                    marked_with_group_text = (
-                        marked_with_group_text[:start_in_sent]
+                    marked_sent_text = (
+                        marked_sent_text[:start_in_sent]
                         + start_entity
-                        + marked_with_group_text[start_in_sent:end_in_sent]
+                        + marked_sent_text[start_in_sent:end_in_sent]
                         + end_entity
                         + start_group
                         + group_annotation
                         + end_group
-                        + marked_with_group_text[end_in_sent:]
+                        + marked_sent_text[end_in_sent:]
                     )
                 else:
-                    marked_with_group_text = (
-                        marked_with_group_text[:start_in_sent]
+                    marked_sent_text = (
+                        marked_sent_text[:start_in_sent]
                         + start_entity
-                        + marked_with_group_text[start_in_sent:end_in_sent]
+                        + marked_sent_text[start_in_sent:end_in_sent]
                         + end_entity
-                        + marked_with_group_text[end_in_sent:]
+                        + marked_sent_text[end_in_sent:]
                     )
-                marked_sent_text = (
-                    marked_sent_text[:start_in_sent]
-                    + start_entity
-                    + marked_sent_text[start_in_sent:end_in_sent]
-                    + end_entity
-                    + marked_sent_text[end_in_sent:]
-                )
 
             # Emit the pair
             tsv_line = {
@@ -395,13 +386,10 @@ def parse_text(
                 "sentence": marked_sent_text,
             }
             tsv_lines.append(tsv_line)
-            marked_sent_text += f"<SEP>{entity_text} {transition_verb}"
-            marked_with_group_text += f"<SEP>{entity_text} {transition_verb}"
             source_sentences.append(marked_sent_text)
-            source_with_group_sentences.append(marked_with_group_text)
-            target_sentences.append(annotation)
+            target_sentences.append(f"[{entity_text}] {transition_verb} {annotation}")
 
-    return source_sentences, source_with_group_sentences, target_sentences, tsv_lines
+    return source_sentences, target_sentences, tsv_lines
 
 
 def process_bigbio_dataset(
@@ -416,7 +404,7 @@ def process_bigbio_dataset(
     semantic_info: pl.DataFrame,
     encoder_name=None,
     tfidf_vectorizer_path: Optional[Path] = None,
-    corrected_cui=None,
+    corrected_code=None,
     language: str = "english",
     selection_method: str = "levenshtein",
     best_syn_map: Optional[dict[tuple[str, str], str]] = None,
@@ -455,7 +443,6 @@ def process_bigbio_dataset(
         nlp = nltk.data.load("tokenizers/punkt/english.pickle")
     target_data = []
     source_data = []
-    source_with_group_data = []
     tsv_data = []
     if selection_method == "embedding" and encoder_name and best_syn_map is None:
         encoder = TextEncoder(model_name=encoder_name)
@@ -477,7 +464,7 @@ def process_bigbio_dataset(
         tfidf_vectorizer = None
 
     for page in tqdm(bigbio_dataset, total=len(bigbio_dataset)):
-        source_texts, source_with_group_texts, target_texts, tsv_lines = parse_text(
+        source_texts, target_texts, tsv_lines = parse_text(
             page,
             start_entity,
             end_entity,
@@ -490,7 +477,7 @@ def process_bigbio_dataset(
             cat_to_group,
             sem_to_group,
             transition_verb,
-            corrected_cui,
+            corrected_code,
             selection_method,
             encoder,
             tfidf_vectorizer,
@@ -500,10 +487,9 @@ def process_bigbio_dataset(
         # Each entity yields one pair; extend the global lists accordingly.
         target_data.extend(target_texts)
         source_data.extend(source_texts)
-        source_with_group_data.extend(source_with_group_texts)
         tsv_data.extend(tsv_lines)
 
-    return source_data, source_with_group_data, target_data, tsv_data
+    return source_data, target_data, tsv_data
 
 
 def compute_best_synonym_df(
@@ -511,7 +497,7 @@ def compute_best_synonym_df(
     CUI_to_Syn: dict[str, Iterable[str]],
     encoder_name: str = "encoder/coder-all",
     batch_size: int = 4096,
-    corrected_cui: Optional[dict[str, str]] = None,
+    corrected_code: Optional[dict[str, str]] = None,
 ) -> "pl.DataFrame":
     """Precompute best synonyms per unique (CUI, entity) using batched embeddings.
 
@@ -530,8 +516,8 @@ def compute_best_synonym_df(
             if not ent.get("normalized"):
                 continue
             cui = ent["normalized"][0]["db_id"]
-            if corrected_cui and cui in corrected_cui:
-                cui = corrected_cui[cui]
+            if corrected_code and cui in corrected_code:
+                cui = corrected_code[cui]
             mention = clean_natural(" ".join(ent["text"]))
             unique_pairs.add((cui, mention))
             present_cuis.add(cui)

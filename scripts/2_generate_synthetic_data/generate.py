@@ -49,8 +49,8 @@ def load_model_and_tokenizer(model_path):
     model.eval()
     # Align generation config with tokenizer defaults
     try:
-        model.generation_config.pad_token_id = tokenizer.pad_token_id
-        model.generation_config.eos_token_id = tokenizer.eos_token_id
+        model.generation_config.pad_token_id = tokenizer.pad_token_id  # type: ignore
+        model.generation_config.eos_token_id = tokenizer.eos_token_id  # type: ignore
     except Exception:
         pass
     return model, tokenizer
@@ -93,7 +93,7 @@ def generate_batches(
 ):
     if lang == "fr":
         template_answer = "exemple : "
-        template_example = "# Exemples de Style de Notes Cliniques"
+        template_example = "# Exemples de phrases"
     elif lang == "es":
         template_answer = "ejemplo: "
         template_example = "# Ejemplos de Estilo de Notas Clínicas"
@@ -105,7 +105,11 @@ def generate_batches(
     system_prompt_before, system_prompt_after = system_prompt.split(
         template_example, maxsplit=1
     )
-    system_prompt_before = system_prompt_before.strip() + "\n" + template_example + "\n"
+    system_prompt_before = (
+        system_prompt_before.strip() + "\n\n" + template_example + "\n"
+    )
+    system_prompt_after = "\n\n" + system_prompt_after.strip()
+
     train_examples = user_prompts_df["train_example"].to_list()
     user_prompts = user_prompts_df["user_prompt"].to_list()
     cui_codes = user_prompts_df["CUI"].to_list()

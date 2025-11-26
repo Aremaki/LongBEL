@@ -18,7 +18,7 @@ bash scripts/3c_preprocess_SPACCC/run.sh
 
 This will:
 1.  Generate a disambiguated terminology file (`all_disambiguated.parquet`) in `data/UMLS_processed/SPACCC/`.
-2.  Generate a CUI correction map (`SPACCC_adapted.csv`) in `data/corrected_cui/`.
+2.  Generate a CUI correction map (`SPACCC_adapted.csv`) in `data/corrected_code/`.
 3.  Generate model-specific data files (e.g., `train_tfidf_source.pkl`, `test_tfidf_target.pkl`) in `data/final_data/SPACCC/`.
 
 Make sure the required input files are in place as specified in the scripts, primarily within `data/SPACCC/`.

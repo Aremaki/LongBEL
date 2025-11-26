@@ -80,7 +80,7 @@ def _load_spaccc_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dat
         annotations_df = annotations_df.rename(
             dict(zip(annotations_df.columns, expected_cols))
         )
-    except pl.ShapeError:
+    except pl.ShapeError:  # type: ignore
         # Handle empty file
         logging.warning(f"Warning: Annotation file {annotation_file} is empty.")
         return Dataset.from_dict({
@@ -158,7 +158,7 @@ def _process_synth_dataset(
     end_group: str,
     out_root: Path,
     synth_data_dir: Path,
-    corrected_cui_path: Path,
+    corrected_code_path: Path,
 ):
     """Process a synthetic dataset already in BigBio format."""
     logging.info(f"→ Loading synthetic dataset {name} ...")
@@ -168,14 +168,14 @@ def _process_synth_dataset(
     language = "spanish"
     selection_method = "tfidf"
 
-    corrected_cui = None
+    corrected_code = None
 
     logging.info(f"Processing dataset {name} ...")
     dataset = _load_json_if_exists(synth_data_dir)
     if dataset is None:
         logging.error(f"Error loading dataset from {synth_data_dir}: File not found.")
         return
-    src, src_with_group, tgt, _ = process_bigbio_dataset(
+    src, tgt, _ = process_bigbio_dataset(
         dataset,
         start_entity,
         end_entity,
@@ -186,7 +186,7 @@ def _process_synth_dataset(
         CUI_to_GROUP=cui_to_groups,
         semantic_info=semantic_info,
         tfidf_vectorizer_path=tfidf_vectorizer_path,
-        corrected_cui=corrected_cui,
+        corrected_code=corrected_code,
         language=language,
         selection_method=selection_method,
         best_syn_map=None,  # Not used for tfidf
@@ -198,10 +198,6 @@ def _process_synth_dataset(
     _dump(
         src,
         data_folder / f"train_{selection_method}_source.pkl",
-    )
-    _dump(
-        src_with_group,
-        data_folder / f"train_{selection_method}_source_with_group.pkl",
     )
     _dump(
         tgt,
@@ -222,7 +218,7 @@ def _process_spaccc_dataset(
     end_group: str,
     out_root: Path,
     spaccc_data_dir: Path,
-    corrected_cui_path: Path,
+    corrected_code_path: Path,
 ):
     logging.info(f"→ Loading dataset {name} ...")
     data_folder = out_root / name
@@ -230,12 +226,12 @@ def _process_spaccc_dataset(
 
     language = "spanish"
 
-    corrected_cui = None
-    if corrected_cui_path.exists():
-        logging.info(f"  • Using corrected CUI mapping from {corrected_cui_path}...")
-        corrected_cui = {
+    corrected_code = None
+    if corrected_code_path.exists():
+        logging.info(f"  • Using corrected CUI mapping from {corrected_code_path}...")
+        corrected_code = {
             str(row[0]): str(row[1])
-            for row in pl.read_csv(corrected_cui_path).iter_rows()
+            for row in pl.read_csv(corrected_code_path).iter_rows()
         }
 
     logging.info(f"Processing dataset {name} ...")
@@ -270,7 +266,7 @@ def _process_spaccc_dataset(
             logging.info(f"  • Skipping empty split: {split_name}")
             continue
         logging.info(f"  • Processing split: {split_name}")
-        src, src_with_group, tgt, tsv_data = process_bigbio_dataset(
+        src, tgt, tsv_data = process_bigbio_dataset(
             split_data,
             start_entity,
             end_entity,
@@ -281,25 +277,21 @@ def _process_spaccc_dataset(
             CUI_to_GROUP=cui_to_groups,
             semantic_info=semantic_info,
             tfidf_vectorizer_path=tfidf_vectorizer_path,
-            corrected_cui=corrected_cui,
+            corrected_code=corrected_code,
             language=language,
             selection_method="tfidf",
             best_syn_map=None,  # Not used for tfidf
             ner_mode="ner" in split_name,
         )
-        processed[split_name] = (src, src_with_group, tgt, tsv_data)
+        processed[split_name] = (src, tgt, tsv_data)
 
     # Write outputs
     selection_method = "tfidf"
-    for split_name, (src, src_with_group, tgt, tsv_data) in processed.items():
+    for split_name, (src, tgt, tsv_data) in processed.items():
         logging.info(f"  • Writing output for split: {split_name}")
         _dump(
             src,
             data_folder / f"{split_name}_{selection_method}_source.pkl",
-        )
-        _dump(
-            src_with_group,
-            data_folder / f"{split_name}_{selection_method}_source_with_group.pkl",
         )
         _dump(
             tgt,
@@ -336,8 +328,8 @@ def run(
     spaccc_data_dir: Path = typer.Option(
         Path("data/SPACCC/Normalization"), help="SPACCC data directory"
     ),
-    corrected_cui_path: Path = typer.Option(
-        Path("data/corrected_cui/SPACCC_adapted.csv"),
+    corrected_code_path: Path = typer.Option(
+        Path("data/corrected_code/SPACCC_adapted.csv"),
         help="Corrected CUI mapping file",
     ),
     synth_spaccc_data_dir: Path = typer.Option(
@@ -389,7 +381,7 @@ def run(
         end_group,
         out_root,
         spaccc_data_dir,
-        corrected_cui_path,
+        corrected_code_path,
     )
 
     if synth_spaccc_data_dir.exists():
@@ -406,7 +398,7 @@ def run(
             end_group,
             out_root,
             synth_spaccc_data_dir,
-            corrected_cui_path,
+            corrected_code_path,
         )
 
     if synth_spaccc_umls_def_data_dir.exists():
@@ -423,7 +415,7 @@ def run(
             end_group,
             out_root,
             synth_spaccc_umls_def_data_dir,
-            corrected_cui_path,
+            corrected_code_path,
         )
 
     if synth_spaccc_umls_no_def_data_dir.exists():
@@ -440,7 +432,7 @@ def run(
             end_group,
             out_root,
             synth_spaccc_umls_no_def_data_dir,
-            corrected_cui_path,
+            corrected_code_path,
         )
 
     logging.info("✅ Preprocessing complete.")

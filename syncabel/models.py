@@ -137,6 +137,7 @@ class _GENREHubInterface:
         num_beams: int = 5,
         text_to_id: dict[str, str] = None,  # type: ignore
         marginalize: bool = False,
+        prefix_templates: list[str] = None,  # type: ignore
         **kwargs,
     ) -> list[dict[str, str]]:
         input_args = {
@@ -146,6 +147,22 @@ class _GENREHubInterface:
             ).items()
         }
 
+        # ---------------------------------------
+        # Encode and batch decoder prefixes
+        # ---------------------------------------
+        decoder_input_ids = None
+        if prefix_templates is not None:
+            # encode prefixes
+            prefix_enc = self.tokenizer.batch_encode_plus(  # type: ignore
+                prefix_templates,
+                padding="longest",  # batch pad
+                truncation=True,
+                add_special_tokens=False,  # IMPORTANT for prefixes
+                return_tensors="pt",
+            )
+
+            decoder_input_ids = prefix_enc["input_ids"].to(self.device)  # type: ignore
+
         outputs = self.generate(  # type: ignore
             **input_args,
             min_length=0,
@@ -154,6 +171,7 @@ class _GENREHubInterface:
             num_return_sequences=num_beams,
             output_scores=True,
             return_dict_in_generate=True,
+            decoder_input_ids=decoder_input_ids,
             **kwargs,
         )
         decoded_sequences = self.tokenizer.batch_decode(  # type: ignore

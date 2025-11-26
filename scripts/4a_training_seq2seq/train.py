@@ -2,13 +2,11 @@ import argparse
 import glob
 import pickle
 import shutil
-import time
 from functools import partial
 from pathlib import Path
 
 import idr_torch  # type: ignore
 import numpy as np
-import pynvml
 import torch.distributed as dist
 from datasets import Dataset, concatenate_datasets, interleave_datasets
 from transformers import (
@@ -17,7 +15,6 @@ from transformers import (
     DataCollatorForSeq2Seq,  # type: ignore
     Seq2SeqTrainer,  # type: ignore
     Seq2SeqTrainingArguments,  # type: ignore
-    TrainerCallback,  # type: ignore
 )
 
 
@@ -26,59 +23,18 @@ def load_pickle(file_path):
         return pickle.load(file)
 
 
-# Custom Callback for GPU and performance metrics
-class GpuUsageCallback(TrainerCallback):
-    def __init__(self):
-        super().__init__()
-        try:
-            pynvml.nvmlInit()
-            self.device_count = pynvml.nvmlDeviceGetCount()
-        except pynvml.NVMLError:
-            self.device_count = 0
-        self.log_history = {}
-
-    def on_log(self, args, state, control, logs=None, **kwargs):
-        if logs is None:
-            logs = {}
-
-        # Log GPU utilization
-        if self.device_count > 0:
-            for i in range(self.device_count):
-                handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-                utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
-                logs[f"gpu_{i}_utilization_percent"] = utilization.gpu
-
-        # Calculate and log samples per second
-        if "loss" in logs and "learning_rate" in logs:  # Training step
-            current_time = time.time()
-            if "time" in self.log_history and "step" in self.log_history:
-                delta_time = current_time - self.log_history["time"]
-                delta_steps = state.global_step - self.log_history["step"]
-                if delta_time > 0 and delta_steps > 0:
-                    samples_processed = (
-                        delta_steps
-                        * args.per_device_train_batch_size
-                        * args.gradient_accumulation_steps
-                        * args.world_size
-                    )
-                    logs["samples_per_second"] = samples_processed / delta_time
-
-            self.log_history["time"] = current_time
-            self.log_history["step"] = state.global_step
-
-    def on_train_end(self, args, state, control, **kwargs):
-        if self.device_count > 0:
-            pynvml.nvmlShutdown()
-
-
 # Preprocess function for tokenization
-def preprocess_function(examples, tokenizer):
+def preprocess_function(
+    examples, tokenizer, dataset_name=None, decoder_start_token_id=None
+):
     """
     Tokenizes the source and target texts for seq2seq training.
 
     Args:
         examples (dict): Dictionary with 'source' and 'target' keys.
         tokenizer (PreTrainedTokenizer): Tokenizer instance.
+        dataset_name (str): Name of the dataset to determine the verb.
+        decoder_start_token_id (int): The start token id for the decoder.
 
     Returns:
         dict: Encoded inputs with labels (labels = target ids, padded and masked with -100).
@@ -89,9 +45,50 @@ def preprocess_function(examples, tokenizer):
     )
 
     # Encode targets
-    labels = tokenizer(
+    target_encodings = tokenizer(
         text_target=examples["target"],
-    )["input_ids"]
+        return_offsets_mapping=True,
+    )
+    labels = target_encodings["input_ids"]
+    offset_mappings = target_encodings["offset_mapping"]
+
+    # Determine verb based on dataset
+    verb = "est"
+    if dataset_name == "MedMentions":
+        verb = "is"
+    elif dataset_name and "SPACCC" in dataset_name:
+        verb = "es"
+
+    new_labels = []
+    decoder_input_ids_list = []
+
+    for i, label in enumerate(labels):
+        # Create decoder_input_ids if start token is provided
+        if decoder_start_token_id is not None:
+            # Shift right: [start] + label[:-1]
+            dec_input = [decoder_start_token_id] + label[:-1]
+            decoder_input_ids_list.append(dec_input)
+
+        # Masking logic
+        text = examples["target"][i]
+        offsets = offset_mappings[i]
+        split_marker = f"] {verb} "
+        split_index = text.find(split_marker)
+
+        new_label = []
+        if split_index != -1:
+            prefix_end = split_index + len(split_marker)
+            for token_id, (_, end) in zip(label, offsets):
+                # Mask if token ends before or at prefix_end
+                if end <= prefix_end:
+                    new_label.append(-100)
+                else:
+                    new_label.append(token_id)
+        else:
+            new_label = label
+        new_labels.append(new_label)
+
+    labels = new_labels
 
     # Replace padding token id's in labels with -100
     labels = [
@@ -99,6 +96,8 @@ def preprocess_function(examples, tokenizer):
         for label in labels
     ]
     model_inputs["labels"] = labels
+    if decoder_input_ids_list:
+        model_inputs["decoder_input_ids"] = decoder_input_ids_list
 
     # --- Debug: print max tokenized length for this batch ---
     source_lengths = [len(ids) for ids in model_inputs["input_ids"]]
@@ -157,7 +156,6 @@ def main(
     lr: float,
     dataset_name: str,
     augmented_data: str,
-    with_group: bool = False,
     selection_method: str = "embedding",
 ):
     # Initialize Distributed Training if available
@@ -191,7 +189,7 @@ def main(
             local_dir = (
                 Path("models")
                 / "NED"
-                / f"{dataset_name}_synth_only_{selection_method}{'_with_group' if with_group else ''}"
+                / f"{dataset_name}_synth_only_{selection_method}"
                 / model_short_name
                 / "model_last"
             )
@@ -230,19 +228,15 @@ def main(
         elif dataset_name == "SPACCC":
             tokenizer.src_lang = "es_XX"
             tokenizer.tgt_lang = "es_XX"
-        elif dataset_name == "SPACCC_UMLS":
-            tokenizer.src_lang = "es_XX"
-            tokenizer.tgt_lang = "es_XX"
         else:
             tokenizer.src_lang = "fr_XX"
             tokenizer.tgt_lang = "fr_XX"
     # Load and preprocess data
-    with_group_extension = "_with_group" if with_group else ""
     data_folder = Path("data/final_data")
+    human_dataset_name = "SPACCC" if "SPACCC" in dataset_name else dataset_name
+
     validation_source_path = (
-        data_folder
-        / dataset_name
-        / f"validation_{selection_method}_source{with_group_extension}.pkl"
+        data_folder / human_dataset_name / f"validation_{selection_method}_source.pkl"
     )
     if validation_source_path.exists():
         split_name = "validation"
@@ -251,12 +245,10 @@ def main(
         print("Validation file not found, using test file instead.")
 
     validation_source_data = load_pickle(
-        data_folder
-        / dataset_name
-        / f"{split_name}_{selection_method}_source{with_group_extension}.pkl"
+        data_folder / human_dataset_name / f"{split_name}_{selection_method}_source.pkl"
     )
     validation_target_data = load_pickle(
-        data_folder / dataset_name / f"{split_name}_{selection_method}_target.pkl"
+        data_folder / human_dataset_name / f"{split_name}_{selection_method}_target.pkl"
     )
 
     validation_data = {
@@ -273,11 +265,8 @@ def main(
     validation_dataset = dev_dataset.select(split_val)
 
     if augmented_data in ["human_only", "full", "human_only_ft", "full_upsampled"]:
-        human_dataset_name = "SPACCC" if "SPACCC" in dataset_name else dataset_name
         human_train_source_data = load_pickle(
-            data_folder
-            / human_dataset_name
-            / f"train_{selection_method}_source{with_group_extension}.pkl"
+            data_folder / human_dataset_name / f"train_{selection_method}_source.pkl"
         )
         human_train_target_data = load_pickle(
             data_folder / human_dataset_name / f"train_{selection_method}_target.pkl"
@@ -298,64 +287,37 @@ def main(
     if augmented_data in ["synth_only", "full", "full_upsampled"]:
         if dataset_name == "MedMentions":
             synth_train_source_data = load_pickle(
-                data_folder
-                / "SynthMM"
-                / f"train_{selection_method}_source{with_group_extension}.pkl"
+                data_folder / "SynthMM" / f"train_{selection_method}_source.pkl"
             )
             synth_train_target_data = load_pickle(
                 data_folder / "SynthMM" / f"train_{selection_method}_target.pkl"
             )
         elif dataset_name == "QUAERO":
             synth_train_source_data = load_pickle(
-                data_folder
-                / "SynthQUAERO"
-                / f"train_{selection_method}_source{with_group_extension}.pkl"
+                data_folder / "SynthQUAERO" / f"train_{selection_method}_source.pkl"
             )
             synth_train_target_data = load_pickle(
                 data_folder / "SynthQUAERO" / f"train_{selection_method}_target.pkl"
             )
-        elif dataset_name == "SPACCC":
-            synth_train_source_data = load_pickle(
-                data_folder
-                / "SynthSPACCC"
-                / f"train_{selection_method}_source{with_group_extension}.pkl"
-            )
-            synth_train_target_data = load_pickle(
-                data_folder / "SynthSPACCC" / f"train_{selection_method}_target.pkl"
-            )
-        else:  # SPACCC_UMLS
+        else:  # SPACCC
             source_no_def = load_pickle(
                 data_folder
-                / "SynthSPACCC_UMLS_No_Def"
-                / f"train_{selection_method}_source{with_group_extension}.pkl"
+                / "SynthSPACCC_No_Def"
+                / f"train_{selection_method}_source.pkl"
             )
             source_def = load_pickle(
-                data_folder
-                / "SynthSPACCC_UMLS_Def"
-                / f"train_{selection_method}_source{with_group_extension}.pkl"
+                data_folder / "SynthSPACCC_Def" / f"train_{selection_method}_source.pkl"
             )
             synth_train_source_data = [*source_no_def, *source_def]
             target_no_def = load_pickle(
                 data_folder
-                / "SynthSPACCC_UMLS_No_Def"
+                / "SynthSPACCC_No_Def"
                 / f"train_{selection_method}_target.pkl"
             )
             target_def = load_pickle(
-                data_folder
-                / "SynthSPACCC_UMLS_Def"
-                / f"train_{selection_method}_target.pkl"
+                data_folder / "SynthSPACCC_Def" / f"train_{selection_method}_target.pkl"
             )
             synth_train_target_data = [*target_no_def, *target_def]
-            synth_def = {
-                "source": source_def,
-                "target": target_def,
-            }
-            synth_no_def = {
-                "source": source_no_def,
-                "target": target_no_def,
-            }
-            synth_def_dataset = Dataset.from_dict(synth_def)
-            synth_no_def_dataset = Dataset.from_dict(synth_no_def)
         synth_train_data = {
             "source": synth_train_source_data,
             "target": synth_train_target_data,
@@ -379,18 +341,11 @@ def main(
                 synth_train_dataset,  # type: ignore
             ])
         else:  # full_upsampled
-            if dataset_name == "SPACCC_UMLS":
-                train_dataset = interleave_datasets(
-                    [human_train_dataset, synth_def_dataset, synth_no_def_dataset],  # type: ignore
-                    stopping_strategy="all_exhausted",
-                    seed=42,
-                )
-            else:
-                train_dataset = interleave_datasets(
-                    [human_train_dataset, synth_train_dataset],  # type: ignore
-                    stopping_strategy="all_exhausted",
-                    seed=42,
-                )
+            train_dataset = interleave_datasets(
+                [human_train_dataset, synth_train_dataset],  # type: ignore
+                stopping_strategy="all_exhausted",
+                seed=42,
+            )
     else:
         save_strategy = "epoch"
         save_steps = 0  # Not used when strategy is epoch
@@ -405,14 +360,36 @@ def main(
             num_train_epochs = 70
             lr = lr / 3
 
+    # Determine decoder_start_token_id
+    if "mbart" in model_short_name:
+        decoder_start_token_id = tokenizer.lang_code_to_id[tokenizer.tgt_lang]
+    else:
+        decoder_start_token_id = model.config.decoder_start_token_id
+
+    if decoder_start_token_id is None:
+        print(
+            "Warning: decoder_start_token_id is None. Using pad_token_id as fallback."
+        )
+        decoder_start_token_id = tokenizer.pad_token_id
+
     tokenized_datasets = {
         "train": train_dataset.map(
-            lambda x: preprocess_function(x, tokenizer),
+            lambda x: preprocess_function(
+                x,
+                tokenizer,
+                dataset_name=dataset_name,
+                decoder_start_token_id=decoder_start_token_id,
+            ),
             batched=True,
             remove_columns=["source", "target"],
         ),
         "validation": validation_dataset.map(
-            lambda x: preprocess_function(x, tokenizer),
+            lambda x: preprocess_function(
+                x,
+                tokenizer,
+                dataset_name=dataset_name,
+                decoder_start_token_id=decoder_start_token_id,
+            ),
             batched=True,
             remove_columns=["source", "target"],
         ),
@@ -433,12 +410,12 @@ def main(
     output_dir = (
         Path("models")
         / "NED"
-        / f"{dataset_name}_{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}"
         / model_short_name
     )
     logging_dir = (
         Path("logs")
-        / f"{dataset_name}_{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}"
         / model_short_name
     )
 
@@ -489,7 +466,6 @@ def main(
             compute_metrics,
             tokenizer=tokenizer,
         ),
-        callbacks=[GpuUsageCallback()],
     )
 
     resume_from_checkpoint = len(glob.glob(rf"{output_dir}/checkpoint-*")) > 0
@@ -538,11 +514,6 @@ if __name__ == "__main__":
         help="Whether to use augmented data for training",
     )
     parser.add_argument(
-        "--with-group",
-        action="store_true",
-        help="Whether to use data with group annotations for training",
-    )
-    parser.add_argument(
         "--selection-method",
         type=str,
         default="embedding",
@@ -559,6 +530,5 @@ if __name__ == "__main__":
         args.lr,
         args.dataset_name,
         args.augmented_data,
-        args.with_group,
         args.selection_method,
     )

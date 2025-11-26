@@ -15,11 +15,12 @@ def main(datasets: list[str]):
     model_name = "mbart-large-50"
     relextractor = RelExtractor()
     for dataset in tqdm(datasets, desc="Evaluation"):
+        train_dataset = "SPACCC" if dataset in ["SPACCC", "SPACCC_UMLS"] else dataset
         # Load train data for seen/unseen evaluation
         train_path = (
             Path("data")
             / "final_data"
-            / dataset
+            / train_dataset
             / f"train_{selection_method}_annotations.tsv"
         )
         train_df = pl.read_csv(
@@ -70,62 +71,61 @@ def main(datasets: list[str]):
                     top_100_mentions=top_100_mentions,
                     unique_pairs=unique_pairs,
                 )
+                aug_label = (
+                    "normal" if aug_data in ["original", "human_only"] else "augmented"
+                )
                 for label in scores.keys():
                     if label not in all_ratios:
-                        all_ratios[label] = {"index": scores[label]["index"]}
+                        all_ratios[label] = {}
+                    if dataset not in all_ratios[label]:
+                        all_ratios[label][dataset] = {"index": scores[label]["index"]}
                     if label not in all_scores:
-                        all_scores[label] = {
+                        all_scores[label] = {}
+                    if f"{dataset}_{aug_label}" not in all_scores[label]:
+                        all_scores[label][f"{dataset}_{aug_label}"] = {
                             "constraint": {"index": scores[label]["index"]},
                             "no_constraint": {"index": scores[label]["index"]},
                         }
-                    all_scores[label][
+                    all_scores[label][f"{dataset}_{aug_label}"][
                         "no_constraint" if not constraint else "constraint"
-                    ][f"recall_strict_{dataset}_{aug_data}"] = scores[label][
-                        "recall_strict"
-                    ]
-                    all_scores[label][
+                    ]["recall_strict"] = scores[label]["recall_strict"]
+                    all_scores[label][f"{dataset}_{aug_label}"][
                         "no_constraint" if not constraint else "constraint"
-                    ][f"recall_exact_{dataset}_{aug_data}"] = scores[label][
-                        "recall_exact"
-                    ]
-                    all_scores[label][
+                    ]["recall_exact"] = scores[label]["recall_exact"]
+                    all_scores[label][f"{dataset}_{aug_label}"][
                         "no_constraint" if not constraint else "constraint"
-                    ][f"recall_narrow_{dataset}_{aug_data}"] = scores[label][
-                        "recall_narrow"
-                    ]
-                    all_scores[label][
+                    ]["recall_narrow"] = scores[label]["recall_narrow"]
+                    all_scores[label][f"{dataset}_{aug_label}"][
                         "no_constraint" if not constraint else "constraint"
-                    ][f"recall_broad_{dataset}_{aug_data}"] = scores[label][
-                        "recall_broad"
-                    ]
-
-                    all_scores[label][
-                        "no_constraint" if not constraint else "constraint"
-                    ][f"recall_exact_{dataset}_{aug_data}"] = scores[label][
-                        "recall_exact"
-                    ]
-                    all_scores[label][
-                        "no_constraint" if not constraint else "constraint"
-                    ][f"recall_narrow_{dataset}_{aug_data}"] = scores[label][
-                        "recall_narrow"
-                    ]
-                    all_scores[label][
-                        "no_constraint" if not constraint else "constraint"
-                    ][f"recall_broad_{dataset}_{aug_data}"] = scores[label][
-                        "recall_broad"
-                    ]
-                    all_ratios[label][f"ratio_{dataset}"] = scores[label]["ratios"]
+                    ]["recall_broad"] = scores[label]["recall_broad"]
+                    all_ratios[label][dataset]["ratios"] = scores[label]["ratios"]
     # Write results
     for label in all_scores.keys():
-        for key in all_scores[label].keys():
-            df_score = pl.DataFrame(all_scores[label][key])
-            score_path = Path("results") / "error_analysis" / label / f"score_{key}.csv"
-            score_path.parent.mkdir(parents=True, exist_ok=True)
-            df_score.write_csv(score_path)
-        df_ratio = pl.DataFrame(all_ratios[label])
-        ratio_path = Path("results") / "error_analysis" / label / "ratio.csv"
-        ratio_path.parent.mkdir(parents=True, exist_ok=True)
-        df_ratio.write_csv(ratio_path)
+        for dataset in datasets:
+            for aug_data in ["normal", "augmented"]:
+                if f"{dataset}_{aug_data}" not in all_scores[label]:
+                    continue
+                for key in all_scores[label][f"{dataset}_{aug_data}"].keys():
+                    df_score = pl.DataFrame(
+                        all_scores[label][f"{dataset}_{aug_data}"][key]
+                    )
+                    score_path = (
+                        Path("results")
+                        / "error_analysis"
+                        / label
+                        / dataset
+                        / f"score_{key}_{aug_data}.csv"
+                    )
+                    score_path.parent.mkdir(parents=True, exist_ok=True)
+                    df_score.write_csv(score_path)
+            if dataset not in all_ratios[label]:
+                continue
+            df_ratio = pl.DataFrame(all_ratios[label][dataset])
+            ratio_path = (
+                Path("results") / "error_analysis" / label / dataset / "ratio.csv"
+            )
+            ratio_path.parent.mkdir(parents=True, exist_ok=True)
+            df_ratio.write_csv(ratio_path)
 
 
 if __name__ == "__main__":

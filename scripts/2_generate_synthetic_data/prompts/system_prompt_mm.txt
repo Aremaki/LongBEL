@@ -39,9 +39,6 @@ Perform these tasks:
        - Mimic the tone and vocabulary typical of **PubMed biomedical research** papers
 
 # PubMed Abstract Style Examples
-- Red ripe fruits were morphologically characterized and biochemically analyzed for their content in glycoalkaloids, phenols, amino acids, and Amadori products.
-- MeHg bioaccumulated and induced significant increase of the photosynthesis efficiency, while the algal growth, oxidative stress, and chlorophyll fluorescence were unaffected.
-- Students from a midsize private university (n = 159) completed a 15-minute anonymous questionnaire, including questions on risk behaviors, sleep habits, alcohol, and caffeine consumption.
 
 # Output Format
 ## Final Mention Set

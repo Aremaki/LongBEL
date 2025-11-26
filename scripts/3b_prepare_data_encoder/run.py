@@ -65,7 +65,7 @@ def _transform_pages(
     umls_info: dict,
     semantic_info: pl.DataFrame,
     cui_to_groups: dict,
-    corrected_cui: Optional[dict[str, str]] = None,
+    corrected_code: Optional[dict[str, str]] = None,
 ) -> list[dict]:
     """Transform a sequence of BigBio-style pages into BLINK-style mention dicts."""
     # Precompute mappings for efficient GROUP lookup
@@ -94,8 +94,8 @@ def _transform_pages(
                 continue
             # Extract CUI
             cui = entity["normalized"][0]["db_id"]  # type: ignore
-            if corrected_cui and cui in corrected_cui:
-                cui = corrected_cui[cui]
+            if corrected_code and cui in corrected_code:
+                cui = corrected_code[cui]
                 logging.info(
                     f"Corrected CUI {entity['normalized'][0]['db_id']} -> {cui} for entity '{' '.join(entity.get('text', []))}'"
                 )
@@ -165,7 +165,7 @@ def process_bigbio_dataset(
     hf_config: str,
     output_path: Path,
     umls_path: Path,
-    corrected_cui: Optional[dict[str, str]] = None,
+    corrected_code: Optional[dict[str, str]] = None,
 ):
     dataset = load_dataset(hf_id, hf_config)
     umls_df = pl.read_parquet(umls_path / "all_disambiguated.parquet")
@@ -184,7 +184,7 @@ def process_bigbio_dataset(
             umls_info,
             semantic_info,
             cui_to_groups,
-            corrected_cui,
+            corrected_code,
         )
         # write all of the transformed mentions
         output_path.mkdir(parents=True, exist_ok=True)
@@ -207,7 +207,7 @@ def create_augmented_dataset(
     umls_path: Path,
     dictionary: list[dict],
     out_root: Path,
-    corrected_cui: Optional[dict[str, str]] = None,
+    corrected_code: Optional[dict[str, str]] = None,
 ):
     """Create an augmented dataset combining original val/test with original+synthetic train."""
     augmented_path = out_root / name
@@ -248,7 +248,7 @@ def create_augmented_dataset(
             umls_info,
             semantic_info,
             cui_to_groups,
-            corrected_cui,
+            corrected_code,
         )
         logging.info(
             f"Processed {len(synthetic_mentions)} synthetic mentions from {synth_json_path.name}"
@@ -329,12 +329,14 @@ def run(
     typer.echo(f"MEDLINE dictionary saved to {medline_path / 'dictionary.pickle'}")
 
     # Optional: corrected CUI mapping for QUAERO (from manual review)
-    corrected_cui = None
+    corrected_code = None
     if "EMEA" in datasets or "MEDLINE" in datasets:
-        corrected_cui_path = Path("data") / "corrected_cui" / "QUAERO_2014_adapted.csv"
-        if corrected_cui_path.exists():
+        corrected_code_path = (
+            Path("data") / "corrected_code" / "QUAERO_2014_adapted.csv"
+        )
+        if corrected_code_path.exists():
             typer.echo("Using corrected CUI mapping...")
-            corrected_cui = dict(pl.read_csv(corrected_cui_path).iter_rows())
+            corrected_code = dict(pl.read_csv(corrected_code_path).iter_rows())
 
     # Process HF datasets
     if "MedMentions" in datasets:
@@ -352,7 +354,7 @@ def run(
             "quaero_emea_bigbio_kb",
             emea_path,
             umls_quaero_path,
-            corrected_cui,
+            corrected_code,
         )
     if "MEDLINE" in datasets:
         typer.echo("→ Processing QUAERO MEDLINE (HF)…")
@@ -361,7 +363,7 @@ def run(
             "quaero_medline_bigbio_kb",
             medline_path,
             umls_quaero_path,
-            corrected_cui,
+            corrected_code,
         )
 
     # Process augmented datasets (original + synthetic)
@@ -384,7 +386,7 @@ def run(
             umls_quaero_path,
             dictionary_quaero,
             out_root,
-            corrected_cui,
+            corrected_code,
         )
     if "SynthQUAERO" in datasets and "MEDLINE" in datasets:
         typer.echo("→ Creating MEDLINE_augmented (MEDLINE + SynthQUAERO)…")
@@ -395,7 +397,7 @@ def run(
             umls_quaero_path,
             dictionary_quaero,
             out_root,
-            corrected_cui,
+            corrected_code,
         )
 
     typer.echo("✅ Encoder data preparation complete.")

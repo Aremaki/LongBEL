@@ -35,6 +35,8 @@ Une liste de mentions (peut inclure des termes techniques ou artificiels)
        - Commencer par `exemple : `.
        - Avoir un **contexte distinct** (ex. mécanismes différents, populations variées, systèmes biologiques spécifiques).
 
+# Exemples de phrases
+
 # Format de la réponse
 ## Mentions finales
 1. Mention 1

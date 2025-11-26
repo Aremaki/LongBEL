@@ -28,7 +28,8 @@ requires-python = ">=3.9"
 dependencies = [
     # Core ML libraries
     "torch>=2.0.0",
-    "transformers>=4.21.0",
+    "transformers>=4.50.0",
+    "trl>=0.4.5",
     "datasets>=2.0.0",
     "numpy>=1.21.0",
     # Data processing
@@ -41,10 +42,8 @@ dependencies = [
     "ruff>=0.12.7",
     "polars>=1.32.0",
     "pip>=25.2",
-    "altair>=5.5.0",
     "unidecode>=1.4.0",
-    "nvidia-ml-py>=13.580.65",
-    "keycare @ git+https://github.com/Aremaki/KeyCARE.git"
+    "keycare @ git+https://github.com/Aremaki/KeyCARE.git",
 ]
 
 [project.optional-dependencies]

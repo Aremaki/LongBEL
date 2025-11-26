@@ -112,14 +112,13 @@ def build_templates(
     # ----------------------------------------
     # 4. Function to pick 5 random examples
     # ----------------------------------------
-    def pick_examples(sent_list: list[str]) -> list[str]:
-        if not sent_list:
-            return []
-        k = min(5, len(sent_list))
+    def pick_examples(sent_list: pl.Series) -> str:
+        if sent_list.is_empty():
+            return ""
+        k = min(5, sent_list.len())
         # Polars-safe random sampling
-        return pl.select(
-            pl.lit(sent_list).list.sample(n=k, with_replacement=False)
-        ).item()
+        samples = sent_list.sample(n=k, with_replacement=False).to_list()
+        return "\n".join(f"- {s}" for s in samples)
 
     # ----------------------------------------
     # 5. Add train_example column
@@ -127,7 +126,7 @@ def build_templates(
     processed_df = processed_df.with_columns(
         train_example=pl.col("sentences").map_elements(
             pick_examples,
-            return_dtype=pl.List(pl.String),
+            return_dtype=str,  # type: ignore
         )
     )
 
@@ -221,12 +220,7 @@ def run(
     spaccc_path: Path = typer.Option(
         None, help="Path to SPACCC concepts parquet (no definitions)"
     ),
-    spaccc_umls_path: Path = typer.Option(
-        None, help="Path to SPACCC_UMLS concepts parquet"
-    ),
-    spaccc_umls_def: Path = typer.Option(
-        None, help="Path to SPACCC_UMLS definitions parquet"
-    ),
+    spaccc_def: Path = typer.Option(None, help="Path to SPACCC definitions parquet"),
     out_mm_def: Path = typer.Option(
         Path("data/synthetic_data/SynthMM/user_prompts_def"),
         help="Output dir for MM prompts with definitions",
@@ -243,16 +237,12 @@ def run(
         Path("data/synthetic_data/SynthQUAERO/user_prompts_no_def"),
         help="Output dir for QUAERO prompts without definitions",
     ),
-    out_spaccc_no_def: Path = typer.Option(
-        Path("data/synthetic_data/SynthSPACCC/user_prompts_no_def"),
-        help="Output dir for SPACCC prompts (no definitions)",
-    ),
-    out_spaccc_umls_def: Path = typer.Option(
-        Path("data/synthetic_data/SynthSPACCC_UMLS/user_prompts_def"),
+    out_spaccc_def: Path = typer.Option(
+        Path("data/synthetic_data/SynthSPACCC/user_prompts_def"),
         help="Output dir for SPACCC prompts (with definitions)",
     ),
-    out_spaccc_umls_no_def: Path = typer.Option(
-        Path("data/synthetic_data/SynthSPACCC_UMLS/user_prompts_no_def"),
+    out_spaccc_no_def: Path = typer.Option(
+        Path("data/synthetic_data/SynthSPACCC/user_prompts_no_def"),
         help="Output dir for SPACCC prompts (no definitions)",
     ),
     shuffle: bool = typer.Option(True, help="Shuffle concepts (sample fraction=1)"),
@@ -262,8 +252,7 @@ def run(
     if not any([
         mm_path and mm_def and mm_train_path,
         quaero_path and quaero_def and medline_train_path and emea_train_path,
-        spaccc_path and spaccc_train_path,
-        spaccc_umls_path and spaccc_umls_def and spaccc_train_path,
+        spaccc_path and spaccc_def and spaccc_train_path,
     ]):
         raise typer.BadParameter(
             "Provide at least one dataset (MM, QUAERO, or SPACCC) with its definition file and training data examples."
@@ -311,44 +300,25 @@ def run(
                 f"QUAERO concepts without definitions written to {out_quaero_no_def}"
             )
 
-    # --- SPACCC dataset (no definitions) ---
-    if spaccc_path and spaccc_train_path:
+    # --- SPACCC dataset ---
+    if spaccc_path and spaccc_train_path and spaccc_def:
         spaccc_train = _load_train(spaccc_train_path)
-        spaccc_df = pl.read_parquet(spaccc_path)
-        if shuffle:
-            spaccc_df = spaccc_df.sample(fraction=1)
-        # Add empty DEF column to maintain compatibility with build_templates
-        spaccc_df = spaccc_df.with_columns(pl.lit(None).alias("DEF"))
-        # Do not include definitions section for SPACCC prompts
-        user_prompt_spaccc = build_templates(
-            spaccc_df, spaccc_train, include_definitions=False
-        )
-        _write_chunks(user_prompt_spaccc, out_spaccc_no_def, chunk_size)
-        typer.echo(f"SPACCC concepts written to {out_spaccc_no_def}")
-
-    # --- SPACCC UMLS dataset ---
-    if spaccc_umls_path and spaccc_train_path and spaccc_umls_def:
-        spaccc_train = _load_train(spaccc_train_path)
-        spaccc_joined = _load_join(spaccc_umls_path, spaccc_umls_def)
+        spaccc_joined = _load_join(spaccc_path, spaccc_def)
         if "DEF" in spaccc_joined.columns:
             spaccc_filtered = spaccc_joined.filter(pl.col("DEF").is_not_null())
             if shuffle:
                 spaccc_filtered = spaccc_filtered.sample(fraction=1)
-            user_prompt_spaccc_umls = build_templates(spaccc_filtered, spaccc_train)
-            _write_chunks(user_prompt_spaccc_umls, out_spaccc_umls_def, chunk_size)
-            typer.echo(f"SPACCC UMLS concepts written to {out_spaccc_umls_def}")
+            user_prompt_spaccc = build_templates(spaccc_filtered, spaccc_train)
+            _write_chunks(user_prompt_spaccc, out_spaccc_def, chunk_size)
+            typer.echo(f"SPACCC concepts written to {out_spaccc_def}")
 
             spaccc_no_def = spaccc_joined.filter(pl.col("DEF").is_null())
             if shuffle:
                 spaccc_no_def = spaccc_no_def.sample(fraction=1)
-            user_prompt_spaccc_umls_no_def = build_templates(
-                spaccc_no_def, spaccc_train
-            )
-            _write_chunks(
-                user_prompt_spaccc_umls_no_def, out_spaccc_umls_no_def, chunk_size
-            )
+            user_prompt_spaccc_no_def = build_templates(spaccc_no_def, spaccc_train)
+            _write_chunks(user_prompt_spaccc_no_def, out_spaccc_no_def, chunk_size)
             typer.echo(
-                f"SPACCC UMLS concepts without definitions written to {out_spaccc_umls_no_def}"
+                f"SPACCC concepts without definitions written to {out_spaccc_no_def}"
             )
 
 

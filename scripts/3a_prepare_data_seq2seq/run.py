@@ -60,7 +60,7 @@ def _compute_or_load_best_syn(
     encoder_name: str,
     cache_path: Path,
     batch_size: int = 4096,
-    corrected_cui: Optional[dict] = None,
+    corrected_code: Optional[dict] = None,
 ):
     """Return best_syn DataFrame and mapping, using a parquet cache if present."""
     if cache_path.exists():
@@ -73,7 +73,7 @@ def _compute_or_load_best_syn(
             CUI_to_Syn=CUI_to_Syn,
             encoder_name=encoder_name,
             batch_size=batch_size,
-            corrected_cui=corrected_cui,
+            corrected_code=corrected_code,
         )
         best_syn_df.write_parquet(cache_path)
     # Use polars DataFrame -> list of dicts
@@ -116,12 +116,14 @@ def _process_hf_dataset(
                 yield from ds[split_key]  # type: ignore
 
     # Optional: corrected CUI mapping for QUAERO (from manual review)
-    corrected_cui = None
+    corrected_code = None
     if name in ("EMEA", "MEDLINE"):
-        corrected_cui_path = Path("data") / "corrected_cui" / "QUAERO_2014_adapted.csv"
-        if corrected_cui_path.exists():
+        corrected_code_path = (
+            Path("data") / "corrected_code" / "QUAERO_2014_adapted.csv"
+        )
+        if corrected_code_path.exists():
             typer.echo("Using corrected CUI mapping...")
-            corrected_cui = dict(pl.read_csv(corrected_cui_path).iter_rows())
+            corrected_code = dict(pl.read_csv(corrected_code_path).iter_rows())
 
     best_syn_map = None
     if selection_method == "embedding":
@@ -131,7 +133,7 @@ def _process_hf_dataset(
             CUI_to_Syn=cui_to_syn,
             encoder_name=encoder_name,
             cache_path=best_syn_path,
-            corrected_cui=corrected_cui,
+            corrected_code=corrected_code,
         )
     typer.echo(f"Processing dataset {name} ...")
     # Build splits dict only for existing keys
@@ -144,7 +146,7 @@ def _process_hf_dataset(
     for split_name, split_data in splits.items():
         if not split_data:
             continue
-        src, src_with_group, tgt, tsv_data = process_bigbio_dataset(
+        src, tgt, tsv_data = process_bigbio_dataset(
             split_data,
             start_entity,
             end_entity,
@@ -156,22 +158,18 @@ def _process_hf_dataset(
             semantic_info=semantic_info,
             encoder_name=encoder_name,
             tfidf_vectorizer_path=tfidf_vectorizer_path,
-            corrected_cui=corrected_cui,
+            corrected_code=corrected_code,
             language=language,
             selection_method=selection_method,
             best_syn_map=best_syn_map,
         )
-        processed[split_name] = (src, src_with_group, tgt, tsv_data)
+        processed[split_name] = (src, tgt, tsv_data)
 
     # Write outputs
-    for split_name, (src, src_with_group, tgt, tsv_data) in processed.items():
+    for split_name, (src, tgt, tsv_data) in processed.items():
         _dump(
             src,
             data_folder / f"{split_name}_{selection_method}_source.pkl",
-        )
-        _dump(
-            src_with_group,
-            data_folder / f"{split_name}_{selection_method}_source_with_group.pkl",
         )
         _dump(
             tgt,
@@ -221,7 +219,7 @@ def _process_synth_dataset(
         )
 
     typer.echo(f"  • Processing synthetic dataset {name} ...")
-    src, src_with_group, tgt, _ = process_bigbio_dataset(
+    src, tgt, _ = process_bigbio_dataset(
         synth_pages,
         start_entity,
         end_entity,
@@ -239,9 +237,6 @@ def _process_synth_dataset(
     )
     # Treat as train split for the synthetic dataset
     _dump(src, data_folder / f"train_{selection_method}_source.pkl")
-    _dump(
-        src_with_group, data_folder / f"train_{selection_method}_source_with_group.pkl"
-    )
     _dump(tgt, data_folder / f"train_{selection_method}_target.pkl")
 
 
