@@ -5,7 +5,7 @@ BASE_OUTPUT_DIR="models/NED"
 MODELS=("meta-llama/Meta-Llama-3-8B-Instruct")
 DATASETS=("SPACCC")
 SELECTION_METHODS=("tfidf")
-AUGMENTED_OPTIONS=("human_only")
+AUGMENTED_OPTIONS=("human_only" "full_upsampled")
 
 for dataset in "${DATASETS[@]}"; do
     for selection in "${SELECTION_METHODS[@]}"; do
