@@ -11,7 +11,7 @@ from tqdm import tqdm
 from transformers import GenerationConfig  # type: ignore
 
 from syncabel.guided_inference import get_prefix_allowed_tokens_fn
-from syncabel.models import MT5_GENRE, Bart_GENRE, MBart_GENRE
+from syncabel.models import MT5_GENRE, Bart_GENRE, Llama_GENRE, MBart_GENRE
 from syncabel.trie import Trie
 
 sys.setrecursionlimit(5000)
@@ -31,19 +31,27 @@ def load_model(
 ):
     if "mt5" in model_name:
         model = MT5_GENRE.from_pretrained(full_path).eval().to(device)  # type: ignore
-        decoder_start_token_id = 0
         model.generation_config = GenerationConfig(
-            decoder_start_token_id=decoder_start_token_id,
+            decoder_start_token_id=0,
             eos_token_id=1,
             forced_eos_token_id=1,
             pad_token_id=0,
         )
+    elif "Llama" in model_name:
+        model = Llama_GENRE.from_pretrained(full_path).eval().to(device)  # type: ignore
+        model.generation_config = GenerationConfig(
+            bos_token_id=model.config.bos_token_id,  # type: ignore
+            decoder_start_token_id=model.config.bos_token_id,  # type: ignore
+            eos_token_id=model.config.eos_token_id,  # type: ignore
+            forced_eos_token_id=model.config.eos_token_id,  # type: ignore
+            pad_token_id=model.config.pad_token_id,  # type: ignore
+        )
+        model.tokenizer.padding_side = "left"  # type: ignore
     elif "mbart" in model_name:
         model = MBart_GENRE.from_pretrained(full_path).eval().to(device)  # type: ignore
-        decoder_start_token_id = 2
         model.generation_config = GenerationConfig(
             bos_token_id=0,
-            decoder_start_token_id=decoder_start_token_id,
+            decoder_start_token_id=2,
             eos_token_id=2,
             forced_eos_token_id=2,
             pad_token_id=1,
@@ -63,11 +71,10 @@ def load_model(
             model.tokenizer.tgt_lang = "fr_XX"  # type: ignore
     else:
         model = Bart_GENRE.from_pretrained(full_path).eval().to(device)  # type: ignore
-        decoder_start_token_id = 2
         model.generation_config = GenerationConfig(
             bos_token_id=0,
             early_stopping=True,
-            decoder_start_token_id=decoder_start_token_id,
+            decoder_start_token_id=2,
             eos_token_id=2,
             forced_eos_token_id=2,
             pad_token_id=1,
@@ -75,21 +82,21 @@ def load_model(
     print(
         f"Model {model_name} {'best' if best else 'last'} checkpoint is loaded to {device}"
     )
-    return model, decoder_start_token_id
+    return model
 
 
-def add_cui_column(df: pl.DataFrame, umls_df: pl.DataFrame) -> pl.DataFrame:
+def add_code_column(df: pl.DataFrame, umls_df: pl.DataFrame) -> pl.DataFrame:
     """
-    Adds a 'CUI' column to the DataFrame by mapping composite 'Entity' strings to UMLS concepts.
+    Adds a 'code' column to the DataFrame by mapping composite 'Entity' strings to UMLS concepts.
 
     The function performs the following steps:
     1.  Cleans up special characters in the 'Entity' column of the UMLS DataFrame.
     2.  Splits the 'Entity' column of the input DataFrame by '<SEP>' into individual terms.
     3.  Explodes the DataFrame so that each row corresponds to a single term.
-    4.  Performs a left join with the UMLS DataFrame on the term and 'GROUP' to find the CUI for each term.
+    4.  Performs a left join with the UMLS DataFrame on the term and 'GROUP' to find the code for each term.
     5.  Groups the data back by the original rows.
-    6.  Filters out rows where none of the constituent terms mapped to a CUI.
-    7.  Constructs the final CUI string by sorting the unique CUIs and joining them with '+'.
+    6.  Filters out rows where none of the constituent terms mapped to a code.
+    7.  Constructs the final code string by sorting the unique codes and joining them with '+'.
     """
     # 1) Check if there are duplicated entries
     if (
@@ -106,7 +113,7 @@ def add_cui_column(df: pl.DataFrame, umls_df: pl.DataFrame) -> pl.DataFrame:
 
     # 3) Join with UMLS data to get CUIs for each term
     df_joined = df_exploded.join(
-        umls_df.select(["CUI", "Entity", "GROUP"]),
+        umls_df.select(["SNOMED_code", "Entity", "GROUP"]),
         left_on=["Prediction", "label"],
         right_on=["Entity", "GROUP"],
         how="left",
@@ -119,16 +126,16 @@ def add_cui_column(df: pl.DataFrame, umls_df: pl.DataFrame) -> pl.DataFrame:
         "start_span",
         "end_span",
     ]).agg(
-        pl.col("CUI").drop_nulls().unique().alias("cui_list"),
+        pl.col("SNOMED_code").drop_nulls().unique().alias("code_list"),
     )
 
-    # 5) Filter for rows with at least one match and create final CUI string
+    # 5) Filter for rows with at least one match and create final code string
     result = (
-        df_grouped.filter(pl.col("cui_list").list.len() > 0)
+        df_grouped.filter(pl.col("code_list").list.len() > 0)
         .with_columns(
-            pl.col("cui_list").list.sort().list.join("+").alias("Predicted_CUI")
+            pl.col("code_list").list.sort().list.join("+").alias("Predicted_code")
         )
-        .select(["filename", "label", "start_span", "end_span", "Predicted_CUI"])
+        .select(["filename", "label", "start_span", "end_span", "Predicted_code"])
     )
 
     return df.join(
@@ -143,7 +150,6 @@ def main(
     dataset_name,
     selection_method,
     split_name="test",
-    with_group=False,
     augmented_data="human_only",
     batch_size=64,
     output_folder="results/inference_outputs",
@@ -157,14 +163,14 @@ def main(
     model_path = (
         Path("models")
         / "NED"
-        / f"{dataset_name}_{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}"
         / model_name
     )
     if best:
         full_path = model_path / "model_best"
     else:
         full_path = model_path / "model_last"
-    model, decoder_start_token_id = load_model(
+    model = load_model(
         dataset_name,
         model_name,
         full_path,
@@ -173,15 +179,24 @@ def main(
     )
 
     # Load data
-    with_group_extension = "_with_group" if with_group else ""
     data_folder = Path("data/final_data")
     human_dataset_name = "SPACCC" if "SPACCC" in dataset_name else dataset_name
 
     test_source_data = load_pickle(
-        data_folder
-        / human_dataset_name
-        / f"{split_name}_{selection_method}_source{with_group_extension}.pkl"
+        data_folder / human_dataset_name / f"{split_name}_{selection_method}_source.pkl"
     )
+    test_target_data = load_pickle(
+        data_folder / human_dataset_name / f"{split_name}_{selection_method}_target.pkl"
+    )
+    # Determine verb based on dataset
+    verb = "est"
+    if dataset_name == "MedMentions":
+        verb = "is"
+    elif dataset_name and "SPACCC" in dataset_name:
+        verb = "es"
+    prefix_templates = [
+        tgt.split(f"] {verb} ")[0] + f"] {verb}" for tgt in test_target_data
+    ]
     test_data = pl.read_csv(
         data_folder
         / human_dataset_name
@@ -220,9 +235,9 @@ def main(
             trie_legal_tokens = pickle.load(file)
     else:
         # Compute candidate Trie
-        if "mbart" in model_name or "mt5" in model_name:
+        if "mbart" in model_name or "mt5" in model_name or "Llama" in model_name:
             start_idx = 0
-            prefix = " "
+            prefix = f" {verb} "
         else:
             start_idx = 1
             prefix = ""
@@ -233,8 +248,7 @@ def main(
             sequences = []
             for entity in cat_umls_df["Entity"].to_list():
                 sequences.append(
-                    [decoder_start_token_id]
-                    + model.tokenizer.encode(prefix + entity)[start_idx:]  # type: ignore
+                    model.tokenizer.encode(prefix + entity)[start_idx:]  # type: ignore
                 )
             trie_legal_tokens[category] = Trie(sequences)
 
@@ -248,7 +262,7 @@ def main(
     output_folder = (
         Path(output_folder)
         / dataset_name
-        / f"{augmented_data}_{selection_method}{'_with_group' if with_group else ''}"
+        / f"{augmented_data}_{selection_method}"
         / f"{model_name}_{'best' if best else 'last'}"
     )
     output_folder.mkdir(parents=True, exist_ok=True)
@@ -261,12 +275,29 @@ def main(
         range(0, len(test_source_data), batch_size), desc="Processing Test Data"
     ):
         batch_sources = test_source_data[i : i + batch_size]
-        with torch.no_grad():
-            batch_output_sentences = model.sample(
-                batch_sources,
-                num_beams=num_beams,
-            )
-        output_sentences.extend([batch[0]["text"] for batch in batch_output_sentences])  # type: ignore
+        batch_prefixes = prefix_templates[i : i + batch_size]
+        batch_input = [f"{a}<SEP>{b}" for a, b in zip(batch_sources, batch_prefixes)]
+        if "Llama" in model_name:
+            with torch.no_grad():
+                batch_output_sentences = model.sample(
+                    batch_input,
+                    num_beams=num_beams,
+                )
+            output_sentences.extend([
+                batch[0]["text"].split(f"] {verb} ")[1]  # type: ignore
+                for batch in batch_output_sentences
+            ])
+        else:
+            with torch.no_grad():
+                batch_output_sentences = model.sample(
+                    batch_sources,
+                    num_beams=num_beams,
+                    prefix_templates=batch_prefixes,
+                )
+            output_sentences.extend([
+                batch[0]["text"]  # type: ignore
+                for batch in batch_output_sentences
+            ])
         output_scores.extend([
             batch[0]["score"]  # type: ignore
             for batch in batch_output_sentences
@@ -280,12 +311,14 @@ def main(
         pl.Series(name="Prediction_score", values=output_scores),
         pl.Series(name="Prediction_beam_score", values=output_beam_scores),
     )
-    no_constraint_df = add_cui_column(no_constraint_df, umls_df=umls_df)
+    no_constraint_df = add_code_column(no_constraint_df, umls_df=umls_df)
 
     # Compute recall per label
     for label in no_constraint_df["label"].unique().to_list():
         label_df = no_constraint_df.filter(pl.col("label") == label)
-        true_label = label_df.filter(pl.col("code") == pl.col("Predicted_CUI")).shape[0]
+        true_label = label_df.filter(pl.col("code") == pl.col("Predicted_code")).shape[
+            0
+        ]
         total_label = label_df.shape[0]
         recall_label = true_label / total_label if total_label > 0 else 0.0
         print(
@@ -293,7 +326,7 @@ def main(
         )
     # Compute recall overall
     true_overall = no_constraint_df.filter(
-        pl.col("code") == pl.col("Predicted_CUI")
+        pl.col("code") == pl.col("Predicted_code")
     ).shape[0]
     total_overall = no_constraint_df.shape[0]
     recall_overall = true_overall / total_overall if total_overall > 0 else 0.0
@@ -317,19 +350,37 @@ def main(
         range(0, len(test_source_data), batch_size), desc="Processing Test Data"
     ):
         batch_sources = test_source_data[i : i + batch_size]
+        batch_prefixes = prefix_templates[i : i + batch_size]
+        batch_input = [f"{a}<SEP>{b}" for a, b in zip(batch_sources, batch_prefixes)]
         prefix_allowed_tokens_fn = get_prefix_allowed_tokens_fn(
             model,
-            decoder_start_token_id,
             batch_sources,
+            batch_prefixes,
             candidates_trie=trie_legal_tokens,
         )
-        with torch.no_grad():
-            batch_output_sentences = model.sample(
-                batch_sources,
-                prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
-                num_beams=num_beams,
-            )
-        output_sentences.extend([batch[0]["text"] for batch in batch_output_sentences])  # type: ignore
+        if "Llama" in model_name:
+            with torch.no_grad():
+                batch_output_sentences = model.sample(
+                    batch_input,
+                    prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
+                    num_beams=num_beams,
+                )
+            output_sentences.extend([
+                batch[0]["text"].split(f"] {verb} ")[1]  # type: ignore
+                for batch in batch_output_sentences
+            ])
+        else:
+            with torch.no_grad():
+                batch_output_sentences = model.sample(
+                    batch_sources,
+                    prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
+                    num_beams=num_beams,
+                    prefix_templates=batch_prefixes,
+                )
+            output_sentences.extend([
+                batch[0]["text"]  # type: ignore
+                for batch in batch_output_sentences
+            ])
         output_scores.extend([
             batch[0]["score"]  # type: ignore
             for batch in batch_output_sentences
@@ -343,12 +394,14 @@ def main(
         pl.Series(name="Prediction_score", values=output_scores),
         pl.Series(name="Prediction_beam_score", values=output_beam_scores),
     )
-    constraint_df = add_cui_column(constraint_df, umls_df=umls_df)
+    constraint_df = add_code_column(constraint_df, umls_df=umls_df)
 
     # Compute recall per label
     for label in constraint_df["label"].unique().to_list():
         label_df = constraint_df.filter(pl.col("label") == label)
-        true_label = label_df.filter(pl.col("code") == pl.col("Predicted_CUI")).shape[0]
+        true_label = label_df.filter(pl.col("code") == pl.col("Predicted_code")).shape[
+            0
+        ]
         total_label = label_df.shape[0]
         recall_label = true_label / total_label if total_label > 0 else 0.0
         print(
@@ -356,7 +409,7 @@ def main(
         )
     # Compute recall overall
     true_overall = constraint_df.filter(
-        pl.col("code") == pl.col("Predicted_CUI")
+        pl.col("code") == pl.col("Predicted_code")
     ).shape[0]
     total_overall = constraint_df.shape[0]
     recall_overall = true_overall / total_overall if total_overall > 0 else 0.0
@@ -448,7 +501,6 @@ if __name__ == "__main__":
         dataset_name=args.dataset_name,
         selection_method=args.selection_method,
         split_name=args.split_name,
-        with_group=args.with_group,
         augmented_data=args.augmented_data,
         batch_size=args.batch_size,
         output_folder=args.output_folder,

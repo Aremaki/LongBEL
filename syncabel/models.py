@@ -25,75 +25,35 @@ from syncabel.utils import chunk_it
 logger = logging.getLogger(__name__)
 
 
-def compute_score(outputs, tokenizer) -> list[float]:
-    """
-    Compute a confidence score for each generated sequence in outputs.
+def compute_score(outputs, tokenizer, prefix_len=0):
+    sequences = outputs.sequences  # (N, seq_len)
+    scores = outputs.scores  # list length T = # generated tokens
 
-    Confidence = geometric mean of token probabilities,
-    ignoring PAD and EOS tokens.
-
-    Args:
-        outputs: HuggingFace generate() output with
-                 return_dict_in_generate=True and output_scores=True
-        tokenizer: tokenizer used to generate sequences
-
-    Returns:
-        List of confidence scores (float) in (0,1] for each sequence
-    """
-    sequences = outputs.sequences  # (batch*num_return_sequences, seq_len)
-    scores = outputs.scores  # list of logits per step
-
-    N, L = sequences.shape
+    N, total_len = sequences.shape
     T = len(scores)
-    seq_len = sequences.size(1)
 
-    # Case 1: causal LM → sequences include a BOS token that has no score
-    if seq_len == T + 1:
-        # Drop BOS
-        sequences = sequences[:, 1:]
-        seq_len = sequences.size(1)
+    # keep only the generated part (completion)
+    sequences = sequences[:, prefix_len : prefix_len + T]
 
-    # Case 2: sequences shorter than scores (common in encoder-decoder models)
-    if seq_len < T:
-        # Truncate scores to match sequence length
-        scores = scores[:seq_len]
-        T = len(scores)
-
-    # Case 3: sequences longer than scores (rare but possible with padding)
-    elif seq_len > T:
-        # Truncate sequences
-        sequences = sequences[:, :T]
-        seq_len = sequences.size(1)
-
-    # If still inconsistent
-    if seq_len != T:
-        raise ValueError(f"Unrecoverable mismatch: sequences {seq_len} vs scores {T}")
-
-    # Create mask to ignore PAD/EOS tokens
+    # Compute as usual but now only for completion tokens
     mask = (
         (sequences != tokenizer.pad_token_id)
         & (sequences != tokenizer.eos_token_id)
         & (sequences != tokenizer.bos_token_id)
     )
 
-    # Compute log-probabilities for chosen tokens
+    # log-prob for each generated token
     logprob_steps = []
     for t, logits in enumerate(scores):
-        log_probs_t = F.log_softmax(logits, dim=-1)  # (N, vocab)
+        log_probs_t = F.log_softmax(logits, dim=-1)
         token_t = sequences[:, t]
         idx = torch.arange(N)
         logprob_steps.append(log_probs_t[idx, token_t])
 
-    # Stack → (N, T)
     logprobs = torch.stack(logprob_steps, dim=1)
-
-    # Apply mask to remove PAD/EOS/BOS tokens
     logprobs.masked_fill_(~mask, 0)
-    lengths = mask.sum(dim=1)  # number of valid tokens per sequence
 
-    # Compute geometric mean → confidence
-    # Avoid division by zero
-    lengths = torch.clamp(lengths, min=1)
+    lengths = mask.sum(dim=1).clamp(min=1)
     confidence = torch.exp(logprobs.sum(dim=1) / lengths)
 
     return confidence.tolist()
@@ -162,11 +122,14 @@ class _GENREHubInterface:
             )
 
             decoder_input_ids = prefix_enc["input_ids"].to(self.device)  # type: ignore
+            prefix_len = decoder_input_ids.size(1)
+        else:
+            prefix_len = input_args["input_ids"].size(1)
 
         outputs = self.generate(  # type: ignore
             **input_args,
-            min_length=0,
-            max_length=128,
+            # min_length=0,
+            # max_length=128,
             num_beams=num_beams,
             num_return_sequences=num_beams,
             output_scores=True,
@@ -184,7 +147,7 @@ class _GENREHubInterface:
             self.tokenizer,  # type: ignore
         )
 
-        scores = compute_score(outputs, self.tokenizer)  # type: ignore
+        scores = compute_score(outputs, self.tokenizer, prefix_len=prefix_len)  # type: ignore
         beam_scores = [
             float(torch.exp(s)) if num_beams > 1 else float("nan")
             for s in (
@@ -265,6 +228,12 @@ class MT5_GENRE(MT5ForConditionalGeneration):
 class Llama_GENRE(LlamaForCausalLM):
     @classmethod
     def from_pretrained(cls, model_name_or_path):
-        model = LlamaGENREHubInterface.from_pretrained(model_name_or_path)
-        model.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+        model = LlamaGENREHubInterface.from_pretrained(
+            model_name_or_path,
+            attn_implementation="flash_attention_2",
+            dtype=torch.bfloat16,
+        )
+        model.tokenizer = AutoTokenizer.from_pretrained(
+            model_name_or_path, use_fast=True
+        )
         return model

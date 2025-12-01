@@ -36,13 +36,13 @@ def find_group_type(text: str) -> str:
 
 def get_prefix_allowed_tokens_fn(
     model,
-    decoder_start_token_id: int,
-    sentences: list[str],
+    sources: list[str],
+    prefix_templates: list[str],
     candidates_trie: dict[str, Trie] = None,  # type: ignore
 ):
     return _get_end_to_end_prefix_allowed_tokens_fn(
-        sentences,
-        decoder_start_token_id,
+        sources,
+        [model.tokenizer.encode(prefix) for prefix in prefix_templates],
         model.tokenizer.bos_token_id,
         model.tokenizer.eos_token_id,
         model.tokenizer.pad_token_id,
@@ -53,8 +53,8 @@ def get_prefix_allowed_tokens_fn(
 
 
 def _get_end_to_end_prefix_allowed_tokens_fn(
-    sentences: list[str],
-    decoder_start_token_id: int,
+    sources: list[str],
+    prefix_templates: list[list[int]],
     bos_token_id: int,
     eos_token_id: int,
     pad_token_id: int,
@@ -63,43 +63,40 @@ def _get_end_to_end_prefix_allowed_tokens_fn(
     candidates_trie: dict[str, Trie] = None,  # type: ignore
 ):
     sent_sem_type = []
-    for sent in sentences:
+    for sent in sources:
         sem_type = find_group_type(sent)
         sent_sem_type.append(sem_type)
 
     def prefix_allowed_tokens_fn(batch_id, sent):
         sent = sent.tolist()
+        prefix = prefix_templates[batch_id]
+        # Remove the prefix from the sent
+        index_sep = sent.index(sep_token_id)
+        sent = sent[index_sep + 1 :]
+        # Check if the prefix is present
+        prefix_len = len(prefix)
+        if sent[:prefix_len] == prefix:
+            sent = sent[prefix_len - 1 :]
+        else:
+            raise ValueError("Prefix not found in the generated sentence.")
         if len(sent) > 1 and sent[-1] in [eos_token_id, pad_token_id]:
-            return [pad_token_id]
+            return [pad_token_id, eos_token_id]
         sem_type = sent_sem_type[batch_id]
-        # Remove everything up to last sep_token_id and add decoder_start_token_id
+        # Remove everything up to last sep_token_id and add prefix and tgt_lang_id
         if sep_token_id in sent:
             sep_index = len(sent) - 1 - sent[::-1].index(sep_token_id)
             if sep_index == len(sent) - 1:
                 # Start fresh with decoder start (and optional tgt language token)
-                sent = [decoder_start_token_id] + (
-                    [tgt_lang_id] if tgt_lang_id is not None else []
-                )
+                sent = [prefix[-1]] + ([tgt_lang_id] if tgt_lang_id is not None else [])
             else:
                 sent = (
-                    [decoder_start_token_id]
+                    [prefix[-1]]
                     + ([tgt_lang_id] if tgt_lang_id is not None else [])
                     + sent[sep_index + 1 :]
                 )
-        if bos_token_id is not None:
-            clean_sent = [x for x in sent if x != bos_token_id]
-            trie_out = candidates_trie[
-                sem_type  # type: ignore
-            ].get(clean_sent)
-            if eos_token_id in trie_out:
-                trie_out.append(sep_token_id)
-            return [bos_token_id] + trie_out
-        else:
-            trie_out = candidates_trie[
-                sem_type  # type: ignore
-            ].get(sent)
-            if eos_token_id in trie_out:
-                trie_out.append(sep_token_id)
-            return trie_out
+        trie_out = candidates_trie[
+            sem_type  # type: ignore
+        ].get(sent)
+        return [eos_token_id, sep_token_id] + trie_out
 
     return prefix_allowed_tokens_fn
