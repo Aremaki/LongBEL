@@ -19,7 +19,11 @@ def normalize_codes(col: pl.Expr) -> pl.Expr:
     )
 
 
-def load_predictions(prediction_path: Path, dataset: str, relextractor) -> pl.DataFrame:
+def load_predictions(
+    prediction_path: Path,
+    dataset: str,
+    relextractor=None,
+) -> pl.DataFrame:
     """
     Add semantic relation column to the dataframe using KeyCare's RelationExtractor.
     """
@@ -48,7 +52,7 @@ def load_predictions(prediction_path: Path, dataset: str, relextractor) -> pl.Da
         .otherwise(pl.col("Prediction"))
         .alias("Prediction")
     )
-    if "semantic_rel_pred" in df.columns:
+    if "semantic_rel_pred" in df.columns or relextractor is None:
         return df  # already processed
     else:
         source = df["annotation"].to_list()

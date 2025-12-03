@@ -233,7 +233,45 @@ def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
         "ambiguous_level",
     ])
 
-    return pl.concat([unambiguous_cui, one_cui_full])
+    final_df = pl.concat([unambiguous_cui, one_cui_full])
+    # Augment with main titles that were not in synonyms
+    all_entities = final_df.select(pl.col("Entity").unique()).to_series()
+
+    # Unique (CUI, Title...) rows
+    titles = final_df.select("CUI", "Title", "SEM_NAME", "CATEGORY", "GROUP").unique()
+
+    # Keep only titles that do NOT appear as an Entity anywhere
+    titles_to_add = titles.filter(~pl.col("Title").is_in(all_entities.implode()))
+
+    # Build rows
+    titles_to_add = titles_to_add.with_columns([
+        pl.col("Title").alias("Entity"),
+        pl.lit(True).alias("is_main"),
+        pl.lit(0).alias("ambiguous_level"),
+    ])
+
+    final_df = pl.concat([final_df, titles_to_add], how="align")
+    # Final filtering step: remove all-caps entities if a non-all-caps variant exists for the same CUI
+    final_df = final_df.with_columns([
+        pl.col("Entity").str.to_lowercase().alias("norm"),
+        (pl.col("Entity") == pl.col("Entity").str.to_uppercase()).alias("is_all_caps"),
+    ])
+
+    # 2) collect normalized entities that appear with non-all-caps form per CUI
+    non_caps_per_cui = (
+        final_df.filter(~pl.col("is_all_caps"))
+        .group_by("CUI")
+        .agg(pl.col("norm").unique().alias("non_caps_norms"))
+    )
+
+    # 3) join back and filter: drop rows that are all-caps AND whose norm is in non_caps_norms
+    final_df = final_df.join(non_caps_per_cui, on="CUI", how="left")
+    final_df = final_df.with_columns([pl.col("non_caps_norms").fill_null(pl.lit([]))])
+    final_df = final_df.filter(
+        ~(pl.col("is_all_caps") & pl.col("norm").is_in(pl.col("non_caps_norms")))
+    ).drop(["norm", "is_all_caps", "non_caps_norms"])
+
+    return final_df
 
 
 def _explode_language_frames(base: pl.DataFrame) -> pl.DataFrame:

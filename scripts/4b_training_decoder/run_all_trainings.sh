@@ -6,34 +6,22 @@ MODELS=("meta-llama/Meta-Llama-3-8B-Instruct")
 DATASETS=("SPACCC")
 SELECTION_METHODS=("tfidf")
 AUGMENTED_OPTIONS=("human_only" "full_upsampled")
+HUMAN_RATIOS=(0.2 0.4 0.6 0.8)
 
 for dataset in "${DATASETS[@]}"; do
     for selection in "${SELECTION_METHODS[@]}"; do
         for augmented in "${AUGMENTED_OPTIONS[@]}"; do
-            for model in "${MODELS[@]}"; do
+            for human_ratio in "${HUMAN_RATIOS[@]}"; do
+                for model in "${MODELS[@]}"; do
+                    # Construct arguments for the training script (pass full model id)
+                    ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --augmented-data ${augmented} --human-ratio ${human_ratio}"
 
-                # Use only the last path component of the model string
-                model_name="${model##*/}"   # e.g. google/mt5-large -> mt5-large
-
-                # Compute expected output directory:
-                # models/NED/<dataset>_<augmented>_<selection>/<model_name>/model_best
-                MODEL_DIR="${BASE_OUTPUT_DIR}/${dataset}_${augmented}_${selection}/${model_name}/model_best"
-
-                # Check if training already completed
-                if [ -d "$MODEL_DIR" ]; then
-                    echo "Skipping (already trained): $MODEL_DIR"
-                    continue
-                fi
-
-                # Construct arguments for the training script (pass full model id)
-                ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --augmented-data ${augmented}"
-
-                # Submit job
-                echo "Submitting training job (missing): ${MODEL_DIR}"
-                echo "  ARGS=${ARGS}"
-                sbatch --export=ALL,SCRIPT_ARGS="${ARGS}" -A ssq@h100 scripts/4b_training_decoder/run.slurm
-                sleep 1
-
+                    # Submit job
+                    echo "Submitting training job (missing): ${MODEL_DIR}"
+                    echo "  ARGS=${ARGS}"
+                    sbatch --export=ALL,SCRIPT_ARGS="${ARGS}" -A ssq@h100 scripts/4b_training_decoder/run.slurm
+                    sleep 1
+                done
             done
         done
     done

@@ -2,30 +2,38 @@
 
 BASE_OUTPUT_DIR="results/inference_outputs"
 
-MODELS=("mt5-large" "bart-large" "mbart-large-50" "ANGEL_pretrained_bart" "biobart-v2-large")
-DATASETS=("SPACCC")
-NUM_BEAMS=(1 2 5 10)
+MODELS=("Meta-Llama-3-8B-Instruct")
+DATASETS=("SPACCC" "MedMentions" "EMEA" "MEDLINE")
+NUM_BEAMS=(5 10)
 SELECTION_METHODS=("tfidf")
-SPLIT_NAMES=("test" "test_ner")
-AUGMENTED_OPTIONS=("human_only" "human_only_ft" "synth_only" "full" "full_upsampled")
-WITH_GROUP_OPTIONS=(true)
+SPLIT_NAMES=("test")
+AUGMENTED_OPTIONS=("human_only" "full" "full_upsampled")
+HUMAN_RATIOS=(0.2 0.4 0.6 0.8 1.0)
 BEST_OPTIONS=(true false)
-BATCH_SIZE=8
+BATCH_SIZE=16
 
 for dataset in "${DATASETS[@]}"; do
     for selection in "${SELECTION_METHODS[@]}"; do
         for split in "${SPLIT_NAMES[@]}"; do
             for augmented in "${AUGMENTED_OPTIONS[@]}"; do
-                for with_group in "${WITH_GROUP_OPTIONS[@]}"; do
+                for human_ratio in "${HUMAN_RATIOS[@]}"; do
                     for num_beams in "${NUM_BEAMS[@]}"; do
                         for model in "${MODELS[@]}"; do
                             for best in "${BEST_OPTIONS[@]}"; do
 
-                                # Determine the output folder
-                                FOLDER="${BASE_OUTPUT_DIR}/${dataset}/${augmented}_${selection}"
-                                if [ "$with_group" = true ]; then
-                                    FOLDER="${FOLDER}_with_group"
+                                # ----------------------------
+                                # Compute human_ratio string
+                                # ----------------------------
+                                human_ratio_str=""
+                                # Use awk for floating point comparison
+                                if awk "BEGIN {exit !($human_ratio < 1.0)}"; then
+                                    # Multiply by 100 and round to nearest integer
+                                    pct=$(awk "BEGIN {printf \"%d\", $human_ratio * 100 + 0.5}")
+                                    human_ratio_str="_${pct}pct"
                                 fi
+
+                                # Determine the output folder
+                                FOLDER="${BASE_OUTPUT_DIR}/${dataset}/${augmented}_${selection}${human_ratio_str}"
 
                                 MODEL_FOLDER="${FOLDER}/${model}_"
                                 if [ "$best" = true ]; then
@@ -43,11 +51,7 @@ for dataset in "${DATASETS[@]}"; do
                                 fi
 
                                 # Build Slurm args
-                                ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --split-name ${split} --num-beams ${num_beams} --batch-size ${BATCH_SIZE} --augmented-data ${augmented}"
-
-                                if [ "$with_group" = true ]; then
-                                    ARGS="${ARGS} --with-group"
-                                fi
+                                ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --split-name ${split} --num-beams ${num_beams} --batch-size ${BATCH_SIZE} --augmented-data ${augmented} --human-ratio ${human_ratio}"
 
                                 if [ "$best" = true ]; then
                                     ARGS="${ARGS} --best"

@@ -3,8 +3,12 @@
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-import re
-from collections import defaultdict
+
+import logging
+from pathlib import Path
+
+import polars as pl
+from datasets import Dataset
 
 
 def chunk_it(seq, num):
@@ -19,231 +23,102 @@ def chunk_it(seq, num):
     return chunks
 
 
-def get_entity_spans_pre_processing(sentences):
-    return [
-        (
-            f" {sent} ".replace("\xa0", " ")
-            .replace("{", "(")
-            .replace("}", ")")
-            .replace("[", "(")
-            .replace("]", ")")
+def load_tsv_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dataset:
+    """
+    Load a SPACCC TSV annotation file and corresponding raw text files, and format them as a Hugging Face Dataset in BigBio format.
+
+    The `annotation_file` should be a TSV file with columns: doc_id, entity_type, start_span, end_span, entity_text, snomed_code, label.
+    The `raw_files_folder` should be a directory containing raw text files named as <doc_id>.txt for each document referenced in the TSV.
+    Each passage will include the full raw text and annotated entities with their offsets.
+    """
+    # Read annotations and group by document
+    try:
+        # Read the file first without forcing column names
+        annotations_df = pl.read_csv(
+            annotation_file,
+            separator="\t",
+            has_header=True,
         )
-        for sent in sentences
-    ]
 
+        # Define the expected column names (7 total)
+        expected_cols = [
+            "doc_id",
+            "entity_type",
+            "start_span",
+            "end_span",
+            "entity_text",
+            "code",
+            "semantic_type",
+        ]
 
-def get_entity_spans_post_processing(sentences):
-    outputs = []
-    for sent in sentences:
-        sent = re.sub(r"{.*?", "{ ", sent)
-        sent = re.sub(r"}.*?", "} ", sent)
-        sent = re.sub(r"\].*?", "] ", sent)
-        sent = re.sub(r"\[.*?", "[ ", sent)
-        sent = re.sub(r"\s{2,}", " ", sent)
-        sent = re.sub(r"\. \. \} \[ (.*?) \]", r". } [ \1 ] .", sent)
-        sent = re.sub(r"\, \} \[ (.*?) \]", r" } [ \1 ] ,", sent)
-        sent = re.sub(r"\; \} \[ (.*?) \]", r" } [ \1 ] ;", sent)
-        sent = sent.replace("{ ", "{").replace(" } [ ", "}[").replace(" ]", "]")
-        outputs.append(sent)
+        # If fewer than expected columns exist, add missing ones as null columns
+        for col in expected_cols[len(annotations_df.columns) :]:
+            annotations_df = annotations_df.with_columns(pl.lit(None).alias(col))
 
-    return outputs
+        # Rename all columns to expected names
+        annotations_df = annotations_df.rename(
+            dict(zip(annotations_df.columns, expected_cols))
+        )
+    except pl.ShapeError:  # type: ignore
+        # Handle empty file
+        logging.warning(f"Warning: Annotation file {annotation_file} is empty.")
+        return Dataset.from_dict({
+            "id": [],
+            "document_id": [],
+            "text": [],
+            "entities": [],
+        })
 
+    pages = []
+    id = 0
+    for doc_id, group in annotations_df.group_by("doc_id"):
+        # Load raw text for the document
+        raw_text_path = raw_files_folder / f"{doc_id[0]}.txt"
+        if raw_text_path.exists():
+            with raw_text_path.open("r", encoding="utf-8") as raw_file:
+                text = raw_file.read()
+        else:
+            # Skip documents with no corresponding text file
+            logging.warning(f"Warning: Raw text file {raw_text_path} not found.")
+            continue
 
-def get_entity_spans_finalize(
-    input_sentences, output_sentences, start_entity, start_tag, end_tag
-):
-    return_outputs = []
-    nested = False
-    doc_id = 0
-    for input_, output_ in zip(input_sentences, output_sentences):
-        doc_id += 1
+        page = {
+            "id": doc_id[0],
+            "document_id": doc_id[0],
+        }
+
         entities = []
-        status = "out"
-        i = 0
-        j = 0
-        s_ent = len(start_entity)
-        s_tag = len(start_tag)
-        e_tag = len(end_tag)
-        while (j < len(output_) and i < len(input_)) or status != "out":
-            if status == "out":
-                if output_[j : j + s_ent] == start_entity:
-                    nested = 1
-                    entities.append([i, 0, "", ""])
-                    j += s_ent
-                    status = "entity"
-                elif j < len(output_) and i < len(input_):
-                    if input_[i] == output_[j]:
-                        i += 1
-                        j += 1
-                    elif output_[j] in [" ", "\n"]:
-                        j += 1
-                    elif input_[i] in [" ", "\n", "⩾"]:
-                        i += 1
-                    else:
-                        # print(input_[i:])
-                        # print(output_[j:])
-                        # print(doc_id)
-                        # print("output is misaligned")
-                        break
+        for i, record in enumerate(group.to_dicts()):
+            entity = {
+                "id": f"{doc_id[0]}_T{i}",
+                "text": [record["entity_text"]],
+                "offsets": [[int(record["start_span"]), int(record["end_span"])]],
+                "type": record["entity_type"],
+                "normalized": [{"db_name": "SNOMED_CT", "db_id": record["code"]}],
+            }
+            entities.append(entity)
+        page["entities"] = entities
+        page["passages"] = [
+            {
+                "id": f"{doc_id[0]}_passage",
+                "type": "clinical_case",
+                "text": [text],
+                "offsets": [[0, len(text)]],
+            }
+        ]
+        pages.append(page)
+        id += 1
 
-            elif status == "entity":
-                if output_[j : j + s_tag] == start_tag:
-                    j += s_tag
-                    status = "tag"
-                # NESTED
-                elif output_[j : j + s_ent] == start_entity:
-                    nested += 1
-                    entities.append([i, 0, "", ""])
-                    j += s_ent
-                elif j < len(output_) and i < len(input_):
-                    if input_[i] == output_[j]:
-                        for k in range(nested):
-                            entities[-(k + 1)][3] += input_[i]
-                            entities[-(k + 1)][1] += 1
-                        i += 1
-                        j += 1
-                    elif output_[j] == " ":
-                        j += 1
-                    elif input_[i] == " ":
-                        for k in range(nested):
-                            entities[-(k + 1)][3] += input_[i]
-                            entities[-(k + 1)][1] += 1
-                        i += 1
-                    else:
-                        entities.pop()
-                        # print("mention is misaligned")
-                        break
-                else:
-                    status = "out"
+    if not pages:
+        return Dataset.from_list([
+            {
+                "id": None,
+                "document_id": None,
+                "passages": [],
+                "entities": [],
+            }
+        ])
 
-            elif status == "tag":
-                if output_[j : j + e_tag] == end_tag:
-                    if nested > 1:
-                        entities = (
-                            entities[:-nested] + entities[-1:] + entities[-nested:-1]
-                        )
-                        nested -= 1
-                        status = "entity"
-                    else:
-                        status = "out"
-                    j += e_tag
-                elif j < len(output_):
-                    entities[-1][2] += output_[j]
-                    j += 1
-                else:
-                    entities.pop()
-                    # print("entity is misaligned")
-                    break
-
-        return_outputs.append(sorted(entities))
-
-    return return_outputs
-
-
-def strong_tp(guess_entities, gold_entities):
-    return len(gold_entities.intersection(guess_entities))
-
-
-def weak_tp(guess_entities, gold_entities):
-    tp = 0
-    for pred in guess_entities:
-        for gold in gold_entities:
-            if (
-                pred[0] == gold[0]
-                and (
-                    gold[1] <= pred[1] <= gold[1] + gold[2]
-                    or gold[1] <= pred[1] + pred[2] <= gold[1] + gold[2]
-                )
-                and pred[3] == gold[3]
-            ):
-                tp += 1
-
-    return tp
-
-
-def get_micro_precision(guess_entities, gold_entities, mode="strong"):
-    guess_entities = set(guess_entities)
-    gold_entities = set(gold_entities)
-
-    if mode == "strong":
-        return (
-            (strong_tp(guess_entities, gold_entities) / len(guess_entities))
-            if len(guess_entities)
-            else 0
-        )
-    elif mode == "weak":
-        return (
-            (weak_tp(guess_entities, gold_entities) / len(guess_entities))
-            if len(guess_entities)
-            else 0
-        )
-
-
-def get_micro_recall(guess_entities, gold_entities, mode="strong"):
-    guess_entities = set(guess_entities)
-    gold_entities = set(gold_entities)
-
-    if mode == "strong":
-        return (
-            (strong_tp(guess_entities, gold_entities) / len(gold_entities))
-            if len(gold_entities)
-            else 0
-        )
-    elif mode == "weak":
-        return (
-            (weak_tp(guess_entities, gold_entities) / len(gold_entities))
-            if len(gold_entities)
-            else 0
-        )
-
-
-def get_micro_f1(guess_entities, gold_entities, mode="strong"):
-    precision = get_micro_precision(guess_entities, gold_entities, mode)
-    recall = get_micro_recall(guess_entities, gold_entities, mode)
-    return (
-        (2 * (precision * recall) / (precision + recall)) if precision + recall else 0  # type: ignore
-    )
-
-
-def get_doc_level_guess_gold_entities(guess_entities, gold_entities):
-    new_guess_entities = defaultdict(list)
-    for e in guess_entities:
-        new_guess_entities[e[0]].append(e)
-
-    new_gold_entities = defaultdict(list)
-    for e in gold_entities:
-        new_gold_entities[e[0]].append(e)
-
-    return new_guess_entities, new_gold_entities
-
-
-def get_macro_precision(guess_entities, gold_entities, mode="strong"):
-    guess_entities, gold_entities = get_doc_level_guess_gold_entities(
-        guess_entities, gold_entities
-    )
-    all_scores = [
-        get_micro_precision(guess_entities[k], gold_entities[k], mode)
-        for k in guess_entities
-    ]
-    return (sum(all_scores) / len(all_scores)) if len(all_scores) else 0  # type: ignore
-
-
-def get_macro_recall(guess_entities, gold_entities, mode="strong"):
-    guess_entities, gold_entities = get_doc_level_guess_gold_entities(
-        guess_entities, gold_entities
-    )
-    all_scores = [
-        get_micro_recall(guess_entities[k], gold_entities[k], mode)
-        for k in guess_entities
-    ]
-    return (sum(all_scores) / len(all_scores)) if len(all_scores) else 0  # type: ignore
-
-
-def get_macro_f1(guess_entities, gold_entities, mode="strong"):
-    guess_entities, gold_entities = get_doc_level_guess_gold_entities(
-        guess_entities, gold_entities
-    )
-    all_scores = [
-        get_micro_f1(guess_entities[k], gold_entities[k], mode) for k in guess_entities
-    ]
-    return (sum(all_scores) / len(all_scores)) if len(all_scores) else 0
+    # Convert to Hugging Face Dataset
+    logging.info(f"Loaded {len(pages)} pages from {annotation_file}")
+    return Dataset.from_list(pages)

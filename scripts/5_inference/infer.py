@@ -63,9 +63,6 @@ def load_model(
         elif dataset_name == "SPACCC":
             model.tokenizer.src_lang = "es_XX"  # type: ignore
             model.tokenizer.tgt_lang = "es_XX"  # type: ignore
-        elif dataset_name == "SPACCC_UMLS":
-            model.tokenizer.src_lang = "es_XX"  # type: ignore
-            model.tokenizer.tgt_lang = "es_XX"  # type: ignore
         else:
             model.tokenizer.src_lang = "fr_XX"  # type: ignore
             model.tokenizer.tgt_lang = "fr_XX"  # type: ignore
@@ -151,6 +148,7 @@ def main(
     selection_method,
     split_name="test",
     augmented_data="human_only",
+    human_ratio=1.0,
     batch_size=64,
     output_folder="results/inference_outputs",
 ):
@@ -160,10 +158,15 @@ def main(
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Load model
+    if human_ratio < 1.0:
+        human_ratio_str = (
+            "_" + str(round(human_ratio * 100, 0)).replace(".0", "") + "pct"
+        )
+    else:
+        human_ratio_str = ""
     model_path = (
-        Path("models")
-        / "NED"
-        / f"{dataset_name}_{augmented_data}_{selection_method}"
+        Path("/lustre/fsn1/projects/rech/ssq/usk98ia/expe_data_ratio")
+        / f"{dataset_name}_{augmented_data}_{selection_method}{human_ratio_str}"
         / model_name
     )
     if best:
@@ -180,27 +183,24 @@ def main(
 
     # Load data
     data_folder = Path("data/final_data")
-    human_dataset_name = "SPACCC" if "SPACCC" in dataset_name else dataset_name
 
     test_source_data = load_pickle(
-        data_folder / human_dataset_name / f"{split_name}_{selection_method}_source.pkl"
+        data_folder / dataset_name / f"{split_name}_{selection_method}_source.pkl"
     )
     test_target_data = load_pickle(
-        data_folder / human_dataset_name / f"{split_name}_{selection_method}_target.pkl"
+        data_folder / dataset_name / f"{split_name}_{selection_method}_target.pkl"
     )
     # Determine verb based on dataset
     verb = "est"
     if dataset_name == "MedMentions":
         verb = "is"
-    elif dataset_name and "SPACCC" in dataset_name:
+    elif dataset_name == "SPACCC":
         verb = "es"
     prefix_templates = [
         tgt.split(f"] {verb} ")[0] + f"] {verb}" for tgt in test_target_data
     ]
     test_data = pl.read_csv(
-        data_folder
-        / human_dataset_name
-        / f"{split_name}_{selection_method}_annotations.tsv",
+        data_folder / dataset_name / f"{split_name}_{selection_method}_annotations.tsv",
         separator="\t",
         has_header=True,
         schema_overrides={"code": str},  # type: ignore
@@ -229,7 +229,7 @@ def main(
     # Load candidate Trie
     tries_folder = Path("data/UMLS_tries")
     tries_folder.mkdir(parents=True, exist_ok=True)
-    trie_path = tries_folder / f"trie_{dataset_name}_{model_name}.pkl"
+    trie_path = tries_folder / f"trie_{dataset_short}_{model_name}.pkl"
     if os.path.exists(trie_path):  # Check if the file exists
         with open(trie_path, "rb") as file:
             trie_legal_tokens = pickle.load(file)
@@ -262,7 +262,7 @@ def main(
     output_folder = (
         Path(output_folder)
         / dataset_name
-        / f"{augmented_data}_{selection_method}"
+        / f"{augmented_data}_{selection_method}{human_ratio_str}"
         / f"{model_name}_{'best' if best else 'last'}"
     )
     output_folder.mkdir(parents=True, exist_ok=True)
@@ -479,6 +479,12 @@ if __name__ == "__main__":
         help="Whether to use augmented data for training",
     )
     parser.add_argument(
+        "--human-ratio",
+        type=float,
+        default=1.0,
+        help="Ratio of human data to use",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=64,
@@ -502,6 +508,7 @@ if __name__ == "__main__":
         selection_method=args.selection_method,
         split_name=args.split_name,
         augmented_data=args.augmented_data,
+        human_ratio=args.human_ratio,
         batch_size=args.batch_size,
         output_folder=args.output_folder,
     )

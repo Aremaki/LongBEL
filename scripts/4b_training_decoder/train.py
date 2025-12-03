@@ -34,7 +34,7 @@ def create_prompt_completion_dataset(dataset, dataset_name):
     verb = "est"
     if dataset_name == "MedMentions":
         verb = "is"
-    elif dataset_name and "SPACCC" in dataset_name:
+    elif dataset_name == "SPACCC":
         verb = "es"
 
     split_marker = f"] {verb}"
@@ -136,6 +136,7 @@ def main(
     lr: float,
     dataset_name: str,
     augmented_data: str,
+    human_ratio: float = 1.0,
     selection_method: str = "tfidf",
 ):
     # init distributed (if needed)
@@ -277,6 +278,11 @@ def main(
                 human_train_dataset,
                 dev_dataset.select(split_train),
             ])
+        # Reduce train dataset according to human_ratio
+        if human_ratio < 1.0:
+            indexes = list(range(len(human_train_dataset)))
+            split = int(len(human_train_dataset) * human_ratio)
+            human_train_dataset = human_train_dataset.select(indexes[:split])
 
     if augmented_data in ["synth_only", "full", "full_upsampled"]:
         if dataset_name == "MedMentions":
@@ -290,7 +296,7 @@ def main(
                 "source": synth_train_source_data,
                 "target": synth_train_target_data,
             })
-        elif dataset_name == "QUAERO":
+        elif dataset_name in ["EMEA", "MEDLINE"]:
             synth_train_source_data = load_pickle(
                 data_folder / "SynthQUAERO" / f"train_{selection_method}_source.pkl"
             )
@@ -307,23 +313,11 @@ def main(
                 / "SynthSPACCC_No_Def"
                 / f"train_{selection_method}_source.pkl"
             )
-            # source_def = load_pickle(
-            #     data_folder
-            #     / "SynthSPACCC_Def"
-            #     / f"train_{selection_method}_source.pkl"
-            # )
-            # synth_train_source_data = [*source_no_def, *source_def]
             synth_train_target_data = load_pickle(
                 data_folder
                 / "SynthSPACCC_No_Def"
                 / f"train_{selection_method}_target.pkl"
             )
-            # target_def = load_pickle(
-            #     data_folder
-            #     / "SynthSPACCC_UMLS_Def"
-            #     / f"train_{selection_method}_target.pkl"
-            # )
-            # synth_train_target_data = [*target_no_def, *target_def]
             synth_train_dataset = Dataset.from_dict({
                 "source": synth_train_source_data,
                 "target": synth_train_target_data,
@@ -374,17 +368,33 @@ def main(
     )
 
     # ---------- SFT TrainingArguments ----------
+    if human_ratio < 1.0:
+        human_ratio_str = (
+            "_" + str(round(human_ratio * 100, 0)).replace(".0", "") + "pct"
+        )
+    else:
+        human_ratio_str = ""
     output_dir = (
-        Path("models")
-        / "NED"
-        / f"{dataset_name}_{augmented_data}_{selection_method}"
+        Path("/lustre/fsn1/projects/rech/ssq/usk98ia/expe_data_ratio")
+        / f"{dataset_name}_{augmented_data}_{selection_method}{human_ratio_str}"
         / model_short_name
     )
     logging_dir = (
-        Path("logs")
-        / f"{dataset_name}_{augmented_data}_{selection_method}"
+        Path("/lustre/fsn1/projects/rech/ssq/usk98ia/logs")
+        / f"{dataset_name}_{augmented_data}_{selection_method}{human_ratio_str}"
         / model_short_name
     )
+    # output_dir = (
+    #     Path("models")
+    #     / "NED"
+    #     / f"{dataset_name}_{augmented_data}_{selection_method}"
+    #     / model_short_name
+    # )
+    # logging_dir = (
+    #     Path("logs")
+    #     / f"{dataset_name}_{augmented_data}_{selection_method!}"
+    #     / model_short_name
+    # )
     model.gradient_checkpointing_enable()
     sft_args = SFTConfig(
         output_dir=str(output_dir),
@@ -484,13 +494,18 @@ if __name__ == "__main__":
         help="Whether to use augmented data for training",
     )
     parser.add_argument(
+        "--human-ratio",
+        type=float,
+        default=1.0,
+        help="The ratio of augmented data to use for training",
+    )
+    parser.add_argument(
         "--selection-method",
         type=str,
         default="embedding",
         choices=["embedding", "tfidf", "levenshtein", "title"],
         help="The method to select concept synonyms",
     )
-
     args = parser.parse_args()
 
     main(
@@ -498,5 +513,6 @@ if __name__ == "__main__":
         lr=args.lr,
         dataset_name=args.dataset_name,
         augmented_data=args.augmented_data,
+        human_ratio=args.human_ratio,
         selection_method=args.selection_method,
     )

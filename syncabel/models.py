@@ -35,6 +35,10 @@ def compute_score(outputs, tokenizer, prefix_len=0):
     # keep only the generated part (completion)
     sequences = sequences[:, prefix_len : prefix_len + T]
 
+    # Make sure score is not longer than sequences
+    if len(scores) > sequences.size(1):
+        scores = scores[: sequences.size(1)]
+
     # Compute as usual but now only for completion tokens
     mask = (
         (sequences != tokenizer.pad_token_id)

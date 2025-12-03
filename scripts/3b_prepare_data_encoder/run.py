@@ -10,6 +10,8 @@ import polars as pl
 import typer
 from datasets import load_dataset
 
+from syncabel.utils import load_tsv_as_bigbio
+
 
 def prepare_dictionary_from_umls(umls_path: Path):
     """Prepare dictionary pickle files from UMLS data for encoder training/eval."""
@@ -161,13 +163,33 @@ def _transform_pages(
 
 
 def process_bigbio_dataset(
-    hf_id: str,
-    hf_config: str,
+    hf_id: Optional[str],
+    hf_config: Optional[str],
+    input_path: Optional[Path],
     output_path: Path,
     umls_path: Path,
     corrected_code: Optional[dict[str, str]] = None,
 ):
-    dataset = load_dataset(hf_id, hf_config)
+    dataset = {}
+    if hf_id is not None and hf_config is not None:
+        dataset = load_dataset(hf_id, hf_config)
+    elif input_path is not None:
+        logging.info(f"Converting dataset from folder: {input_path} to BigBio...")
+        train_annotations_path = input_path / "train.tsv"
+        test_annotations_path = input_path / "test.tsv"
+        train_raw_files_folder = input_path.parent / "raw_txt" / "train"
+        test_raw_files_folder = input_path.parent / "raw_txt" / "test"
+
+        if train_annotations_path.exists():
+            logging.info(f"  • Loading train split from {train_annotations_path}")
+            dataset["train"] = load_tsv_as_bigbio(
+                train_annotations_path, train_raw_files_folder
+            )
+        if test_annotations_path.exists():
+            logging.info(f"  • Loading test split from {test_annotations_path}")
+            dataset["test"] = load_tsv_as_bigbio(
+                test_annotations_path, test_raw_files_folder
+            )
     umls_df = pl.read_parquet(umls_path / "all_disambiguated.parquet")
     cui_to_groups = dict(
         umls_df.group_by("CUI").agg([pl.col("GROUP").unique()]).iter_rows()
@@ -284,7 +306,7 @@ app = typer.Typer(
 @app.command()
 def run(
     datasets: list[str] = typer.Option(
-        ["MedMentions", "EMEA", "MEDLINE", "SynthMM", "SynthQUAERO"],
+        ["MedMentions", "EMEA", "MEDLINE", "SPACCC"],
         help="Datasets to process. Include both original and synthetic to create augmented versions.",
     ),
     umls_mm_path: Path = typer.Option(
@@ -293,16 +315,11 @@ def run(
     umls_quaero_path: Path = typer.Option(
         Path("data/UMLS_processed/QUAERO"), help="Path to UMLS QUAERO directory"
     ),
+    umls_spaccc_path: Path = typer.Option(
+        Path("data/UMLS_processed/SPACCC"), help="Path to UMLS SPACCC directory"
+    ),
     out_root: Path = typer.Option(
         Path("arboEL/data/final_data_encoder"), help="Root output directory"
-    ),
-    synth_mm_json: Path = typer.Option(
-        Path("data/synthetic_data/SynthMM/SynthMM_bigbio_def.json"),
-        help="Synthetic MedMentions JSON path",
-    ),
-    synth_quaero_json: Path = typer.Option(
-        Path("data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio_def.json"),
-        help="Synthetic QUAERO JSON path",
     ),
 ):
     """Run dictionary prep and dataset processing for encoder training/eval."""
@@ -327,6 +344,12 @@ def run(
     with open(medline_path / "dictionary.pickle", "wb") as f:
         pickle.dump(dictionary_quaero, f)
     typer.echo(f"MEDLINE dictionary saved to {medline_path / 'dictionary.pickle'}")
+    dictionary_spaccc = prepare_dictionary_from_umls(umls_spaccc_path)
+    spaccc_path = out_root / "SPACCC"
+    spaccc_path.mkdir(parents=True, exist_ok=True)
+    with open(spaccc_path / "dictionary.pickle", "wb") as f:
+        pickle.dump(dictionary_spaccc, f)
+    typer.echo(f"SPACCC dictionary saved to {spaccc_path / 'dictionary.pickle'}")
 
     # Optional: corrected CUI mapping for QUAERO (from manual review)
     corrected_code = None
@@ -344,6 +367,7 @@ def run(
         process_bigbio_dataset(
             "bigbio/medmentions",
             "medmentions_st21pv_bigbio_kb",
+            None,
             medmentions_path,
             umls_mm_path,
         )
@@ -352,6 +376,7 @@ def run(
         process_bigbio_dataset(
             "bigbio/quaero",
             "quaero_emea_bigbio_kb",
+            None,
             emea_path,
             umls_quaero_path,
             corrected_code,
@@ -361,43 +386,20 @@ def run(
         process_bigbio_dataset(
             "bigbio/quaero",
             "quaero_medline_bigbio_kb",
+            None,
             medline_path,
             umls_quaero_path,
             corrected_code,
         )
 
-    # Process augmented datasets (original + synthetic)
-    if "SynthMM" in datasets and "MedMentions" in datasets:
-        typer.echo("→ Creating MedMentions_augmented (MedMentions + SynthMM)…")
-        create_augmented_dataset(
-            "MedMentions_augmented",
-            medmentions_path,
-            synth_mm_json,
-            umls_mm_path,
-            dictionary_mm,
-            out_root,
-        )
-    if "SynthQUAERO" in datasets and "EMEA" in datasets:
-        typer.echo("→ Creating EMEA_augmented (EMEA + SynthQUAERO)…")
-        create_augmented_dataset(
-            "EMEA_augmented",
-            emea_path,
-            synth_quaero_json,
-            umls_quaero_path,
-            dictionary_quaero,
-            out_root,
-            corrected_code,
-        )
-    if "SynthQUAERO" in datasets and "MEDLINE" in datasets:
-        typer.echo("→ Creating MEDLINE_augmented (MEDLINE + SynthQUAERO)…")
-        create_augmented_dataset(
-            "MEDLINE_augmented",
-            medline_path,
-            synth_quaero_json,
-            umls_quaero_path,
-            dictionary_quaero,
-            out_root,
-            corrected_code,
+    if "SPACCC" in datasets:
+        typer.echo("→ Processing SPACCC (local)…")
+        process_bigbio_dataset(
+            None,
+            None,
+            Path("data/SPACCC/Normalization/"),
+            spaccc_path,
+            umls_spaccc_path,
         )
 
     typer.echo("✅ Encoder data preparation complete.")
