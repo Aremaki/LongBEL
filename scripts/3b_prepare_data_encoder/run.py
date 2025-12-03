@@ -16,6 +16,10 @@ from syncabel.utils import load_tsv_as_bigbio
 def prepare_dictionary_from_umls(umls_path: Path):
     """Prepare dictionary pickle files from UMLS data for encoder training/eval."""
     umls_df = pl.read_parquet(umls_path / "all_disambiguated.parquet")
+    # Rename SNOMED_code into CUI for consistency if needed
+    if "SNOMED_code" in umls_df.columns:
+        umls_df = umls_df.rename({"SNOMED_code": "CUI"})
+
     umls_df = (
         umls_df.group_by(["CUI", "Title", "GROUP"])
         .agg(pl.col("Entity").unique())
@@ -107,7 +111,9 @@ def _transform_pages(
             if len(groups) == 1:
                 group = groups[0]
             else:
-                if entity_type in cat_to_group.keys():
+                if entity_type in cat_to_group.values():
+                    group = entity_type
+                elif entity_type in cat_to_group.keys():
                     group = cat_to_group[entity_type]
                 elif entity_type in sem_to_group.keys():
                     group = sem_to_group[entity_type]
@@ -191,6 +197,9 @@ def process_bigbio_dataset(
                 test_annotations_path, test_raw_files_folder
             )
     umls_df = pl.read_parquet(umls_path / "all_disambiguated.parquet")
+    # Rename SNOMED_code into CUI for consistency if needed
+    if "SNOMED_code" in umls_df.columns:
+        umls_df = umls_df.rename({"SNOMED_code": "CUI"})
     cui_to_groups = dict(
         umls_df.group_by("CUI").agg([pl.col("GROUP").unique()]).iter_rows()
     )
@@ -222,80 +231,6 @@ def process_bigbio_dataset(
         )
 
 
-def create_augmented_dataset(
-    name: str,
-    original_path: Path,
-    synth_json_path: Path,
-    umls_path: Path,
-    dictionary: list[dict],
-    out_root: Path,
-    corrected_code: Optional[dict[str, str]] = None,
-):
-    """Create an augmented dataset combining original val/test with original+synthetic train."""
-    augmented_path = out_root / name
-    augmented_path.mkdir(parents=True, exist_ok=True)
-
-    # Save dictionary for augmented dataset
-    with open(augmented_path / "dictionary.pickle", "wb") as f:
-        pickle.dump(dictionary, f)
-    logging.info(f"{name} dictionary saved to {augmented_path / 'dictionary.pickle'}")
-
-    # Copy validation and test splits from original (if they exist)
-    for split in ["validation", "test"]:
-        if split == "validation":
-            split_name = "valid"
-        else:
-            split_name = split
-        original_split_file = original_path / f"{split_name}.jsonl"
-        if original_split_file.exists():
-            augmented_split_file = augmented_path / f"{split_name}.jsonl"
-            augmented_split_file.write_text(original_split_file.read_text())
-            logging.info(f"Copied {split} split to {augmented_split_file}")
-
-    # Create augmented train split: original train + synthetic train
-    original_train = original_path / "train.jsonl"
-    synthetic_mentions = []
-
-    # Process synthetic data if available
-    if synth_json_path.exists():
-        pages = json.loads(synth_json_path.read_text(encoding="utf-8"))
-        umls_df = pl.read_parquet(umls_path / "all_disambiguated.parquet")
-        cui_to_groups = dict(
-            umls_df.group_by("CUI").agg([pl.col("GROUP").unique()]).iter_rows()
-        )
-        umls_info = pickle.load(open(umls_path / "umls_info_encoder.pkl", "rb"))
-        semantic_info = pl.read_parquet(umls_path / "semantic_info.parquet")
-        synthetic_mentions = _transform_pages(
-            pages,
-            umls_info,
-            semantic_info,
-            cui_to_groups,
-            corrected_code,
-        )
-        logging.info(
-            f"Processed {len(synthetic_mentions)} synthetic mentions from {synth_json_path.name}"
-        )
-
-    # Combine original train + synthetic
-    augmented_train_file = augmented_path / "train.jsonl"
-    with open(augmented_train_file, "w") as f:
-        # Write original training data first
-        if original_train.exists():
-            f.write(original_train.read_text().rstrip())
-            if synthetic_mentions:
-                f.write("\n")  # Add newline separator
-
-        # Write synthetic data
-        if synthetic_mentions:
-            f.write("\n".join([json.dumps(m) for m in synthetic_mentions]))
-
-    # Count total mentions in augmented train
-    total_train_lines = sum(1 for _ in open(augmented_train_file))
-    logging.info(
-        f"Created augmented train split with {total_train_lines} total mentions in {augmented_train_file}"
-    )
-
-
 # --- Typer CLI -------------------------------------------------------------
 
 app = typer.Typer(
@@ -325,8 +260,8 @@ def run(
     """Run dictionary prep and dataset processing for encoder training/eval."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    # Prepare dictionaries once for MM and QUAERO
-    typer.echo("→ Preparing dictionaries (MM, QUAERO)…")
+    # Prepare dictionaries once for MM, QUAERO, SPACCC
+    typer.echo("→ Preparing dictionaries (MM, QUAERO, SPACCC)…")
     dictionary_mm = prepare_dictionary_from_umls(umls_mm_path)
     medmentions_path = out_root / "MedMentions"
     medmentions_path.mkdir(parents=True, exist_ok=True)
