@@ -82,7 +82,9 @@ def load_model(
     return model
 
 
-def add_code_column(df: pl.DataFrame, umls_df: pl.DataFrame) -> pl.DataFrame:
+def add_code_column(
+    df: pl.DataFrame, umls_df: pl.DataFrame, multiple_answers: bool = False
+) -> pl.DataFrame:
     """
     Adds a 'code' column to the DataFrame by mapping composite 'Entity' strings to UMLS concepts.
 
@@ -103,14 +105,21 @@ def add_code_column(df: pl.DataFrame, umls_df: pl.DataFrame) -> pl.DataFrame:
         print("There are duplicated entries. Keeping just the first one...")
         df = df.unique(subset=["filename", "label", "start_span", "end_span"])
 
+    df_exploded = df.clone()
     # 2) Explode df by splitting 'Entity' into multiple terms
-    df_exploded = df.with_columns(pl.col("Prediction").str.split("<SEP>")).explode(
-        "Prediction"
-    )
+    if multiple_answers:
+        df_exploded = df_exploded.with_columns(
+            pl.col("Prediction").str.split("<SEP>")
+        ).explode("Prediction")
 
+    # Rename umls columns for join
+    if "CUI" in umls_df.columns:
+        umls_df = umls_df.rename({"CUI": "target_code"})
+    if "SNOMED_code" in umls_df.columns:
+        umls_df = umls_df.rename({"SNOMED_code": "target_code"})
     # 3) Join with UMLS data to get CUIs for each term
     df_joined = df_exploded.join(
-        umls_df.select(["SNOMED_code", "Entity", "GROUP"]),
+        umls_df.select(["target_code", "Entity", "GROUP"]),
         left_on=["Prediction", "label"],
         right_on=["Entity", "GROUP"],
         how="left",
@@ -123,7 +132,7 @@ def add_code_column(df: pl.DataFrame, umls_df: pl.DataFrame) -> pl.DataFrame:
         "start_span",
         "end_span",
     ]).agg(
-        pl.col("SNOMED_code").drop_nulls().unique().alias("code_list"),
+        pl.col("target_code").drop_nulls().unique().alias("code_list"),
     )
 
     # 5) Filter for rows with at least one match and create final code string
@@ -267,6 +276,12 @@ def main(
     )
     output_folder.mkdir(parents=True, exist_ok=True)
 
+    # Multiple answers setting for guided decoding
+    if dataset_name == "SPACCC":
+        multiple_answers = True
+    else:
+        multiple_answers = False
+
     # Perform inference without constraint
     output_sentences = []
     output_scores = []
@@ -285,13 +300,12 @@ def main(
                 )
             # Split to get final prediction if not possible add empty string
             for batch in batch_output_sentences:
-                try:
-                    output_sentences.append(
-                        batch[0]["text"].split(f"] {verb} ")[1]  # type: ignore
-                    )
-                except IndexError:
+                splits = batch[0]["text"].split(f"] {verb}")  # type: ignore
+                if len(splits) > 1 and splits[1].strip():
+                    output_sentences.append(splits[1].strip())
+                else:
                     print(
-                        "IndexError: splitting failed, adding empty string as prediction."
+                        "IndexError: splitting failed or empty prediction, adding empty string as prediction."
                     )
                     print(f"Full text: {batch[0]['text']}")  # type: ignore
                     output_sentences.append("")
@@ -319,7 +333,9 @@ def main(
         pl.Series(name="Prediction_score", values=output_scores),
         pl.Series(name="Prediction_beam_score", values=output_beam_scores),
     )
-    no_constraint_df = add_code_column(no_constraint_df, umls_df=umls_df)
+    no_constraint_df = add_code_column(
+        no_constraint_df, umls_df=umls_df, multiple_answers=multiple_answers
+    )
 
     # Compute recall per label
     for label in no_constraint_df["label"].unique().to_list():
@@ -365,6 +381,7 @@ def main(
             batch_sources,
             batch_prefixes,
             candidates_trie=trie_legal_tokens,
+            multiple_answers=multiple_answers,
         )
         if "Llama" in model_name:
             with torch.no_grad():
@@ -375,13 +392,12 @@ def main(
                 )
             # Split to get final prediction if not possible add empty string
             for batch in batch_output_sentences:
-                try:
-                    output_sentences.append(
-                        batch[0]["text"].split(f"] {verb} ")[1]  # type: ignore
-                    )
-                except IndexError:
+                splits = batch[0]["text"].split(f"] {verb}")  # type: ignore
+                if len(splits) > 1 and splits[1].strip():
+                    output_sentences.append(splits[1].strip())
+                else:
                     print(
-                        "IndexError: splitting failed, adding empty string as prediction."
+                        "IndexError: splitting failed or empty prediction, adding empty string as prediction."
                     )
                     print(f"Full text: {batch[0]['text']}")  # type: ignore
                     output_sentences.append("")
@@ -410,7 +426,9 @@ def main(
         pl.Series(name="Prediction_score", values=output_scores),
         pl.Series(name="Prediction_beam_score", values=output_beam_scores),
     )
-    constraint_df = add_code_column(constraint_df, umls_df=umls_df)
+    constraint_df = add_code_column(
+        constraint_df, umls_df=umls_df, multiple_answers=multiple_answers
+    )
 
     # Compute recall per label
     for label in constraint_df["label"].unique().to_list():

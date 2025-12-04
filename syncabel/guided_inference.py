@@ -39,6 +39,7 @@ def get_prefix_allowed_tokens_fn(
     sources: list[str],
     prefix_templates: list[str],
     candidates_trie: dict[str, Trie] = None,  # type: ignore
+    multiple_answers: bool = False,
 ):
     return _get_end_to_end_prefix_allowed_tokens_fn(
         sources,
@@ -49,6 +50,7 @@ def get_prefix_allowed_tokens_fn(
         model.tokenizer.sep_token_id,
         _get_tgt_lang_token_id(model.tokenizer),
         candidates_trie,
+        multiple_answers,
     )
 
 
@@ -61,6 +63,7 @@ def _get_end_to_end_prefix_allowed_tokens_fn(
     sep_token_id: int,
     tgt_lang_id: Optional[int],
     candidates_trie: dict[str, Trie] = None,  # type: ignore
+    multiple_answers: bool = False,
 ):
     sent_sem_type = []
     for sent in sources:
@@ -83,7 +86,7 @@ def _get_end_to_end_prefix_allowed_tokens_fn(
             return [pad_token_id, eos_token_id]
         sem_type = sent_sem_type[batch_id]
         # Remove everything up to last sep_token_id and add prefix and tgt_lang_id
-        if sep_token_id in sent:
+        if multiple_answers and sep_token_id in sent:
             sep_index = len(sent) - 1 - sent[::-1].index(sep_token_id)
             if sep_index == len(sent) - 1:
                 # Start fresh with decoder start (and optional tgt language token)
@@ -97,6 +100,8 @@ def _get_end_to_end_prefix_allowed_tokens_fn(
         trie_out = candidates_trie[
             sem_type  # type: ignore
         ].get(sent)
-        return [eos_token_id, sep_token_id] + trie_out
+        if multiple_answers:
+            trie_out = [sep_token_id] + trie_out
+        return [eos_token_id] + trie_out
 
     return prefix_allowed_tokens_fn

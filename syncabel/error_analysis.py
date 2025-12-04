@@ -33,7 +33,7 @@ def load_predictions(
         has_header=True,
         schema_overrides={
             "code": str,  # force as string
-            "Predicted_CUI": str,  # force as string
+            "Predicted_code": str,  # force as string
         },  # type: ignore
     ).unique(
         subset=[
@@ -44,10 +44,10 @@ def load_predictions(
         ]
     )
     df = df.with_columns(
-        normalize_codes(pl.col("code")), normalize_codes(pl.col("Predicted_CUI"))
+        normalize_codes(pl.col("code")), normalize_codes(pl.col("Predicted_code"))
     )
     df = df.with_columns(
-        pl.when(pl.col("Predicted_CUI").is_null())
+        pl.when(pl.col("Predicted_code").is_null())
         .then(pl.lit(""))  # replace Prediction with empty string
         .otherwise(pl.col("Prediction"))
         .alias("Prediction")
@@ -67,6 +67,25 @@ def load_predictions(
         df = df.with_columns(semantic_rel_pred=pl.Series(relations))
         df.write_csv(file=prediction_path, separator="\t")
         return df
+
+
+def compute_simple_recall(df):
+    recall = {}
+    labels = sorted(df["label"].unique())
+    for label in labels:
+        df_label = df.filter(pl.col("label") == label)
+        total_label = df_label.height
+        true_label = df_label.filter(pl.col("code") == pl.col("Predicted_code")).height
+        if total_label == 0:
+            recall[label] = 0.0
+            continue
+        recall[label] = round(true_label / total_label * 100, 1)
+
+    # compute overall
+    total_df = df.height
+    true = df.filter(pl.col("code") == pl.col("Predicted_code")).height
+    recall["overall"] = round(true / total_df * 100, 1)
+    return recall
 
 
 def compute_recall_ratios(df, df_full, index="overall"):
@@ -91,7 +110,7 @@ def compute_recall_ratios(df, df_full, index="overall"):
             df_label = df.filter(pl.col("label") == label)
             total_full = df_full.filter(pl.col("label") == label).height
             total_df = df_label.height
-            true = df_label.filter(pl.col("code") == pl.col("Predicted_CUI")).height
+            true = df_label.filter(pl.col("code") == pl.col("Predicted_code")).height
             true_exact = df_label.filter(pl.col("semantic_rel_pred") == "EXACT").height
             true_narrow = df_label.filter(
                 pl.col("semantic_rel_pred") == "NARROW"
@@ -122,7 +141,7 @@ def compute_recall_ratios(df, df_full, index="overall"):
     # compute overall
     total_full = df_full.height
     total_df = df.height
-    true = df.filter(pl.col("code") == pl.col("Predicted_CUI")).height
+    true = df.filter(pl.col("code") == pl.col("Predicted_code")).height
     true_exact = df.filter(pl.col("semantic_rel_pred") == "EXACT").height
     true_narrow = df.filter(pl.col("semantic_rel_pred") == "NARROW").height
     true_broad = df.filter(pl.col("semantic_rel_pred") == "BROAD").height
@@ -149,7 +168,7 @@ def compute_metrics(
     pred_df, train_mentions, train_cuis, top_100_cuis, top_100_mentions, unique_pairs
 ):
     pred_df = pred_df.with_columns(
-        normalize_codes(pl.col("code")), normalize_codes(pl.col("Predicted_CUI"))
+        normalize_codes(pl.col("code")), normalize_codes(pl.col("Predicted_code"))
     )
     (
         recall_strict_all,
