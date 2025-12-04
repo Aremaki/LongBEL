@@ -283,10 +283,18 @@ def main(
                     batch_input,
                     num_beams=num_beams,
                 )
-            output_sentences.extend([
-                batch[0]["text"].split(f"] {verb} ")[1]  # type: ignore
-                for batch in batch_output_sentences
-            ])
+            # Split to get final prediction if not possible add empty string
+            for batch in batch_output_sentences:
+                try:
+                    output_sentences.append(
+                        batch[0]["text"].split(f"] {verb} ")[1]  # type: ignore
+                    )
+                except IndexError:
+                    print(
+                        "IndexError: splitting failed, adding empty string as prediction."
+                    )
+                    print(f"Full text: {batch[0]['text']}")  # type: ignore
+                    output_sentences.append("")
         else:
             with torch.no_grad():
                 batch_output_sentences = model.sample(
@@ -365,10 +373,18 @@ def main(
                     prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
                     num_beams=num_beams,
                 )
-            output_sentences.extend([
-                batch[0]["text"].split(f"] {verb} ")[1]  # type: ignore
-                for batch in batch_output_sentences
-            ])
+            # Split to get final prediction if not possible add empty string
+            for batch in batch_output_sentences:
+                try:
+                    output_sentences.append(
+                        batch[0]["text"].split(f"] {verb} ")[1]  # type: ignore
+                    )
+                except IndexError:
+                    print(
+                        "IndexError: splitting failed, adding empty string as prediction."
+                    )
+                    print(f"Full text: {batch[0]['text']}")  # type: ignore
+                    output_sentences.append("")
         else:
             with torch.no_grad():
                 batch_output_sentences = model.sample(
