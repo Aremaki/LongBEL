@@ -132,8 +132,7 @@ class _GENREHubInterface:
 
         outputs = self.generate(  # type: ignore
             **input_args,
-            # min_length=0,
-            # max_length=128,
+            max_new_tokens=128,
             num_beams=num_beams,
             num_return_sequences=num_beams,
             output_scores=True,

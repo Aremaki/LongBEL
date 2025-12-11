@@ -8,8 +8,8 @@ from syncabel.error_analysis import compute_simple_recall, load_predictions
 
 
 def main(datasets: list[str]):
-    for ckpt in ["best", "last"]:
-        for num_beams in [5, 10]:
+    for ckpt in ["best"]:
+        for num_beams in [5]:
             all_scores = {
                 "dataset": [],
                 "data_augmentation": [],
@@ -20,8 +20,57 @@ def main(datasets: list[str]):
             selection_method = "tfidf"
             model_name = "Meta-Llama-3-8B-Instruct"
             for dataset in tqdm(datasets, desc="Evaluation"):
-                for aug_data in ["human_only", "full_upsampled"]:
-                    for human_ratio in [0.2, 0.4, 0.6, 0.8, 1.0]:
+                if dataset == "SPACCC":
+                    data_split = "test_simple"
+                else:
+                    data_split = "test"
+                # Load train data for seen/unseen evaluation
+                train_path = (
+                    Path("data")
+                    / "final_data"
+                    / dataset
+                    / f"train_{selection_method}_annotations.tsv"
+                )
+
+                train_df = pl.read_csv(
+                    train_path,
+                    separator="\t",
+                    has_header=True,
+                    schema_overrides={
+                        "code": str,
+                        "mention_id": str,
+                        "filename": str,  # force as string
+                    },  # type: ignore
+                )
+                validation_path = (
+                    Path("data")
+                    / "final_data"
+                    / dataset
+                    / f"validation_{selection_method}_annotations.tsv"
+                )
+                if validation_path.exists():
+                    val_df = pl.read_csv(
+                        validation_path,
+                        separator="\t",
+                        has_header=True,
+                        schema_overrides={
+                            "code": str,
+                            "mention_id": str,
+                            "filename": str,  # force as string
+                        },  # type: ignore
+                    )
+                    # Reduce validation dataset to 10% as before
+                    split = int(len(val_df) * 0.9)
+                    val_df = val_df[:split]
+                    train_df = pl.concat([train_df, val_df])
+                train_cuis = set(train_df["code"].drop_nulls())
+                for aug_data in [
+                    "human_only",
+                    "full_upsampled",
+                    "full",
+                    "human_only_ft",
+                ]:
+                    for human_ratio in [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]:
                         if human_ratio < 1.0:
                             human_ratio_str = (
                                 "_"
@@ -30,14 +79,14 @@ def main(datasets: list[str]):
                             )
                         else:
                             human_ratio_str = ""
-                        if human_ratio == 0.0 and aug_data == "full_upsampled":
+                        if human_ratio == 0.0 and aug_data == "full":
                             preditction_path = (
                                 Path("results")
                                 / "inference_outputs"
                                 / dataset
                                 / f"synth_only_{selection_method}"
                                 / f"{model_name}_{ckpt}"
-                                / f"pred_test_constraint_{num_beams}_beams.tsv"
+                                / f"pred_{data_split}_constraint_{num_beams}_beams.tsv"
                             )
                         else:
                             preditction_path = (
@@ -46,7 +95,7 @@ def main(datasets: list[str]):
                                 / dataset
                                 / f"{aug_data}_{selection_method}{human_ratio_str}"
                                 / f"{model_name}_{ckpt}"
-                                / f"pred_test_constraint_{num_beams}_beams.tsv"
+                                / f"pred_{data_split}_constraint_{num_beams}_beams.tsv"
                             )
                         if not preditction_path.exists():
                             logging.warning(
@@ -56,6 +105,9 @@ def main(datasets: list[str]):
                         pred_df = load_predictions(
                             preditction_path,
                             dataset=dataset,
+                        )
+                        pred_df = pred_df.filter(
+                            ~pl.col("code").is_in(list(train_cuis))
                         )
                         score = compute_simple_recall(pred_df)
                         for label in score.keys():

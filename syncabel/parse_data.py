@@ -151,6 +151,7 @@ def parse_text(
     tsv_lines: list[dict[str, str]] = []
 
     # Build a fast lookup of sentence spans per passage
+    entity_id = 1
     for passage in data.get("passages", []):
         passage_text = passage["text"][0]
         start_offset_passage = passage["offsets"][0][0]
@@ -374,8 +375,10 @@ def parse_text(
                     )
 
             # Emit the pair
+            doc_id = data.get("document_id", "")
             tsv_line = {
-                "filename": data.get("id", ""),
+                "filename": doc_id,
+                "mention_id": f"{doc_id}.{entity_id}",
                 "label": group_annotation,
                 "start_span": entity["offsets"][0][0],
                 "end_span": entity["offsets"][-1][1],
@@ -385,6 +388,7 @@ def parse_text(
                 "annotation": annotation,
                 "sentence": marked_sent_text,
             }
+            entity_id += 1
             tsv_lines.append(tsv_line)
             source_sentences.append(marked_sent_text)
             target_sentences.append(f"[{entity_text}] {transition_verb} {annotation}")

@@ -210,7 +210,7 @@ def load_priority_pairs(train_file: Path, test_file: Path) -> set[tuple[str, str
             file_path,
             separator="\t",
             quote_char=None,
-            schema_overrides={"code": str},  # type: ignore
+            schema_overrides={"code": str, "mention_id": str, "filename": str},  # type: ignore
         )
         pairs = set()
 

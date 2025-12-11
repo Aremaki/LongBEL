@@ -47,7 +47,7 @@ Select specific datasets:
 
 ```bash
 python scripts/3b_prepare_data_encoder/run.py \
-  --datasets MedMentions EMEA MEDLINE
+  --datasets MedMentions EMEA
 ```
 
 Customize paths:

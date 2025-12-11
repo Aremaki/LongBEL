@@ -100,8 +100,8 @@ def _get_end_to_end_prefix_allowed_tokens_fn(
         trie_out = candidates_trie[
             sem_type  # type: ignore
         ].get(sent)
-        if multiple_answers:
+        if multiple_answers and eos_token_id in trie_out:
             trie_out = [sep_token_id] + trie_out
-        return [eos_token_id] + trie_out
+        return trie_out
 
     return prefix_allowed_tokens_fn

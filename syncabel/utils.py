@@ -38,6 +38,10 @@ def load_tsv_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dataset
             annotation_file,
             separator="\t",
             has_header=True,
+            schema_overrides={
+                "code": str,
+                "filename": str,  # force as string
+            },  # type: ignore
         )
 
         # Define the expected column names (7 total)
@@ -69,9 +73,15 @@ def load_tsv_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dataset
             "entities": [],
         })
 
+    # Sort to make grouping deterministic
+    annotations_df = annotations_df.unique().sort(
+        by=["doc_id", "entity_type", "start_span", "end_span"],
+        descending=[False, False, False, True],
+    )
+
     pages = []
     id = 0
-    for doc_id, group in annotations_df.group_by("doc_id"):
+    for doc_id, group in annotations_df.group_by("doc_id", maintain_order=True):
         # Load raw text for the document
         raw_text_path = raw_files_folder / f"{doc_id[0]}.txt"
         if raw_text_path.exists():

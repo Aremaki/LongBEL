@@ -287,14 +287,30 @@ def run(
     typer.echo(f"SPACCC dictionary saved to {spaccc_path / 'dictionary.pickle'}")
 
     # Optional: corrected CUI mapping for QUAERO (from manual review)
-    corrected_code = None
+    quaero_corrected_code = None
     if "EMEA" in datasets or "MEDLINE" in datasets:
-        corrected_code_path = (
+        quaero_corrected_code_path = (
             Path("data") / "corrected_code" / "QUAERO_2014_adapted.csv"
         )
-        if corrected_code_path.exists():
+        if quaero_corrected_code_path.exists():
             typer.echo("Using corrected CUI mapping...")
-            corrected_code = dict(pl.read_csv(corrected_code_path).iter_rows())
+            quaero_corrected_code = {
+                str(row[0]): str(row[1])
+                for row in pl.read_csv(quaero_corrected_code_path).iter_rows()
+            }
+
+    # Optional: corrected SNOMED mapping for SPACCC
+    spaccc_corrected_code = None
+    if "SPACCC" in datasets:
+        spaccc_corrected_code_path = (
+            Path("data") / "corrected_code" / "SPACCC_adapted.csv"
+        )
+        if spaccc_corrected_code_path.exists():
+            typer.echo("Using corrected SNOMED mapping...")
+            spaccc_corrected_code = {
+                str(row[0]): str(row[1])
+                for row in pl.read_csv(spaccc_corrected_code_path).iter_rows()
+            }
 
     # Process HF datasets
     if "MedMentions" in datasets:
@@ -314,7 +330,7 @@ def run(
             None,
             emea_path,
             umls_quaero_path,
-            corrected_code,
+            quaero_corrected_code,
         )
     if "MEDLINE" in datasets:
         typer.echo("→ Processing QUAERO MEDLINE (HF)…")
@@ -324,7 +340,7 @@ def run(
             None,
             medline_path,
             umls_quaero_path,
-            corrected_code,
+            quaero_corrected_code,
         )
 
     if "SPACCC" in datasets:
@@ -335,6 +351,7 @@ def run(
             Path("data/SPACCC/Normalization/"),
             spaccc_path,
             umls_spaccc_path,
+            spaccc_corrected_code,
         )
 
     typer.echo("✅ Encoder data preparation complete.")

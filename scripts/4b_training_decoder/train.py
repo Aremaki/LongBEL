@@ -1,3 +1,6 @@
+import os
+
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import argparse
 import glob
 import pickle
@@ -171,8 +174,7 @@ def main(
     except Exception as hub_err:  # pragma: no cover - network / availability branch
         if augmented_data == "human_only_ft":
             local_dir = (
-                Path("models")
-                / "NED"
+                Path("/lustre/fsn1/projects/rech/ssq/usk98ia/expe_data_ratio")
                 / f"{dataset_name}_synth_only_{selection_method}"
                 / model_short_name
                 / "model_last"
@@ -260,7 +262,14 @@ def main(
     human_train_dataset = None
     synth_train_dataset = None
 
-    if augmented_data in ["human_only", "full", "human_only_ft", "full_upsampled"]:
+    if augmented_data in [
+        "human_only",
+        "full",
+        "human_only_ft",
+        "full_upsampled",
+        "full_filtered",
+        "full_filtered_upsampled",
+    ]:
         human_train_source_data = load_pickle(
             data_folder / human_dataset_name / f"train_{selection_method}_source.pkl"
         )
@@ -308,23 +317,45 @@ def main(
                 "target": synth_train_target_data,
             })
         else:  # SPACCC logic
-            synth_train_source_data = load_pickle(
-                data_folder
-                / "SynthSPACCC_No_Def"
-                / f"train_{selection_method}_source.pkl"
-            )
-            synth_train_target_data = load_pickle(
-                data_folder
-                / "SynthSPACCC_No_Def"
-                / f"train_{selection_method}_target.pkl"
-            )
-            synth_train_dataset = Dataset.from_dict({
-                "source": synth_train_source_data,
-                "target": synth_train_target_data,
-            })
+            if "filtered" not in augmented_data:
+                synth_train_source_data = load_pickle(
+                    data_folder
+                    / "SynthSPACCC_No_Def"
+                    / f"train_{selection_method}_source.pkl"
+                )
+                synth_train_target_data = load_pickle(
+                    data_folder
+                    / "SynthSPACCC_No_Def"
+                    / f"train_{selection_method}_target.pkl"
+                )
+                synth_train_dataset = Dataset.from_dict({
+                    "source": synth_train_source_data,
+                    "target": synth_train_target_data,
+                })
+            else:
+                synth_train_source_data = load_pickle(
+                    data_folder
+                    / "SynthSPACCC_Filtered"
+                    / f"train_{selection_method}_source.pkl"
+                )
+                synth_train_target_data = load_pickle(
+                    data_folder
+                    / "SynthSPACCC_Filtered"
+                    / f"train_{selection_method}_target.pkl"
+                )
+                synth_train_dataset = Dataset.from_dict({
+                    "source": synth_train_source_data,
+                    "target": synth_train_target_data,
+                })
 
     # Choose train_dataset accordingly (same logic as before)
-    if augmented_data in ["synth_only", "full", "full_upsampled"]:
+    if augmented_data in [
+        "synth_only",
+        "full",
+        "full_upsampled",
+        "full_filtered",
+        "full_filtered_upsampled",
+    ]:
         save_strategy = "steps"
         save_steps = 2000
         eval_strategy = "steps"
@@ -335,7 +366,7 @@ def main(
         if augmented_data == "synth_only":
             num_train_epochs = 5
             train_dataset = synth_train_dataset
-        elif augmented_data == "full":
+        elif augmented_data in ["full", "full_filtered"]:
             num_train_epochs = 5
             train_dataset = concatenate_datasets([
                 human_train_dataset,
@@ -358,9 +389,13 @@ def main(
         if augmented_data == "human_only":
             num_train_epochs = 200
         else:  # human_only_ft
-            num_train_epochs = 70
             lr = lr / 3.0
-
+            if dataset_name in ["EMEA", "MEDLINE"]:
+                num_train_epochs = 50
+            elif dataset_name == "SPACCC":
+                num_train_epochs = 70
+            else:
+                num_train_epochs = 20
     # Format datasets into prompt/completion format
     train_dataset = create_prompt_completion_dataset(train_dataset, dataset_name)
     validation_dataset = create_prompt_completion_dataset(
@@ -490,6 +525,8 @@ if __name__ == "__main__":
             "synth_only",
             "full",
             "full_upsampled",
+            "full_filtered",
+            "full_filtered_upsampled",
         ],
         help="Whether to use augmented data for training",
     )

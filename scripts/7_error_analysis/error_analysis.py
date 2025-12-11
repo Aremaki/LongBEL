@@ -34,7 +34,9 @@ def main(datasets: list[str]):
             separator="\t",
             has_header=True,
             schema_overrides={
-                "code": str,  # force as string
+                "code": str,
+                "mention_id": str,
+                "filename": str,  # force as string
             },  # type: ignore
         )
         validation_path = (
@@ -49,7 +51,9 @@ def main(datasets: list[str]):
                 separator="\t",
                 has_header=True,
                 schema_overrides={
-                    "code": str,  # force as string
+                    "code": str,
+                    "mention_id": str,
+                    "filename": str,  # force as string
                 },  # type: ignore
             )
             # Reduce validation dataset to 10% as before

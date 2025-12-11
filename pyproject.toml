@@ -44,6 +44,7 @@ dependencies = [
     "pip>=25.2",
     "unidecode>=1.4.0",
     "keycare @ git+https://github.com/Aremaki/KeyCARE.git",
+    "owlready2>=0.49",
 ]
 
 [project.optional-dependencies]

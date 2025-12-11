@@ -212,7 +212,11 @@ def main(
         data_folder / dataset_name / f"{split_name}_{selection_method}_annotations.tsv",
         separator="\t",
         has_header=True,
-        schema_overrides={"code": str},  # type: ignore
+        schema_overrides={
+            "code": str,
+            "mention_id": str,
+            "filename": str,
+        },  # type: ignore
     )
 
     # Load UMLS data
@@ -256,9 +260,10 @@ def main(
             cat_umls_df = umls_df.filter(pl.col("GROUP") == category)
             sequences = []
             for entity in cat_umls_df["Entity"].to_list():
-                sequences.append(
-                    model.tokenizer.encode(prefix + entity)[start_idx:]  # type: ignore
-                )
+                sequence = model.tokenizer.encode(prefix + entity)[start_idx:]  # type: ignore
+                if sequence[-1] != model.tokenizer.eos_token_id:  # type: ignore
+                    sequence.append(model.tokenizer.eos_token_id)  # type: ignore
+                sequences.append(sequence)
             trie_legal_tokens[category] = Trie(sequences)
 
         # Save it
@@ -277,7 +282,7 @@ def main(
     output_folder.mkdir(parents=True, exist_ok=True)
 
     # Multiple answers setting for guided decoding
-    if dataset_name == "SPACCC":
+    if not split_name == "test_simple" and dataset_name == "SPACCC":
         multiple_answers = True
     else:
         multiple_answers = False
@@ -492,12 +497,6 @@ if __name__ == "__main__":
         type=str,
         default="test",
         help="The data split name for inference",
-    )
-    parser.add_argument(
-        "--with-group",
-        default=False,
-        action="store_true",
-        help="Use group information if True",
     )
     parser.add_argument(
         "--augmented-data",

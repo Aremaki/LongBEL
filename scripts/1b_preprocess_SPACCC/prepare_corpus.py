@@ -144,10 +144,12 @@ def _process_spaccc_dataset(
     splits = {}
     train_annotations_path = spaccc_data_dir / "train.tsv"
     test_annotations_path = spaccc_data_dir / "test.tsv"
+    test_simple_annotations_path = spaccc_data_dir / "test_simple.tsv"
     test_ner_annotations_path = spaccc_data_dir / "test_ner.tsv"
     train_raw_files_folder = spaccc_data_dir.parent / "raw_txt" / "train"
     test_raw_files_folder = spaccc_data_dir.parent / "raw_txt" / "test"
     test_ner_raw_files_folder = spaccc_data_dir.parent / "raw_txt" / "test"
+    test_simple_raw_files_folder = spaccc_data_dir.parent / "raw_txt" / "test"
 
     if train_annotations_path.exists():
         logging.info(f"  • Loading train split from {train_annotations_path}")
@@ -164,7 +166,13 @@ def _process_spaccc_dataset(
         splits["test_ner"] = load_tsv_as_bigbio(
             test_ner_annotations_path, test_ner_raw_files_folder
         )
-
+    if test_simple_annotations_path.exists():
+        logging.info(
+            f"  • Loading test_simple split from {test_simple_annotations_path}"
+        )
+        splits["test_simple"] = load_tsv_as_bigbio(
+            test_simple_annotations_path, test_simple_raw_files_folder
+        )
     processed = {}
     for split_name, split_data in splits.items():
         if not split_data or len(split_data) == 0:
@@ -245,6 +253,10 @@ def run(
         Path("data/synthetic_data/SynthSPACCC/SynthSPACCC_bigbio_no_def.json"),
         help="SynthSPACCC no definitions directory (BigBio format)",
     ),
+    synth_spaccc_filtered_data_dir: Path = typer.Option(
+        Path("data/synthetic_data/SynthSPACCC/SynthSPACCC_bigbio_filtered.json"),
+        help="SynthSPACCC filtered directory (BigBio format)",
+    ),
 ) -> None:
     """Run preprocessing pipeline for SPACCC dataset."""
     # Load UMLS mapping resources
@@ -283,6 +295,22 @@ def run(
         corrected_code_path,
     )
 
+    if synth_spaccc_filtered_data_dir.exists():
+        _process_synth_dataset(
+            "SynthSPACCC_Filtered",
+            code_to_title,
+            code_to_syn,
+            code_to_groups,
+            semantic_info,
+            tfidf_vectorizer_path,
+            start_entity,
+            end_entity,
+            start_group,
+            end_group,
+            out_root,
+            synth_spaccc_filtered_data_dir,
+            corrected_code_path,
+        )
     if synth_spaccc_def_data_dir.exists():
         _process_synth_dataset(
             "SynthSPACCC_Def",
