@@ -507,6 +507,8 @@ if __name__ == "__main__":
             "synth_only",
             "full",
             "full_upsampled",
+            "full_filtered",
+            "full_filtered_upsampled",
             "human_only_ft",
         ],
         help="Whether to use augmented data for training",
