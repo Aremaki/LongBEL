@@ -228,10 +228,9 @@ def main(
 
     # ---------- Load validation dataset (same logic) ----------
     data_folder = Path("data/final_data")
-    human_dataset_name = "SPACCC" if "SPACCC" in dataset_name else dataset_name
 
     validation_source_path = (
-        data_folder / human_dataset_name / f"validation_{selection_method}_source.pkl"
+        data_folder / dataset_name / f"validation_{selection_method}_source.pkl"
     )
     if validation_source_path.exists():
         split_name = "validation"
@@ -240,10 +239,10 @@ def main(
         print("Validation file not found, using test file instead.")
 
     validation_source_data = load_pickle(
-        data_folder / human_dataset_name / f"{split_name}_{selection_method}_source.pkl"
+        data_folder / dataset_name / f"{split_name}_{selection_method}_source.pkl"
     )
     validation_target_data = load_pickle(
-        data_folder / human_dataset_name / f"{split_name}_{selection_method}_target.pkl"
+        data_folder / dataset_name / f"{split_name}_{selection_method}_target.pkl"
     )
 
     validation_data = {
@@ -262,19 +261,12 @@ def main(
     human_train_dataset = None
     synth_train_dataset = None
 
-    if augmented_data in [
-        "human_only",
-        "full",
-        "human_only_ft",
-        "full_upsampled",
-        "full_filtered",
-        "full_filtered_upsampled",
-    ]:
+    if not augmented_data == "synth_only":
         human_train_source_data = load_pickle(
-            data_folder / human_dataset_name / f"train_{selection_method}_source.pkl"
+            data_folder / dataset_name / f"train_{selection_method}_source.pkl"
         )
         human_train_target_data = load_pickle(
-            data_folder / human_dataset_name / f"train_{selection_method}_target.pkl"
+            data_folder / dataset_name / f"train_{selection_method}_target.pkl"
         )
         human_train_dataset = Dataset.from_dict({
             "source": human_train_source_data,
@@ -293,7 +285,7 @@ def main(
             split = int(len(human_train_dataset) * human_ratio)
             human_train_dataset = human_train_dataset.select(indexes[:split])
 
-    if augmented_data in ["synth_only", "full", "full_upsampled"]:
+    if augmented_data not in ["human_only", "human_only_ft"]:
         if dataset_name == "MedMentions":
             synth_train_source_data = load_pickle(
                 data_folder / "SynthMM" / f"train_{selection_method}_source.pkl"
@@ -348,14 +340,8 @@ def main(
                     "target": synth_train_target_data,
                 })
 
-    # Choose train_dataset accordingly (same logic as before)
-    if augmented_data in [
-        "synth_only",
-        "full",
-        "full_upsampled",
-        "full_filtered",
-        "full_filtered_upsampled",
-    ]:
+        # ---------- Prepare final train_dataset based on augmented_data ----------
+        # augmented data training
         save_strategy = "steps"
         save_steps = 2000
         eval_strategy = "steps"
@@ -369,9 +355,9 @@ def main(
         elif augmented_data in ["full", "full_filtered"]:
             num_train_epochs = 5
             train_dataset = concatenate_datasets([
-                human_train_dataset,
+                human_train_dataset,  # type: ignore
                 synth_train_dataset,
-            ])  # type: ignore
+            ])
         else:  # full_upsampled
             train_dataset = interleave_datasets(
                 [human_train_dataset, synth_train_dataset],  # type: ignore
@@ -379,6 +365,7 @@ def main(
                 seed=42,
             )
     else:
+        # human only training
         save_strategy = "epoch"
         save_steps = 0
         eval_strategy = "epoch"

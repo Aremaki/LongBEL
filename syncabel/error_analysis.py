@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import polars as pl
 
@@ -20,59 +20,8 @@ def normalize_codes(col: pl.Expr) -> pl.Expr:
     )
 
 
-def get_concepts_from_codes(
-    codes: list[str],
-    labels: list[str],
-    umls_df: pl.DataFrame,
-    mentions: Optional[list[str]] = None,
-    context_sentences: Optional[list[str]] = None,
-) -> list[dict[str, str]]:
-    """Provide a list of dictionaries with 'mentions', 'synonym', 'title', 'semantic_group', and 'code' for each code in the input list."""
-    concepts = []
-    if mentions is not None and context_sentences is not None:
-        for code, label, mention, context in zip(
-            codes, labels, mentions, context_sentences
-        ):
-            concept_info = umls_df.filter(pl.col("CUI") == code)
-            if concept_info.height == 0:
-                continue
-            synonyms = concept_info["Entity"].unique().to_list()
-            title = concept_info["title"].first()
-            semantic_group = concept_info["GROUP"].first()
-            concept_dict = {
-                "text": label,
-                "synonyms": synonyms,
-                "title": title,
-                "semantic_group": semantic_group,
-                "code": code,
-                "mention": mention,
-                "context_sentence": context,
-            }
-            concepts.append(concept_dict)
-        return concepts
-    for code, label in zip(codes, labels):
-        concept_info = umls_df.filter(pl.col("CUI") == code)
-        if concept_info.height == 0:
-            continue
-        synonyms = concept_info["Entity"].unique().to_list()
-        title = concept_info["title"].first()
-        semantic_group = concept_info["GROUP"].first()
-        concept_dict = {
-            "text": label,
-            "synonyms": synonyms,
-            "title": title,
-            "semantic_group": semantic_group,
-            "code": code,
-        }
-        concepts.append(concept_dict)
-    return concepts
-
-
 def load_predictions(
     prediction_path: Path,
-    dataset: str,
-    umls_df: pl.DataFrame = pl.DataFrame(),
-    relextractor=None,
 ) -> pl.DataFrame:
     """
     Add semantic relation column to the dataframe using KeyCare's RelationExtractor.
@@ -106,29 +55,7 @@ def load_predictions(
         .otherwise(pl.col("Prediction"))
         .alias("Prediction")
     )
-    if "semantic_rel_pred" in df.columns or relextractor is None:
-        return df  # already processed
-    else:
-        source_codes = df["code"].to_list()
-        source_labels = df["annotations"].to_list()
-        target_codes = df["Prediction_code"].to_list()
-        target_labels = df["Prediction"].to_list()
-        mentions = df["span"].to_list()
-        context_sentences = df["sentences"].to_list()
-        source_concepts = get_concepts_from_codes(
-            source_codes, source_labels, umls_df, mentions, context_sentences
-        )
-        target_concepts = get_concepts_from_codes(target_codes, target_labels, umls_df)
-        relextractor(source_concepts, target_concepts)
-        relations = []
-        for rel in relextractor.relations:
-            if len(rel.rel_type) == 0:
-                relations.append("NO_RELATION")
-            else:
-                relations.append(rel.rel_type[0])
-        df = df.with_columns(semantic_rel_pred=pl.Series(relations))
-        df.write_csv(file=prediction_path, separator="\t")
-        return df
+    return df  # already processed
 
 
 def compute_simple_recall(df):
