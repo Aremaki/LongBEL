@@ -2,8 +2,6 @@ import logging
 from pathlib import Path
 
 import polars as pl
-
-# from keycare.RelExtractor import RelExtractor
 from tqdm import tqdm
 
 from syncabel.error_analysis import compute_metrics, load_predictions
@@ -68,9 +66,8 @@ def main(datasets: list[str]):
         top_100_mentions = set(train_df["span"].value_counts().head(100)["span"])
         preditction_path = None
         for model_name in model_names:
-            for aug_data in ["human_only", "full_upsampled"]:
+            for aug_data in ["human_only", "full_upsampled", "full"]:
                 for constraint in [True, False]:
-                    aug_label = "normal" if aug_data == "human_only" else "augmented"
                     if not model_name == "Meta-Llama-3-8B-Instruct":
                         preditction_path = (
                             Path("results")
@@ -85,10 +82,10 @@ def main(datasets: list[str]):
                             / "inference_outputs"
                             / dataset
                             / f"{aug_data}_{selection_method}"
-                            / f"{model_name}_best"
+                            / f"{model_name}_last"
                             / f"pred_{data_split}_{'no_constraint' if not constraint else 'constraint'}_5_beams.tsv"
                         )
-                        model_name_str = f"{model_name}_{aug_label}_{'no_constraint' if not constraint else 'constraint'}"
+                        model_name_str = f"{model_name}_{aug_data}_{'no_constraint' if not constraint else 'constraint'}"
                     if not preditction_path.exists():
                         logging.warning(
                             f"Prediction file not found, skipping: {preditction_path}"
@@ -96,8 +93,8 @@ def main(datasets: list[str]):
                         continue
                     pred_df = load_predictions(
                         preditction_path,
-                        dataset=dataset,
                     )
+                    compute_all_recalls = "LLM_Evaluation" in pred_df.columns
                     scores = compute_metrics(
                         pred_df=pred_df,
                         train_mentions=train_mentions,
@@ -105,7 +102,7 @@ def main(datasets: list[str]):
                         top_100_cuis=top_100_cuis,
                         top_100_mentions=top_100_mentions,
                         unique_pairs=unique_pairs,
-                        compute_all_recalls=False,
+                        compute_all_recalls=compute_all_recalls,
                     )
                     for label in scores.keys():
                         if label not in all_ratios:
@@ -116,9 +113,15 @@ def main(datasets: list[str]):
                             all_scores[label][dataset] = {
                                 "index": scores[label]["index"]
                             }
-                        all_scores[label][dataset][model_name_str] = scores[label][
-                            "recall_strict"
-                        ]
+                        for recall_score in scores[label].keys():
+                            if recall_score.startswith("recall_"):
+                                if compute_all_recalls:
+                                    model_name_str_label = f"{model_name_str}_{recall_score.replace('recall_', '')}"
+                                else:
+                                    model_name_str_label = model_name_str
+                                all_scores[label][dataset][model_name_str_label] = (
+                                    scores[label][recall_score]
+                                )
                         all_ratios[label][dataset] = scores[label]["ratios"]
     # Write results
     for label in all_scores.keys():

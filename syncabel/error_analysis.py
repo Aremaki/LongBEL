@@ -102,6 +102,7 @@ def compute_recall_ratios(
     recall_exact: dict[str, dict[str, float]] = {}
     recall_narrow: dict[str, dict[str, float]] = {}
     recall_broad: dict[str, dict[str, float]] = {}
+    recall_partial: dict[str, dict[str, float]] = {}
     ratios: dict[str, dict[str, str]] = {}
 
     # Overall row (aggregated across labels)
@@ -117,25 +118,22 @@ def compute_recall_ratios(
     }
 
     if compute_all:
-        true_exact_overall = df.filter(pl.col("semantic_rel_pred") == "EXACT").height
-        true_narrow_overall = df.filter(pl.col("semantic_rel_pred") == "NARROW").height
-        true_broad_overall = df.filter(pl.col("semantic_rel_pred") == "BROAD").height
+        true_exact_overall = df.filter(pl.col("LLM_Evaluation") == "EXACT").height
+        true_partial_overall = df.filter(pl.col("LLM_Evaluation") == "PARTIAL").height
+        true_narrow_overall = df.filter(pl.col("LLM_Evaluation") == "NARROW").height
+        true_broad_overall = df.filter(pl.col("LLM_Evaluation") == "BROAD").height
 
         recall_exact["overall"] = {
             index_key: round(true_exact_overall / total_pred_overall * 100, 1)
         }
-        recall_narrow["overall"] = {
-            index_key: round(
-                (true_exact_overall + true_narrow_overall) / total_pred_overall * 100, 1
-            )
-        }
         recall_broad["overall"] = {
-            index_key: round(
-                (true_exact_overall + true_narrow_overall + true_broad_overall)
-                / total_pred_overall
-                * 100,
-                1,
-            )
+            index_key: round(true_broad_overall / total_pred_overall * 100, 1)
+        }
+        recall_partial["overall"] = {
+            index_key: round(true_partial_overall / total_pred_overall * 100, 1)
+        }
+        recall_narrow["overall"] = {
+            index_key: round(true_narrow_overall / total_pred_overall * 100, 1)
         }
 
     # deterministic label list from df_full
@@ -157,22 +155,26 @@ def compute_recall_ratios(
         # Only compute semantic-rel counts if compute_all requested (avoid cost otherwise)
         if compute_all:
             true_exact = df_label_pred.filter(
-                pl.col("semantic_rel_pred") == "EXACT"
+                pl.col("LLM_Evaluation") == "EXACT"
+            ).height
+            true_partial = df_label_pred.filter(
+                pl.col("LLM_Evaluation") == "PARTIAL"
             ).height
             true_narrow = df_label_pred.filter(
-                pl.col("semantic_rel_pred") == "NARROW"
+                pl.col("LLM_Evaluation") == "NARROW"
             ).height
             true_broad = df_label_pred.filter(
-                pl.col("semantic_rel_pred") == "BROAD"
+                pl.col("LLM_Evaluation") == "BROAD"
             ).height
         else:
-            true_exact = true_narrow = true_broad = 0
+            true_exact = true_narrow = true_broad = true_partial = 0
 
         # init containers
         recall_strict[label] = {}
         ratios[label] = {}
         if compute_all:
             recall_exact[label] = {}
+            recall_partial[label] = {}
             recall_narrow[label] = {}
             recall_broad[label] = {}
 
@@ -182,6 +184,7 @@ def compute_recall_ratios(
             ratios[label][index_key] = f"0% (0/{total_full})"
             if compute_all:
                 recall_exact[label][index_key] = 0.0
+                recall_partial[label][index_key] = 0.0
                 recall_narrow[label][index_key] = 0.0
                 recall_broad[label][index_key] = 0.0
             continue
@@ -200,15 +203,19 @@ def compute_recall_ratios(
 
         if compute_all:
             recall_exact[label][index_key] = round(true_exact / total_pred * 100, 1)
-            recall_narrow[label][index_key] = round(
-                (true_exact + true_narrow) / total_pred * 100, 1
-            )
-            recall_broad[label][index_key] = round(
-                (true_exact + true_narrow + true_broad) / total_pred * 100, 1
-            )
+            recall_partial[label][index_key] = round(true_partial / total_pred * 100, 1)
+            recall_narrow[label][index_key] = round(true_narrow / total_pred * 100, 1)
+            recall_broad[label][index_key] = round(true_broad / total_pred * 100, 1)
 
     if compute_all:
-        return recall_strict, recall_exact, recall_narrow, recall_broad, ratios
+        return (
+            recall_strict,
+            recall_exact,
+            recall_partial,
+            recall_narrow,
+            recall_broad,
+            ratios,
+        )
 
     return recall_strict, ratios
 
@@ -237,6 +244,7 @@ def compute_metrics(
 
     # We'll call compute_recall_ratios for each partition and then aggregate
     # Helper to call and return a consistent tuple for easier aggregation
+
     def _call_partition(df_partition: pl.DataFrame, index_name: str):
         if compute_all_recalls:
             return compute_recall_ratios(
@@ -252,6 +260,7 @@ def compute_metrics(
         (
             recall_strict_all,
             recall_exact_all,
+            recall_partial_all,
             recall_narrow_all,
             recall_broad_all,
             ratios_all,
@@ -266,6 +275,7 @@ def compute_metrics(
         (
             recall_strict_seen_cuis,
             recall_exact_seen_cuis,
+            recall_partial_seen_cuis,
             recall_narrow_seen_cuis,
             recall_broad_seen_cuis,
             ratios_seen_cuis,
@@ -273,6 +283,7 @@ def compute_metrics(
         (
             recall_strict_unseen_cuis,
             recall_exact_unseen_cuis,
+            recall_partial_unseen_cuis,
             recall_narrow_unseen_cuis,
             recall_broad_unseen_cuis,
             ratios_unseen_cuis,
@@ -294,6 +305,7 @@ def compute_metrics(
         (
             recall_strict_seen_mentions,
             recall_exact_seen_mentions,
+            recall_partial_seen_mentions,
             recall_narrow_seen_mentions,
             recall_broad_seen_mentions,
             ratios_seen_mentions,
@@ -301,6 +313,7 @@ def compute_metrics(
         (
             recall_strict_unseen_mentions,
             recall_exact_unseen_mentions,
+            recall_partial_unseen_mentions,
             recall_narrow_unseen_mentions,
             recall_broad_unseen_mentions,
             ratios_unseen_mentions,
@@ -322,6 +335,7 @@ def compute_metrics(
         (
             recall_strict_seen_top_100_cuis,
             recall_exact_seen_top_100_cuis,
+            recall_partial_seen_top_100_cuis,
             recall_narrow_seen_top_100_cuis,
             recall_broad_seen_top_100_cuis,
             ratios_seen_top_100_cuis,
@@ -329,6 +343,7 @@ def compute_metrics(
         (
             recall_strict_unseen_top_100_cuis,
             recall_exact_unseen_top_100_cuis,
+            recall_partial_unseen_top_100_cuis,
             recall_narrow_unseen_top_100_cuis,
             recall_broad_unseen_top_100_cuis,
             ratios_unseen_top_100_cuis,
@@ -352,6 +367,7 @@ def compute_metrics(
         (
             recall_strict_seen_top_100_mentions,
             recall_exact_seen_top_100_mentions,
+            recall_partial_seen_top_100_mentions,
             recall_narrow_seen_top_100_mentions,
             recall_broad_seen_top_100_mentions,
             ratios_seen_top_100_mentions,
@@ -359,6 +375,7 @@ def compute_metrics(
         (
             recall_strict_unseen_top_100_mentions,
             recall_exact_unseen_top_100_mentions,
+            recall_partial_unseen_top_100_mentions,
             recall_narrow_unseen_top_100_mentions,
             recall_broad_unseen_top_100_mentions,
             ratios_unseen_top_100_mentions,
@@ -383,6 +400,7 @@ def compute_metrics(
         (
             recall_strict_seen_unique_pairs,
             recall_exact_seen_unique_pairs,
+            recall_partial_seen_unique_pairs,
             recall_narrow_seen_unique_pairs,
             recall_broad_seen_unique_pairs,
             ratios_seen_unique_pairs,
@@ -390,6 +408,7 @@ def compute_metrics(
         (
             recall_strict_unseen_unique_pairs,
             recall_exact_unseen_unique_pairs,
+            recall_partial_unseen_unique_pairs,
             recall_narrow_unseen_unique_pairs,
             recall_broad_unseen_unique_pairs,
             ratios_unseen_unique_pairs,
@@ -409,6 +428,7 @@ def compute_metrics(
         (
             recall_strict_identical,
             recall_exact_identical,
+            recall_partial_identical,
             recall_narrow_identical,
             recall_broad_identical,
             ratios_identical,
@@ -416,6 +436,7 @@ def compute_metrics(
         (
             recall_strict_not_identical,
             recall_exact_not_identical,
+            recall_partial_not_identical,
             recall_narrow_not_identical,
             recall_broad_not_identical,
             ratios_not_identical,
@@ -440,6 +461,7 @@ def compute_metrics(
         (
             recall_strict_one_word,
             recall_exact_one_word,
+            recall_partial_one_word,
             recall_narrow_one_word,
             recall_broad_one_word,
             ratios_one_word,
@@ -447,6 +469,7 @@ def compute_metrics(
         (
             recall_strict_two_words,
             recall_exact_two_words,
+            recall_partial_two_words,
             recall_narrow_two_words,
             recall_broad_two_words,
             ratios_two_words,
@@ -454,6 +477,7 @@ def compute_metrics(
         (
             recall_strict_three_words,
             recall_exact_three_words,
+            recall_partial_three_words,
             recall_narrow_three_words,
             recall_broad_three_words,
             ratios_three_words,
@@ -461,6 +485,7 @@ def compute_metrics(
         (
             recall_strict_more_than_three_words,
             recall_exact_more_than_three_words,
+            recall_partial_more_than_three_words,
             recall_narrow_more_than_three_words,
             recall_broad_more_than_three_words,
             ratios_more_than_three_words,
@@ -494,6 +519,7 @@ def compute_metrics(
         (
             recall_strict_abbrev_only,
             recall_exact_abbrev_only,
+            recall_partial_abbrev_only,
             recall_narrow_abbrev_only,
             recall_broad_abbrev_only,
             ratios_abbrev_only,
@@ -501,6 +527,7 @@ def compute_metrics(
         (
             recall_strict_abbrev_or_contains,
             recall_exact_abbrev_or_contains,
+            recall_partial_abbrev_or_contains,
             recall_narrow_abbrev_or_contains,
             recall_broad_abbrev_or_contains,
             ratios_abbrev_or_contains,
@@ -508,6 +535,7 @@ def compute_metrics(
         (
             recall_strict_not_abbrev,
             recall_exact_not_abbrev,
+            recall_partial_not_abbrev,
             recall_narrow_not_abbrev,
             recall_broad_not_abbrev,
             ratios_not_abbrev,
@@ -537,6 +565,7 @@ def compute_metrics(
         (
             recall_strict_repeated,
             recall_exact_repeated,
+            recall_partial_repeated,
             recall_narrow_repeated,
             recall_broad_repeated,
             ratios_repeated,
@@ -544,6 +573,7 @@ def compute_metrics(
         (
             recall_strict_not_repeated,
             recall_exact_not_repeated,
+            recall_partial_not_repeated,
             recall_narrow_not_repeated,
             recall_broad_not_repeated,
             ratios_not_repeated,
@@ -568,6 +598,7 @@ def compute_metrics(
                 "index": [],
                 "recall_strict": [],
                 "recall_exact": [],
+                "recall_partial": [],
                 "recall_narrow": [],
                 "recall_broad": [],
                 "ratios": [],
@@ -585,6 +616,7 @@ def compute_metrics(
         recall_strict_map: dict[str, dict[str, float]],
         ratios_map: dict[str, dict[str, str]],
         recall_exact_map=None,
+        recall_partial_map=None,
         recall_narrow_map=None,
         recall_broad_map=None,
     ):
@@ -601,9 +633,11 @@ def compute_metrics(
 
         if compute_all_recalls:
             exact_val = list(recall_exact_map.get(label, {"": 0.0}).values())[0]  # type: ignore
+            partial_val = list(recall_partial_map.get(label, {"": 0.0}).values())[0]  # type: ignore
             narrow_val = list(recall_narrow_map.get(label, {"": 0.0}).values())[0]  # type: ignore
             broad_val = list(recall_broad_map.get(label, {"": 0.0}).values())[0]  # type: ignore
             final_results[label]["recall_exact"].append(exact_val)
+            final_results[label]["recall_partial"].append(partial_val)
             final_results[label]["recall_narrow"].append(narrow_val)
             final_results[label]["recall_broad"].append(broad_val)
 
@@ -611,24 +645,26 @@ def compute_metrics(
     partitions = []
 
     # For each partition, gather the maps returned above and append a tuple to partitions:
-    # (recall_strict_map, recall_exact_map_or_None, recall_narrow_map_or_None, recall_broad_map_or_None, ratios_map)
+    # (recall_strict_map, recall_exact_map_or_None, recall_partial_map_or_None, recall_narrow_map_or_None, recall_broad_map_or_None, ratios_map)
     # "All"
     if compute_all_recalls:
         partitions.append((
             recall_strict_all,
             recall_exact_all,  # type: ignore
+            recall_partial_all,  # type: ignore
             recall_narrow_all,  # type: ignore
             recall_broad_all,  # type: ignore
             ratios_all,
         ))
     else:
-        partitions.append((recall_strict_all, None, None, None, ratios_all))
+        partitions.append((recall_strict_all, None, None, None, None, ratios_all))
 
     # seen/unseen cuis
     if compute_all_recalls:
         partitions.append((
             recall_strict_seen_cuis,
             recall_exact_seen_cuis,  # type: ignore
+            recall_partial_seen_cuis,  # type: ignore
             recall_narrow_seen_cuis,  # type: ignore
             recall_broad_seen_cuis,  # type: ignore
             ratios_seen_cuis,
@@ -636,14 +672,23 @@ def compute_metrics(
         partitions.append((
             recall_strict_unseen_cuis,
             recall_exact_unseen_cuis,  # type: ignore
+            recall_partial_unseen_cuis,  # type: ignore
             recall_narrow_unseen_cuis,  # type: ignore
             recall_broad_unseen_cuis,  # type: ignore
             ratios_unseen_cuis,
         ))
     else:
-        partitions.append((recall_strict_seen_cuis, None, None, None, ratios_seen_cuis))
+        partitions.append((
+            recall_strict_seen_cuis,
+            None,
+            None,
+            None,
+            None,
+            ratios_seen_cuis,
+        ))
         partitions.append((
             recall_strict_unseen_cuis,
+            None,
             None,
             None,
             None,
@@ -655,6 +700,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_seen_mentions,
             recall_exact_seen_mentions,  # type: ignore
+            recall_partial_seen_mentions,  # type: ignore
             recall_narrow_seen_mentions,  # type: ignore
             recall_broad_seen_mentions,  # type: ignore
             ratios_seen_mentions,
@@ -662,6 +708,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_unseen_mentions,
             recall_exact_unseen_mentions,  # type: ignore
+            recall_partial_unseen_mentions,  # type: ignore
             recall_narrow_unseen_mentions,  # type: ignore
             recall_broad_unseen_mentions,  # type: ignore
             ratios_unseen_mentions,
@@ -672,10 +719,12 @@ def compute_metrics(
             None,
             None,
             None,
+            None,
             ratios_seen_mentions,
         ))
         partitions.append((
             recall_strict_unseen_mentions,
+            None,
             None,
             None,
             None,
@@ -687,6 +736,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_seen_top_100_cuis,
             recall_exact_seen_top_100_cuis,  # type: ignore
+            recall_partial_seen_top_100_cuis,  # type: ignore
             recall_narrow_seen_top_100_cuis,  # type: ignore
             recall_broad_seen_top_100_cuis,  # type: ignore
             ratios_seen_top_100_cuis,
@@ -694,6 +744,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_unseen_top_100_cuis,
             recall_exact_unseen_top_100_cuis,  # type: ignore
+            recall_partial_unseen_top_100_cuis,  # type: ignore
             recall_narrow_unseen_top_100_cuis,  # type: ignore
             recall_broad_unseen_top_100_cuis,  # type: ignore
             ratios_unseen_top_100_cuis,
@@ -704,10 +755,12 @@ def compute_metrics(
             None,
             None,
             None,
+            None,
             ratios_seen_top_100_cuis,
         ))
         partitions.append((
             recall_strict_unseen_top_100_cuis,
+            None,
             None,
             None,
             None,
@@ -719,6 +772,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_seen_top_100_mentions,
             recall_exact_seen_top_100_mentions,  # type: ignore
+            recall_partial_seen_top_100_mentions,  # type: ignore
             recall_narrow_seen_top_100_mentions,  # type: ignore
             recall_broad_seen_top_100_mentions,  # type: ignore
             ratios_seen_top_100_mentions,
@@ -726,6 +780,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_unseen_top_100_mentions,
             recall_exact_unseen_top_100_mentions,  # type: ignore
+            recall_partial_unseen_top_100_mentions,  # type: ignore
             recall_narrow_unseen_top_100_mentions,  # type: ignore
             recall_broad_unseen_top_100_mentions,  # type: ignore
             ratios_unseen_top_100_mentions,
@@ -736,10 +791,12 @@ def compute_metrics(
             None,
             None,
             None,
+            None,
             ratios_seen_top_100_mentions,
         ))
         partitions.append((
             recall_strict_unseen_top_100_mentions,
+            None,
             None,
             None,
             None,
@@ -751,6 +808,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_seen_unique_pairs,
             recall_exact_seen_unique_pairs,  # type: ignore
+            recall_partial_seen_unique_pairs,  # type: ignore
             recall_narrow_seen_unique_pairs,  # type: ignore
             recall_broad_seen_unique_pairs,  # type: ignore
             ratios_seen_unique_pairs,
@@ -758,6 +816,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_unseen_unique_pairs,
             recall_exact_unseen_unique_pairs,  # type: ignore
+            recall_partial_unseen_unique_pairs,  # type: ignore
             recall_narrow_unseen_unique_pairs,  # type: ignore
             recall_broad_unseen_unique_pairs,  # type: ignore
             ratios_unseen_unique_pairs,
@@ -768,10 +827,12 @@ def compute_metrics(
             None,
             None,
             None,
+            None,
             ratios_seen_unique_pairs,
         ))
         partitions.append((
             recall_strict_unseen_unique_pairs,
+            None,
             None,
             None,
             None,
@@ -783,6 +844,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_identical,
             recall_exact_identical,  # type: ignore
+            recall_partial_identical,  # type: ignore
             recall_narrow_identical,  # type: ignore
             recall_broad_identical,  # type: ignore
             ratios_identical,
@@ -790,14 +852,23 @@ def compute_metrics(
         partitions.append((
             recall_strict_not_identical,
             recall_exact_not_identical,  # type: ignore
+            recall_partial_not_identical,  # type: ignore
             recall_narrow_not_identical,  # type: ignore
             recall_broad_not_identical,  # type: ignore
             ratios_not_identical,
         ))
     else:
-        partitions.append((recall_strict_identical, None, None, None, ratios_identical))
+        partitions.append((
+            recall_strict_identical,
+            None,
+            None,
+            None,
+            None,
+            ratios_identical,
+        ))
         partitions.append((
             recall_strict_not_identical,
+            None,
             None,
             None,
             None,
@@ -809,6 +880,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_one_word,
             recall_exact_one_word,  # type: ignore
+            recall_partial_one_word,  # type: ignore
             recall_narrow_one_word,  # type: ignore
             recall_broad_one_word,  # type: ignore
             ratios_one_word,
@@ -816,6 +888,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_two_words,
             recall_exact_two_words,  # type: ignore
+            recall_partial_two_words,  # type: ignore
             recall_narrow_two_words,  # type: ignore
             recall_broad_two_words,  # type: ignore
             ratios_two_words,
@@ -823,6 +896,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_three_words,
             recall_exact_three_words,  # type: ignore
+            recall_partial_three_words,  # type: ignore
             recall_narrow_three_words,  # type: ignore
             recall_broad_three_words,  # type: ignore
             ratios_three_words,
@@ -830,15 +904,31 @@ def compute_metrics(
         partitions.append((
             recall_strict_more_than_three_words,
             recall_exact_more_than_three_words,  # type: ignore
+            recall_partial_more_than_three_words,  # type: ignore
             recall_narrow_more_than_three_words,  # type: ignore
             recall_broad_more_than_three_words,  # type: ignore
             ratios_more_than_three_words,
         ))
     else:
-        partitions.append((recall_strict_one_word, None, None, None, ratios_one_word))
-        partitions.append((recall_strict_two_words, None, None, None, ratios_two_words))
+        partitions.append((
+            recall_strict_one_word,
+            None,
+            None,
+            None,
+            None,
+            ratios_one_word,
+        ))
+        partitions.append((
+            recall_strict_two_words,
+            None,
+            None,
+            None,
+            None,
+            ratios_two_words,
+        ))
         partitions.append((
             recall_strict_three_words,
+            None,
             None,
             None,
             None,
@@ -846,6 +936,7 @@ def compute_metrics(
         ))
         partitions.append((
             recall_strict_more_than_three_words,
+            None,
             None,
             None,
             None,
@@ -857,6 +948,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_abbrev_only,
             recall_exact_abbrev_only,  # type: ignore
+            recall_partial_abbrev_only,  # type: ignore
             recall_narrow_abbrev_only,  # type: ignore
             recall_broad_abbrev_only,  # type: ignore
             ratios_abbrev_only,
@@ -864,6 +956,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_abbrev_or_contains,
             recall_exact_abbrev_or_contains,  # type: ignore
+            recall_partial_abbrev_or_contains,  # type: ignore
             recall_narrow_abbrev_or_contains,  # type: ignore
             recall_broad_abbrev_or_contains,  # type: ignore
             ratios_abbrev_or_contains,
@@ -871,6 +964,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_not_abbrev,
             recall_exact_not_abbrev,  # type: ignore
+            recall_partial_not_abbrev,  # type: ignore
             recall_narrow_not_abbrev,  # type: ignore
             recall_broad_not_abbrev,  # type: ignore
             ratios_not_abbrev,
@@ -881,6 +975,7 @@ def compute_metrics(
             None,
             None,
             None,
+            None,
             ratios_abbrev_only,
         ))
         partitions.append((
@@ -888,10 +983,12 @@ def compute_metrics(
             None,
             None,
             None,
+            None,
             ratios_abbrev_or_contains,
         ))
         partitions.append((
             recall_strict_not_abbrev,
+            None,
             None,
             None,
             None,
@@ -903,6 +1000,7 @@ def compute_metrics(
         partitions.append((
             recall_strict_repeated,
             recall_exact_repeated,  # type: ignore
+            recall_partial_repeated,  # type: ignore
             recall_narrow_repeated,  # type: ignore
             recall_broad_repeated,  # type: ignore
             ratios_repeated,
@@ -910,14 +1008,23 @@ def compute_metrics(
         partitions.append((
             recall_strict_not_repeated,
             recall_exact_not_repeated,  # type: ignore
+            recall_partial_not_repeated,  # type: ignore
             recall_narrow_not_repeated,  # type: ignore
             recall_broad_not_repeated,  # type: ignore
             ratios_not_repeated,
         ))
     else:
-        partitions.append((recall_strict_repeated, None, None, None, ratios_repeated))
+        partitions.append((
+            recall_strict_repeated,
+            None,
+            None,
+            None,
+            None,
+            ratios_repeated,
+        ))
         partitions.append((
             recall_strict_not_repeated,
+            None,
             None,
             None,
             None,
@@ -925,9 +1032,9 @@ def compute_metrics(
         ))
 
     # iterate partitions in order and aggregate for each label
-    for rs_map, re_map, rn_map, rb_map, ratios_map in partitions:
+    for rs_map, re_map, rp_map, rn_map, rb_map, ratios_map in partitions:
         # rs_map and ratios_map are always present
         for label in sorted(rs_map.keys()):
-            _aggregate(label, rs_map, ratios_map, re_map, rn_map, rb_map)
+            _aggregate(label, rs_map, ratios_map, re_map, rp_map, rn_map, rb_map)
 
     return final_results
