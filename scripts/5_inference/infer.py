@@ -1,5 +1,6 @@
 import argparse
 import gc
+import json
 import os
 import pickle
 import sys
@@ -8,10 +9,8 @@ from pathlib import Path
 import polars as pl
 import torch
 from tqdm import tqdm
-from transformers import GenerationConfig  # type: ignore
 
-from syncabel.guided_inference import get_prefix_allowed_tokens_fn
-from syncabel.models import MT5_GENRE, Bart_GENRE, Llama_GENRE, MBart_GENRE
+from syncabel.models import Llama_GENRE
 from syncabel.trie import Trie
 
 sys.setrecursionlimit(5000)
@@ -20,133 +19,6 @@ sys.setrecursionlimit(5000)
 def load_pickle(file_path):
     with open(file_path, "rb") as file:
         return pickle.load(file)
-
-
-def load_model(
-    dataset_name: str,
-    model_name: str,
-    full_path: Path,
-    device: str,
-    best: bool,
-):
-    if "mt5" in model_name:
-        model = MT5_GENRE.from_pretrained(full_path).eval().to(device)  # type: ignore
-        model.generation_config = GenerationConfig(
-            decoder_start_token_id=0,
-            eos_token_id=1,
-            forced_eos_token_id=1,
-            pad_token_id=0,
-        )
-    elif "Llama" in model_name:
-        model = Llama_GENRE.from_pretrained(full_path).eval().to(device)  # type: ignore
-        model.generation_config = GenerationConfig(
-            bos_token_id=model.config.bos_token_id,  # type: ignore
-            decoder_start_token_id=model.config.bos_token_id,  # type: ignore
-            eos_token_id=model.config.eos_token_id,  # type: ignore
-            forced_eos_token_id=model.config.eos_token_id,  # type: ignore
-            pad_token_id=model.config.pad_token_id,  # type: ignore
-        )
-        model.tokenizer.padding_side = "left"  # type: ignore
-    elif "mbart" in model_name:
-        model = MBart_GENRE.from_pretrained(full_path).eval().to(device)  # type: ignore
-        model.generation_config = GenerationConfig(
-            bos_token_id=0,
-            decoder_start_token_id=2,
-            eos_token_id=2,
-            forced_eos_token_id=2,
-            pad_token_id=1,
-        )
-        model.tokenizer.bos_token_id = None  # type: ignore
-        if dataset_name == "MedMentions":
-            model.tokenizer.src_lang = "en_XX"  # type: ignore
-            model.tokenizer.tgt_lang = "en_XX"  # type: ignore
-        elif dataset_name == "SPACCC":
-            model.tokenizer.src_lang = "es_XX"  # type: ignore
-            model.tokenizer.tgt_lang = "es_XX"  # type: ignore
-        else:
-            model.tokenizer.src_lang = "fr_XX"  # type: ignore
-            model.tokenizer.tgt_lang = "fr_XX"  # type: ignore
-    else:
-        model = Bart_GENRE.from_pretrained(full_path).eval().to(device)  # type: ignore
-        model.generation_config = GenerationConfig(
-            bos_token_id=0,
-            early_stopping=True,
-            decoder_start_token_id=2,
-            eos_token_id=2,
-            forced_eos_token_id=2,
-            pad_token_id=1,
-        )
-    print(
-        f"Model {model_name} {'best' if best else 'last'} checkpoint is loaded to {device}"
-    )
-    return model
-
-
-def add_code_column(
-    df: pl.DataFrame, umls_df: pl.DataFrame, multiple_answers: bool = False
-) -> pl.DataFrame:
-    """
-    Adds a 'code' column to the DataFrame by mapping composite 'Entity' strings to UMLS concepts.
-
-    The function performs the following steps:
-    1.  Cleans up special characters in the 'Entity' column of the UMLS DataFrame.
-    2.  Splits the 'Entity' column of the input DataFrame by '<SEP>' into individual terms.
-    3.  Explodes the DataFrame so that each row corresponds to a single term.
-    4.  Performs a left join with the UMLS DataFrame on the term and 'GROUP' to find the code for each term.
-    5.  Groups the data back by the original rows.
-    6.  Filters out rows where none of the constituent terms mapped to a code.
-    7.  Constructs the final code string by sorting the unique codes and joining them with '+'.
-    """
-    # 1) Check if there are duplicated entries
-    if (
-        df.shape[0]
-        != df.unique(subset=["filename", "label", "start_span", "end_span"]).shape[0]
-    ):
-        print("There are duplicated entries. Keeping just the first one...")
-        df = df.unique(subset=["filename", "label", "start_span", "end_span"])
-
-    df_exploded = df.clone()
-    # 2) Explode df by splitting 'Entity' into multiple terms
-    if multiple_answers:
-        df_exploded = df_exploded.with_columns(
-            pl.col("Prediction").str.split("<SEP>")
-        ).explode("Prediction")
-
-    # Rename umls columns for join
-    if "CUI" in umls_df.columns:
-        umls_df = umls_df.rename({"CUI": "target_code"})
-    if "SNOMED_code" in umls_df.columns:
-        umls_df = umls_df.rename({"SNOMED_code": "target_code"})
-    # 3) Join with UMLS data to get CUIs for each term
-    df_joined = df_exploded.join(
-        umls_df.select(["target_code", "Entity", "GROUP"]),
-        left_on=["Prediction", "label"],
-        right_on=["Entity", "GROUP"],
-        how="left",
-    )
-
-    # 4) Group back, aggregate CUIs, and count nulls to find incomplete matches
-    df_grouped = df_joined.group_by([
-        "filename",
-        "label",
-        "start_span",
-        "end_span",
-    ]).agg(
-        pl.col("target_code").drop_nulls().unique().alias("code_list"),
-    )
-
-    # 5) Filter for rows with at least one match and create final code string
-    result = (
-        df_grouped.filter(pl.col("code_list").list.len() > 0)
-        .with_columns(
-            pl.col("code_list").list.sort().list.join("+").alias("Predicted_code")
-        )
-        .select(["filename", "label", "start_span", "end_span", "Predicted_code"])
-    )
-
-    return df.join(
-        result, on=["filename", "label", "start_span", "end_span"], how="left"
-    )
 
 
 def main(
@@ -182,12 +54,46 @@ def main(
         full_path = model_path / "model_best"
     else:
         full_path = model_path / "model_last"
-    model = load_model(
-        dataset_name,
-        model_name,
-        full_path,
-        device,
-        best,
+
+    # Candidate trie path
+    if dataset_name == "MedMentions":
+        dataset_short = "MM"
+    elif dataset_name in ["EMEA", "MEDLINE"]:
+        dataset_short = "QUAERO"
+    elif "SPACCC" in dataset_name:
+        dataset_short = "SPACCC"
+    else:
+        dataset_short = dataset_name
+    candidate_tries_folder = Path("data/candidate_tries")
+    candidate_tries_folder.mkdir(parents=True, exist_ok=True)
+    candidate_trie_path = (
+        candidate_tries_folder / f"trie_{dataset_short}_{model_name}.pkl"
+    )
+
+    # Text to code path
+    text_to_codes_folder = Path("data") / "text_to_codes"
+    text_to_codes_folder.mkdir(parents=True, exist_ok=True)
+    text_to_code_path = text_to_codes_folder / f"text_to_code_{dataset_short}.json"
+
+    # Lang
+    if dataset_name == "SPACCC":
+        lang = "es"
+    elif dataset_name == "MedMentions":
+        lang = "en"
+    elif dataset_name in ["EMEA", "MEDLINE"]:
+        lang = "fr"
+    else:
+        raise ValueError(f"Unknown dataset: {dataset_name}")
+
+    model = (
+        Llama_GENRE.from_pretrained(
+            full_path,
+            lang=lang,
+            text_to_code_path=text_to_code_path,
+            candidate_trie_path=candidate_trie_path,
+        )
+        .eval()
+        .to(device)  # type: ignore
     )
 
     # Load data
@@ -196,18 +102,7 @@ def main(
     test_source_data = load_pickle(
         data_folder / dataset_name / f"{split_name}_{selection_method}_source.pkl"
     )
-    test_target_data = load_pickle(
-        data_folder / dataset_name / f"{split_name}_{selection_method}_target.pkl"
-    )
-    # Determine verb based on dataset
-    verb = "est"
-    if dataset_name == "MedMentions":
-        verb = "is"
-    elif dataset_name == "SPACCC":
-        verb = "es"
-    prefix_templates = [
-        tgt.split(f"] {verb} ")[0] + f"] {verb}" for tgt in test_target_data
-    ]
+
     test_data = pl.read_csv(
         data_folder / dataset_name / f"{split_name}_{selection_method}_annotations.tsv",
         separator="\t",
@@ -219,58 +114,75 @@ def main(
         },  # type: ignore
     )
 
-    # Load UMLS data
-    if dataset_name == "MedMentions":
-        dataset_short = "MM"
-    elif dataset_name in ["EMEA", "MEDLINE"]:
-        dataset_short = "QUAERO"
-    elif "SPACCC" in dataset_name:
-        dataset_short = "SPACCC"
-    else:
-        dataset_short = dataset_name
-    umls_path = (
-        Path("data") / "UMLS_processed" / dataset_short / "all_disambiguated.parquet"
-    )
-    umls_df = pl.read_parquet(umls_path)
-    umls_df = umls_df.with_columns(
-        pl.col("Entity")
-        .str.replace_all("\xa0", " ", literal=True)
-        .str.replace_all(r"[\{\[]", "(", literal=False)
-        .str.replace_all(r"[\}\]]", ")", literal=False)
-    )
+    # Text to codes or candidate trie generation
+    if not os.path.exists(candidate_trie_path) or not os.path.exists(text_to_code_path):
+        umls_path = (
+            Path("data")
+            / "UMLS_processed"
+            / dataset_short
+            / "all_disambiguated.parquet"
+        )
+        umls_df = pl.read_parquet(umls_path)
+        umls_df = umls_df.with_columns(
+            pl.col("Entity")
+            .str.replace_all("\xa0", " ", literal=True)
+            .str.replace_all(r"[\{\[]", "(", literal=False)
+            .str.replace_all(r"[\}\]]", ")", literal=False)
+        )
 
-    # Load candidate Trie
-    tries_folder = Path("data/UMLS_tries")
-    tries_folder.mkdir(parents=True, exist_ok=True)
-    trie_path = tries_folder / f"trie_{dataset_short}_{model_name}.pkl"
-    if os.path.exists(trie_path):  # Check if the file exists
-        with open(trie_path, "rb") as file:
-            trie_legal_tokens = pickle.load(file)
-    else:
-        # Compute candidate Trie
-        if "mbart" in model_name or "mt5" in model_name or "Llama" in model_name:
+        # Text to code
+        if not os.path.exists(text_to_code_path):
+            code_col = "SNOMED_code" if "SNOMED_code" in umls_df.columns else "CUI"
+            result = umls_df.group_by("GROUP").agg([
+                pl.col("Entity"),
+                pl.col(code_col),
+            ])
+
+            text_to_code = {
+                row["GROUP"]: dict(zip(row["Entity"], row[code_col]))
+                for row in result.to_dicts()
+            }
+            os.makedirs(text_to_code_path.parent, exist_ok=True)
+            with open(text_to_code_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    text_to_code,
+                    f,
+                    ensure_ascii=False,  # important for biomedical terms
+                    indent=2,  # human-readable
+                )
+            model.text_to_code = text_to_code  # type: ignore
+
+        # candidate Trie
+        if not os.path.exists(candidate_trie_path):
+            if model.lang == "fr":  # type: ignore
+                verb = "est"
+            elif model.lang == "en":  # type: ignore
+                verb = "is"
+            elif model.lang == "es":  # type: ignore
+                verb = "es"
+            else:
+                raise ValueError(f"Unknown language: {model.lang}")  # type: ignore
+            # Compute candidate Trie
             start_idx = 0
             prefix = f" {verb} "
-        else:
-            start_idx = 1
-            prefix = ""
-        trie_legal_tokens = {}
-        for category in umls_df["GROUP"].unique().to_list():
-            print(f"processing {category}")
-            cat_umls_df = umls_df.filter(pl.col("GROUP") == category)
-            sequences = []
-            for entity in cat_umls_df["Entity"].to_list():
-                sequence = model.tokenizer.encode(prefix + entity)[start_idx:]  # type: ignore
-                if sequence[-1] != model.tokenizer.eos_token_id:  # type: ignore
-                    sequence.append(model.tokenizer.eos_token_id)  # type: ignore
-                sequences.append(sequence)
-            trie_legal_tokens[category] = Trie(sequences)
+            candidate_trie = {}
+            for group in umls_df["GROUP"].unique().to_list():  # type: ignore
+                print(f"processing {group}")
+                group_umls_df = umls_df.filter(pl.col("GROUP") == group)  # type: ignore
+                sequences = []
+                for entity in group_umls_df["Entity"].to_list():
+                    sequence = model.tokenizer.encode(prefix + entity)[start_idx:]  # type: ignore
+                    if sequence[-1] != model.tokenizer.eos_token_id:  # type: ignore
+                        sequence.append(model.tokenizer.eos_token_id)  # type: ignore
+                    sequences.append(sequence)
+                candidate_trie[group] = Trie(sequences)
 
-        # Save it
-        # Create directory if it doesn't exist
-        os.makedirs(trie_path.parent, exist_ok=True)
-        with open(trie_path, "wb") as file:
-            pickle.dump(trie_legal_tokens, file, protocol=-1)
+            # Save it
+            # Create directory if it doesn't exist
+            os.makedirs(candidate_trie_path.parent, exist_ok=True)
+            with open(candidate_trie_path, "wb") as file:
+                pickle.dump(candidate_trie, file, protocol=-1)
+            model.candidate_trie = candidate_trie  # type: ignore
 
     # Init output folder
     output_folder = (
@@ -291,55 +203,30 @@ def main(
     output_sentences = []
     output_scores = []
     output_beam_scores = []
+    output_codes = []
     for i in tqdm(
         range(0, len(test_source_data), batch_size), desc="Processing Test Data"
     ):
         batch_sources = test_source_data[i : i + batch_size]
-        batch_prefixes = prefix_templates[i : i + batch_size]
-        batch_input = [f"{a}<SEP>{b}" for a, b in zip(batch_sources, batch_prefixes)]
-        if "Llama" in model_name:
-            with torch.no_grad():
-                batch_output_sentences = model.sample(
-                    batch_input,
-                    num_beams=num_beams,
-                )
+        with torch.no_grad():
+            batch_output_sentences = model.sample(
+                batch_sources,
+                num_beams=num_beams,
+                constrained=False,
+                multiple_answers=multiple_answers,
+            )
             # Split to get final prediction if not possible add empty string
             for batch in batch_output_sentences:
-                splits = batch[0]["text"].split(f"] {verb}")  # type: ignore
-                if len(splits) > 1 and splits[1].strip():
-                    output_sentences.append(splits[1].strip())
-                else:
-                    print(
-                        "IndexError: splitting failed or empty prediction, adding empty string as prediction."
-                    )
-                    print(f"Full text: {batch[0]['text']}")  # type: ignore
-                    output_sentences.append("")
-        else:
-            with torch.no_grad():
-                batch_output_sentences = model.sample(
-                    batch_sources,
-                    num_beams=num_beams,
-                    prefix_templates=batch_prefixes,
-                )
-            output_sentences.extend([
-                batch[0]["text"]  # type: ignore
-                for batch in batch_output_sentences
-            ])
-        output_scores.extend([
-            batch[0]["score"]  # type: ignore
-            for batch in batch_output_sentences
-        ])
-        output_beam_scores.extend([
-            batch[0]["beam_score"]  # type: ignore
-            for batch in batch_output_sentences
-        ])
+                output_sentences.append(batch[0]["pred_concept_name"].strip())
+                output_scores.append(batch[0]["score"])
+                output_beam_scores.append(batch[0]["beam_score"])
+                output_codes.append(batch[0]["pred_concept_code"].strip())
+
     no_constraint_df = test_data.with_columns(
         pl.Series(name="Prediction", values=output_sentences),
+        pl.Series(name="Predicted_code", values=output_codes),
         pl.Series(name="Prediction_score", values=output_scores),
         pl.Series(name="Prediction_beam_score", values=output_beam_scores),
-    )
-    no_constraint_df = add_code_column(
-        no_constraint_df, umls_df=umls_df, multiple_answers=multiple_answers
     )
 
     # Compute recall per label
@@ -375,64 +262,30 @@ def main(
     output_sentences = []
     output_scores = []
     output_beam_scores = []
+    output_codes = []
     for i in tqdm(
         range(0, len(test_source_data), batch_size), desc="Processing Test Data"
     ):
         batch_sources = test_source_data[i : i + batch_size]
-        batch_prefixes = prefix_templates[i : i + batch_size]
-        batch_input = [f"{a}<SEP>{b}" for a, b in zip(batch_sources, batch_prefixes)]
-        prefix_allowed_tokens_fn = get_prefix_allowed_tokens_fn(
-            model,
-            batch_sources,
-            batch_prefixes,
-            candidates_trie=trie_legal_tokens,
-            multiple_answers=multiple_answers,
-        )
-        if "Llama" in model_name:
-            with torch.no_grad():
-                batch_output_sentences = model.sample(
-                    batch_input,
-                    prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
-                    num_beams=num_beams,
-                )
+        with torch.no_grad():
+            batch_output_sentences = model.sample(
+                batch_sources,
+                num_beams=num_beams,
+                constrained=True,
+                multiple_answers=multiple_answers,
+            )
             # Split to get final prediction if not possible add empty string
             for batch in batch_output_sentences:
-                splits = batch[0]["text"].split(f"] {verb}")  # type: ignore
-                if len(splits) > 1 and splits[1].strip():
-                    output_sentences.append(splits[1].strip())
-                else:
-                    print(
-                        "IndexError: splitting failed or empty prediction, adding empty string as prediction."
-                    )
-                    print(f"Full text: {batch[0]['text']}")  # type: ignore
-                    output_sentences.append("")
-        else:
-            with torch.no_grad():
-                batch_output_sentences = model.sample(
-                    batch_sources,
-                    prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
-                    num_beams=num_beams,
-                    prefix_templates=batch_prefixes,
-                )
-            output_sentences.extend([
-                batch[0]["text"]  # type: ignore
-                for batch in batch_output_sentences
-            ])
-        output_scores.extend([
-            batch[0]["score"]  # type: ignore
-            for batch in batch_output_sentences
-        ])
-        output_beam_scores.extend([
-            batch[0]["beam_score"]  # type: ignore
-            for batch in batch_output_sentences
-        ])
+                output_sentences.append(batch[0]["pred_concept_name"].strip())
+                output_scores.append(batch[0]["score"])
+                output_beam_scores.append(batch[0]["beam_score"])
+                output_codes.append(batch[0]["pred_concept_code"].strip())
+
     constraint_df = test_data.with_columns(
         pl.Series(name="Prediction", values=output_sentences),
+        pl.Series(name="Predicted_code", values=output_codes),
         pl.Series(name="Prediction_score", values=output_scores),
         pl.Series(name="Prediction_beam_score", values=output_beam_scores),
-    )
-    constraint_df = add_code_column(
-        constraint_df, umls_df=umls_df, multiple_answers=multiple_answers
     )
 
     # Compute recall per label
