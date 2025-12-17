@@ -1,7 +1,10 @@
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import polars as pl
+from tqdm import tqdm
 
 
 def normalize_codes(col: pl.Expr) -> pl.Expr:
@@ -58,23 +61,73 @@ def load_predictions(
     return df  # already processed
 
 
-def compute_simple_recall(df):
-    recall = {}
-    labels = sorted(df["label"].unique())
-    for label in labels:
-        df_label = df.filter(pl.col("label") == label)
-        total_label = df_label.height
-        true_label = df_label.filter(pl.col("code") == pl.col("Predicted_code")).height
-        if total_label == 0:
-            recall[label] = 0.0
-            continue
-        recall[label] = round(true_label / total_label * 100, 1)
+def compute_recall(
+    df: pl.DataFrame,
+    bootstrap: bool = False,
+    n_bootstrap: int = 1000,
+    ci: float = 0.95,
+    seed: int = 42,
+):
+    """
+    Faster recall computation with optional bootstrap using numpy indexing.
+    """
+    rng = np.random.default_rng(seed)
 
-    # compute overall
-    total_df = df.height
-    true = df.filter(pl.col("code") == pl.col("Predicted_code")).height
-    recall["overall"] = round(true / total_df * 100, 1)
-    return recall
+    # Encode dataframe as numpy arrays
+    codes = df["code"].to_numpy()
+    preds = df["Predicted_code"].to_numpy()
+    labels = df["label"].to_numpy()
+    filenames = df["filename"].to_numpy()
+
+    unique_labels = np.unique(labels)
+    unique_docs = np.unique(filenames)
+
+    # Map document -> row indices
+    doc_to_idx = {doc: np.where(filenames == doc)[0] for doc in unique_docs}
+
+    # Core recall computation using numpy indexing
+    def _recall_core(idx_array):
+        out = {}
+        for lbl in unique_labels:
+            lbl_idx = idx_array[labels[idx_array] == lbl]
+            if lbl_idx.size == 0:
+                out[lbl] = 0.0
+                continue
+            correct = np.sum(codes[lbl_idx] == preds[lbl_idx])
+            out[lbl] = correct / lbl_idx.size
+        overall_correct = np.sum(codes[idx_array] == preds[idx_array])
+        out["overall"] = overall_correct / idx_array.size
+        return out
+
+    # Point estimate
+    point = _recall_core(np.arange(len(df)))
+
+    if not bootstrap:
+        return {
+            k: {"recall": round(v * 100, 1), "ci_low": None, "ci_high": None}
+            for k, v in point.items()
+        }
+
+    # -------- Bootstrap --------
+    scores = defaultdict(list)
+
+    for _ in tqdm(range(n_bootstrap), desc="Bootstrapping"):
+        sampled_docs = rng.choice(unique_docs, size=len(unique_docs), replace=True)
+        # Collect row indices for all sampled docs
+        sampled_idx = np.concatenate([doc_to_idx[d] for d in sampled_docs])
+        r = _recall_core(sampled_idx)
+        for k, v in r.items():
+            scores[k].append(v)
+
+    alpha = (1 - ci) / 2
+    return {
+        k: {
+            "recall": round(point[k] * 100, 1),
+            "ci_low": round(np.quantile(scores[k], alpha) * 100, 1),
+            "ci_high": round(np.quantile(scores[k], 1 - alpha) * 100, 1),
+        }
+        for k in point.keys()
+    }
 
 
 # ---------------------------

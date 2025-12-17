@@ -67,9 +67,8 @@ Your task is to determine the semantic relationship between two sets of concepts
 - NO_RELATION: The two sets of concepts describe different medical ideas.
 
 # RULES
-- Use ONLY the provided titles, codes, synonyms, semantic groups and the context sentence.
+- Use ONLY the provided titles, codes, synonyms and semantic groups.
 - The context sentence is for disambiguation only.
-- Do NOT hallucinate missing information.
 - Output ONLY a JSON dictionary: {{"label": "<LABEL>"}}
 
 # QUERY

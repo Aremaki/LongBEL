@@ -46,10 +46,12 @@ app = typer.Typer()
 
 @app.command()
 def main(
-    datasets: list[str] = typer.Option(["SPACCC"], help="Dataset name (e.g., MEDLINE)"),
+    datasets: list[str] = typer.Option(
+        ["MedMentions", "EMEA", "MEDLINE"], help="Dataset name (e.g., MEDLINE)"
+    ),
     model_name: str = typer.Option("Meta-Llama-3-8B-Instruct", help="Model name"),
     aug_data_list: list[str] = typer.Option(
-        ["full_upsampled", "full"], help="Augmented data type"
+        ["full_upsampled", "human_only"], help="Augmented data type"
     ),
     data_splits: list[str] = typer.Option(
         ["test"], help="Data split (e.g., test, val, train)"
@@ -58,6 +60,10 @@ def main(
     """Evaluate LLM predictions using LLMRelator."""
 
     for dataset in datasets:
+        if dataset in ["SPACCC", "MEDLINE"]:
+            ckpt = "last"
+        else:
+            ckpt = "best"
         # Load UMLS data
         if dataset == "MedMentions":
             dataset_short = "MM"
@@ -77,7 +83,7 @@ def main(
                     f"Evaluating dataset: {dataset}, aug_data: {aug_data}, split: {data_split}"
                 )
                 example_path = Path(
-                    f"results/inference_outputs/{dataset}/{aug_data}_tfidf/{model_name}_last/pred_{data_split}_constraint_5_beams.tsv"
+                    f"results/inference_outputs/{dataset}/{aug_data}_tfidf/{model_name}_{ckpt}/pred_{data_split}_constraint_5_beams.tsv"
                 )
                 example_results = load_predictions(example_path)
 
