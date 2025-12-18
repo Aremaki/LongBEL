@@ -83,7 +83,7 @@ def main(
                     f"Evaluating dataset: {dataset}, aug_data: {aug_data}, split: {data_split}"
                 )
                 example_path = Path(
-                    f"results/inference_outputs/{dataset}/{aug_data}_tfidf/{model_name}_{ckpt}/pred_{data_split}_constraint_5_beams.tsv"
+                    f"results/final_outputs/{dataset}/{aug_data}_tfidf/{model_name}_{ckpt}/pred_{data_split}_constraint_5_beams.tsv"
                 )
                 example_results = load_predictions(example_path)
 
@@ -98,6 +98,9 @@ def main(
                     pred_codes = row["Predicted_code"]
                     if gold_codes == pred_codes:
                         llm_evaluation.append("STRICT")
+                        continue
+                    if not pred_codes:
+                        llm_evaluation.append("NO_RELATION")
                         continue
                     gold_codes = gold_codes.split("+")
                     pred_codes = pred_codes.split("+")
