@@ -1,10 +1,127 @@
-from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import polars as pl
 from tqdm import tqdm
+
+
+def _run_vectorized_bootstrap(
+    doc_agg: pl.DataFrame,
+    unique_docs: np.ndarray,
+    unique_labels: np.ndarray,
+    n_bootstrap: int,
+    ci: float,
+    rng: np.random.Generator,
+    num_col: str,
+    denom_col: str,
+) -> dict[str, tuple[float, float]]:
+    """
+    Helper to run vectorized bootstrap for a specific metric (num/denom).
+    """
+    n_docs = len(unique_docs)
+
+    # Generate Weights (B x D)
+    # We use multinomial to simulate sampling with replacement
+    weights = rng.multinomial(n_docs, [1.0 / n_docs] * n_docs, size=n_bootstrap)
+
+    results = {}
+    alpha = (1 - ci) / 2
+
+    # --- Overall ---
+    doc_overall = doc_agg.group_by("filename").agg([
+        pl.col(num_col).sum().alias("num"),
+        pl.col(denom_col).sum().alias("denom"),
+    ])
+    docs_df = pl.DataFrame({"filename": unique_docs})
+    doc_overall = docs_df.join(doc_overall, on="filename", how="left").fill_null(0)
+
+    num_vec = doc_overall["num"].to_numpy()
+    denom_vec = doc_overall["denom"].to_numpy()
+
+    boot_num = weights @ num_vec
+    boot_denom = weights @ denom_vec
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        boot_metric = boot_num / boot_denom
+        boot_metric = np.nan_to_num(boot_metric, nan=0.0)
+
+    results["overall"] = (
+        float(np.quantile(boot_metric, alpha)),
+        float(np.quantile(boot_metric, 1 - alpha)),
+    )
+
+    # --- Per Label (Chunked) ---
+    # Map labels to indices for filtering
+    # label_map = {l: i for i, l in enumerate(unique_labels)}
+
+    # Add indices to doc_agg
+    label_map_df = pl.DataFrame({
+        "label": unique_labels,
+        "label_idx": np.arange(len(unique_labels), dtype=np.int32),
+    })
+
+    # Filter doc_agg to only labels we care about (in unique_labels)
+    doc_agg_idx = doc_agg.join(label_map_df, on="label", how="inner")
+
+    # Add doc indices
+    doc_map_df = pl.DataFrame({
+        "filename": unique_docs,
+        "doc_idx": np.arange(len(unique_docs), dtype=np.int32),
+    })
+    doc_agg_idx = doc_agg_idx.join(doc_map_df, on="filename", how="inner")
+
+    # Extract arrays
+    rows = doc_agg_idx["doc_idx"].to_numpy()
+    cols = doc_agg_idx["label_idx"].to_numpy()
+    vals_num = doc_agg_idx[num_col].to_numpy()
+    vals_denom = doc_agg_idx[denom_col].to_numpy()
+
+    chunk_size = 1000
+    n_labels = len(unique_labels)
+
+    for i in range(0, n_labels, chunk_size):
+        end = min(i + chunk_size, n_labels)
+        size = end - i
+
+        # Identify entries in this chunk
+        mask = (cols >= i) & (cols < end)
+        if not np.any(mask):
+            # No data for any label in this chunk
+            for idx in range(i, end):
+                results[unique_labels[idx]] = (0.0, 0.0)
+            continue
+
+        rows_chunk = rows[mask]
+        cols_chunk = cols[mask] - i  # relative index
+        num_chunk = vals_num[mask]
+        denom_chunk = vals_denom[mask]
+
+        # Build dense matrices for chunk
+        C_num = np.zeros((n_docs, size), dtype=np.float64)
+        C_denom = np.zeros((n_docs, size), dtype=np.float64)
+
+        # Use np.add.at for unbuffered summation
+        np.add.at(C_num, (rows_chunk, cols_chunk), num_chunk)
+        np.add.at(C_denom, (rows_chunk, cols_chunk), denom_chunk)
+
+        # Matrix Multiply
+        B_num = weights @ C_num
+        B_denom = weights @ C_denom
+
+        # Compute Metrics
+        with np.errstate(divide="ignore", invalid="ignore"):
+            B_metric = B_num / B_denom
+            B_metric = np.nan_to_num(B_metric, nan=0.0)
+
+        # Quantiles
+        q_low = np.quantile(B_metric, alpha, axis=0)
+        q_high = np.quantile(B_metric, 1 - alpha, axis=0)
+
+        for idx in range(size):
+            results[unique_labels[i + idx]] = (float(q_low[idx]), float(q_high[idx]))
+
+    return results
 
 
 def normalize_codes(col: pl.Expr) -> pl.Expr:
@@ -61,216 +178,686 @@ def load_predictions(
     return df  # already processed
 
 
-def compute_recall(
+def compute_metrics_simple(
     df: pl.DataFrame,
+    df_full: pl.DataFrame,
     bootstrap: bool = False,
     n_bootstrap: int = 1000,
     ci: float = 0.95,
     seed: int = 42,
-):
+    threshold: Optional[float] = None,
+    score_column: str = "Prediction_score",
+    include_ratios: bool = True,
+    index_key: str = "Overall",
+) -> dict[str, dict[str, Any]]:  # type: ignore
     """
-    Faster recall computation with optional bootstrap using numpy indexing.
+    Core metric computation used by downstream aggregations.
+
+    - Computes recall (and precision/F1 when `threshold` is provided) per label and overall.
+    - Supports optional document-level bootstrap (vectorized).
+    - Adds ratio coverage information versus `df_full` (or within-partition shares when `index_key == "All"`).
     """
+
     rng = np.random.default_rng(seed)
 
-    # Encode dataframe as numpy arrays
-    codes = df["code"].to_numpy()
-    preds = df["Predicted_code"].to_numpy()
-    labels = df["label"].to_numpy()
-    filenames = df["filename"].to_numpy()
+    # Encode dataframe as numpy arrays; guard empty frames to keep shapes consistent
+    filenames = df["filename"].to_numpy() if df.height else np.array([], dtype=object)
 
-    unique_labels = np.unique(labels)
+    # Use labels from the full set to keep deterministic ordering and include missing labels
+    unique_labels = np.array(sorted(df_full["label"].unique()))
     unique_docs = np.unique(filenames)
 
-    # Map document -> row indices
-    doc_to_idx = {doc: np.where(filenames == doc)[0] for doc in unique_docs}
+    # Precompute counts for ratios
+    total_full_overall = df_full.height
+    total_pred_overall = df.height
 
-    # Core recall computation using numpy indexing
-    def _recall_core(idx_array):
-        out = {}
-        for lbl in unique_labels:
-            lbl_idx = idx_array[labels[idx_array] == lbl]
-            if lbl_idx.size == 0:
-                out[lbl] = 0.0
-                continue
-            correct = np.sum(codes[lbl_idx] == preds[lbl_idx])
-            out[lbl] = correct / lbl_idx.size
-        overall_correct = np.sum(codes[idx_array] == preds[idx_array])
-        out["overall"] = overall_correct / idx_array.size
-        return out
+    full_counts = (
+        df_full.group_by("label")
+        .count()
+        .select(["label", "count"])
+        .to_dict(as_series=False)
+    )
+    full_counts_map = dict(zip(full_counts["label"], full_counts["count"]))
 
-    # Point estimate
-    point = _recall_core(np.arange(len(df)))
+    pred_counts = (
+        df.group_by("label").count().select(["label", "count"]).to_dict(as_series=False)
+        if df.height
+        else {"label": [], "count": []}
+    )
+    pred_counts_map = dict(zip(pred_counts["label"], pred_counts["count"]))
 
-    if not bootstrap:
+    def _format_ratio(label: str, pred_count: int) -> str:
+        if not include_ratios:
+            return "N/A"
+        if index_key == "All":
+            denom = total_pred_overall
+        else:
+            denom = full_counts_map.get(label, 0)
+        if denom == 0:
+            return "0% (0/0)"
+        return f"{round(pred_count / denom * 100, 1)}% ({pred_count}/{denom})"
+
+    # Build ratios once
+    ratios = {
+        lbl: _format_ratio(lbl, pred_counts_map.get(lbl, 0))
+        for lbl in (*unique_labels, "overall")
+    }
+    ratios["overall"] = (
+        f"{round(total_pred_overall / total_full_overall * 100, 1)}% ({total_pred_overall}/{total_full_overall})"
+        if include_ratios and total_full_overall
+        else ("0% (0/0)" if include_ratios else "N/A")
+    )
+
+    if threshold is None:
+        # -------- Strict Recall --------
+
+        # 1. Point Estimate (Polars)
+        label_stats = df.group_by("label").agg([
+            pl.count().alias("total"),
+            (pl.col("code") == pl.col("Predicted_code")).sum().alias("correct"),
+        ])
+
+        all_labels_df = pl.DataFrame({"label": unique_labels})
+        stats = all_labels_df.join(label_stats, on="label", how="left").fill_null(0)
+
+        stats = stats.with_columns(
+            (pl.col("correct") / pl.col("total")).fill_nan(0.0).alias("recall")
+        )
+
+        point = dict(zip(stats["label"], stats["recall"]))
+
+        overall_correct = df.filter(pl.col("code") == pl.col("Predicted_code")).height
+        overall_total = df.height
+        point["overall"] = overall_correct / overall_total if overall_total > 0 else 0.0
+
+        # 2. Bootstrap (Vectorized)
+        ci_data = {}
+        if bootstrap and len(unique_docs) > 0:
+            doc_agg = df.group_by(["filename", "label"]).agg([
+                pl.len().alias("denom"),
+                (pl.col("code") == pl.col("Predicted_code")).sum().alias("num"),
+            ])
+            ci_data = _run_vectorized_bootstrap(
+                doc_agg,
+                unique_docs,
+                unique_labels,
+                n_bootstrap,
+                ci,
+                rng,
+                "num",
+                "denom",
+            )
+
         return {
-            k: {"recall": round(v * 100, 1), "ci_low": None, "ci_high": None}
+            k: {
+                "recall": round(v * 100, 1),
+                "ci_low": round(ci_data[k][0] * 100, 1) if k in ci_data else None,
+                "ci_high": round(ci_data[k][1] * 100, 1) if k in ci_data else None,
+                "ratio": ratios.get(k, "N/A"),
+            }
             for k, v in point.items()
         }
 
-    # -------- Bootstrap --------
-    scores = defaultdict(list)
+    # -------- Thresholded precision / recall / F1 --------
+    if score_column not in df.columns:
+        raise ValueError(
+            "threshold was provided but the requested score column is missing;"
+            f" got '{score_column}' but expected a column named exactly that"
+        )
 
-    for _ in tqdm(range(n_bootstrap), desc="Bootstrapping"):
-        sampled_docs = rng.choice(unique_docs, size=len(unique_docs), replace=True)
-        # Collect row indices for all sampled docs
-        sampled_idx = np.concatenate([doc_to_idx[d] for d in sampled_docs])
-        r = _recall_core(sampled_idx)
-        for k, v in r.items():
-            scores[k].append(v)
+    # 1. Point Estimate (Polars)
+    agg_exprs = [
+        pl.count().alias("total"),
+        (pl.col(score_column) >= threshold).sum().alias("selected"),
+        (
+            (pl.col(score_column) >= threshold)
+            & (pl.col("code") == pl.col("Predicted_code"))
+        )
+        .sum()
+        .alias("tp"),
+    ]
 
-    alpha = (1 - ci) / 2
+    label_stats = df.group_by("label").agg(agg_exprs)
+
+    all_labels_df = pl.DataFrame({"label": unique_labels})
+    stats = all_labels_df.join(label_stats, on="label", how="left").fill_null(0)
+
+    stats = stats.with_columns([
+        (pl.col("tp") / pl.col("total")).fill_nan(0.0).alias("recall"),
+        (pl.col("tp") / pl.col("selected")).fill_nan(0.0).alias("precision"),
+    ])
+
+    stats = stats.with_columns(
+        (
+            2
+            * pl.col("precision")
+            * pl.col("recall")
+            / (pl.col("precision") + pl.col("recall"))
+        )
+        .fill_nan(0.0)
+        .alias("f1")
+    )
+
+    point = {
+        lbl: {
+            "precision": row["precision"],
+            "recall": row["recall"],
+            "f1": row["f1"],
+        }
+        for lbl, row in zip(stats["label"], stats.to_dicts())
+    }
+
+    # Overall
+    total_all = df.height
+    selected_all = df.filter(pl.col(score_column) >= threshold).height
+    tp_all = df.filter(
+        (pl.col(score_column) >= threshold)
+        & (pl.col("code") == pl.col("Predicted_code"))
+    ).height
+
+    recall_all = tp_all / total_all if total_all > 0 else 0.0
+    precision_all = tp_all / selected_all if selected_all > 0 else 0.0
+    f1_all = (
+        2 * precision_all * recall_all / (precision_all + recall_all)
+        if (precision_all + recall_all) > 0
+        else 0.0
+    )
+
+    point["overall"] = {
+        "precision": precision_all,
+        "recall": recall_all,
+        "f1": f1_all,
+    }
+
+    # 2. Bootstrap (Vectorized)
+    ci_recall = {}
+    ci_precision = {}
+    ci_f1 = {}
+
+    if bootstrap and len(unique_docs) > 0:
+        doc_agg = df.group_by(["filename", "label"]).agg([
+            pl.count().alias("total"),
+            (pl.col(score_column) >= threshold).sum().alias("selected"),
+            (
+                (pl.col(score_column) >= threshold)
+                & (pl.col("code") == pl.col("Predicted_code"))
+            )
+            .sum()
+            .alias("tp"),
+        ])
+
+        doc_agg = doc_agg.with_columns([
+            (pl.col("tp") * 2).alias("f1_num"),
+            (pl.col("total") + pl.col("selected")).alias("f1_denom"),
+        ])
+
+        ci_recall = _run_vectorized_bootstrap(
+            doc_agg, unique_docs, unique_labels, n_bootstrap, ci, rng, "tp", "total"
+        )
+        ci_precision = _run_vectorized_bootstrap(
+            doc_agg,
+            unique_docs,
+            unique_labels,
+            n_bootstrap,
+            ci,
+            rng,
+            "tp",
+            "selected",
+        )
+        ci_f1 = _run_vectorized_bootstrap(
+            doc_agg,
+            unique_docs,
+            unique_labels,
+            n_bootstrap,
+            ci,
+            rng,
+            "f1_num",
+            "f1_denom",
+        )
+
     return {
         k: {
-            "recall": round(point[k] * 100, 1),
-            "ci_low": round(np.quantile(scores[k], alpha) * 100, 1),
-            "ci_high": round(np.quantile(scores[k], 1 - alpha) * 100, 1),
+            "precision": round(v["precision"] * 100, 1),
+            "precision_ci_low": round(ci_precision[k][0] * 100, 1)
+            if k in ci_precision
+            else None,
+            "precision_ci_high": round(ci_precision[k][1] * 100, 1)
+            if k in ci_precision
+            else None,
+            "recall": round(v["recall"] * 100, 1),
+            "recall_ci_low": round(ci_recall[k][0] * 100, 1)
+            if k in ci_recall
+            else None,
+            "recall_ci_high": round(ci_recall[k][1] * 100, 1)
+            if k in ci_recall
+            else None,
+            "f1": round(v["f1"] * 100, 1),
+            "f1_ci_low": round(ci_f1[k][0] * 100, 1) if k in ci_f1 else None,
+            "f1_ci_high": round(ci_f1[k][1] * 100, 1) if k in ci_f1 else None,
+            "ratio": ratios.get(k, "N/A"),
         }
-        for k in point.keys()
+        for k, v in point.items()
     }
 
 
-# ---------------------------
-# Core: compute_recall_ratios
-# ---------------------------
-def compute_recall_ratios(
+# -------------------------------
+# Core: compute_partition_metrics
+# -------------------------------
+def compute_partition_metrics(
     df: pl.DataFrame,
     df_full: pl.DataFrame,
+    full_counts_map: dict[str, int],
+    unique_labels: list[str],
+    total_full_count: int,
     index: str = "overall",
     compute_all: bool = True,
-) -> tuple[Any, ...]:
+    include_ratios: bool = True,
+    threshold: Optional[float] = None,
+    score_column: str = "Prediction_score",
+    bootstrap: bool = False,
+    n_bootstrap: int = 1000,
+    ci: float = 0.95,
+    seed: int = 42,
+) -> dict[str, Any]:
     """
-    Compute recall_strict (+ optional exact/narrow/broad) and ratios for each label.
-    Returns:
-      - if compute_all: (recall_strict, recall_exact, recall_narrow, recall_broad, ratios)
-      - else: (recall_strict, ratios)
-    Structure:
-      recall_strict[label_name][IndexKey] = float
-      ratios[label_name][IndexKey] = "X% (a/b)"
+    Compute strict (and optional semantic) recalls plus ratios for each label.
+    Optimized to use single-pass Polars aggregation when bootstrap=False.
     """
+
     index_key = index.capitalize()
 
-    # outputs
-    recall_strict: dict[str, dict[str, float]] = {}
-    recall_exact: dict[str, dict[str, float]] = {}
-    recall_narrow: dict[str, dict[str, float]] = {}
-    recall_broad: dict[str, dict[str, float]] = {}
-    recall_partial: dict[str, dict[str, float]] = {}
-    ratios: dict[str, dict[str, str]] = {}
+    # ---------------------------------------------------------
+    # FAST PATH: No bootstrap -> Single pass aggregation
+    # ---------------------------------------------------------
+    if not bootstrap:
+        # 1. Define Aggregations
+        aggs = [
+            pl.len().alias("count"),
+            (pl.col("code") == pl.col("Predicted_code")).sum().alias("strict_correct"),
+        ]
 
-    # Overall row (aggregated across labels)
-    total_full_overall = df_full.height
-    total_pred_overall = df.height
-    true_strict_overall = df.filter(pl.col("code") == pl.col("Predicted_code")).height
+        if compute_all:
+            aggs.extend([
+                (pl.col("LLM_Evaluation") == "EXACT").sum().alias("exact_correct"),
+                (pl.col("LLM_Evaluation") == "PARTIAL").sum().alias("partial_correct"),
+                (pl.col("LLM_Evaluation") == "NARROW").sum().alias("narrow_correct"),
+                (pl.col("LLM_Evaluation") == "BROAD").sum().alias("broad_correct"),
+            ])
 
-    recall_strict["overall"] = {
-        index_key: round(true_strict_overall / total_pred_overall * 100, 1)
+        if threshold is not None:
+            # Thresholded metrics
+            is_selected = pl.col(score_column) >= threshold
+            is_correct = pl.col("code") == pl.col("Predicted_code")
+            aggs.extend([
+                is_selected.sum().alias("thresh_selected"),
+                (is_selected & is_correct).sum().alias("thresh_tp"),
+            ])
+
+        # 2. Perform GroupBy Aggregation
+        # We use a left join on unique_labels to ensure all labels are present
+        grouped = df.group_by("label").agg(aggs)
+
+        # Create base dataframe with all labels
+        # Note: unique_labels is a list of strings
+        base_df = pl.DataFrame({"label": unique_labels}, schema={"label": pl.String})
+
+        # Join and fill nulls with 0
+        stats = base_df.join(grouped, on="label", how="left").fill_null(0)
+
+        # 3. Calculate Metrics (Vectorized)
+        # Strict Recall
+        stats = stats.with_columns(
+            (pl.col("strict_correct") / pl.col("count"))
+            .fill_nan(0.0)
+            .alias("recall_strict")
+        )
+
+        # Semantic Recalls
+        if compute_all:
+            stats = stats.with_columns([
+                (pl.col("exact_correct") / pl.col("count"))
+                .fill_nan(0.0)
+                .alias("recall_exact"),
+                (pl.col("partial_correct") / pl.col("count"))
+                .fill_nan(0.0)
+                .alias("recall_partial"),
+                (pl.col("narrow_correct") / pl.col("count"))
+                .fill_nan(0.0)
+                .alias("recall_narrow"),
+                (pl.col("broad_correct") / pl.col("count"))
+                .fill_nan(0.0)
+                .alias("recall_broad"),
+            ])
+
+        # Thresholded Metrics
+        if threshold is not None:
+            stats = stats.with_columns([
+                (pl.col("thresh_tp") / pl.col("count")).fill_nan(0.0).alias("recall"),
+                (pl.col("thresh_tp") / pl.col("thresh_selected"))
+                .fill_nan(0.0)
+                .alias("precision"),
+            ])
+            stats = stats.with_columns(
+                (
+                    2
+                    * pl.col("precision")
+                    * pl.col("recall")
+                    / (pl.col("precision") + pl.col("recall"))
+                )
+                .fill_nan(0.0)
+                .alias("f1")
+            )
+
+        # 4. Construct Result Dictionary
+        results: dict[str, Any] = {
+            "recall_strict": {},
+            "ratios": {},
+        }
+        if compute_all:
+            results.update({
+                "recall_exact": {},
+                "recall_partial": {},
+                "recall_narrow": {},
+                "recall_broad": {},
+            })
+        if threshold is not None:
+            results.update({"recall": {}, "precision": {}, "f1": {}})
+
+        # Helper for ratios
+        total_pred_overall = df.height
+
+        def _get_ratio_str(lbl, pred_cnt):
+            if not include_ratios:
+                return "N/A"
+            if index_key == "All":
+                denom = total_pred_overall
+            else:
+                denom = full_counts_map.get(lbl, 0)
+            if denom == 0:
+                return "0% (0/0)"
+            return f"{round(pred_cnt / denom * 100, 1)}% ({pred_cnt}/{denom})"
+
+        # Iterate rows to populate dict (fast enough for ~thousands of labels)
+        # Using iter_rows(named=True)
+        for row in stats.iter_rows(named=True):
+            lbl = row["label"]
+            cnt = row["count"]
+
+            results["recall_strict"][lbl] = {
+                index_key: round(row["recall_strict"] * 100, 1)
+            }
+            results["ratios"][lbl] = {index_key: _get_ratio_str(lbl, cnt)}
+
+            if compute_all:
+                results["recall_exact"][lbl] = {
+                    index_key: round(row["recall_exact"] * 100, 1)
+                }
+                results["recall_partial"][lbl] = {
+                    index_key: round(row["recall_partial"] * 100, 1)
+                }
+                results["recall_narrow"][lbl] = {
+                    index_key: round(row["recall_narrow"] * 100, 1)
+                }
+                results["recall_broad"][lbl] = {
+                    index_key: round(row["recall_broad"] * 100, 1)
+                }
+
+            if threshold is not None:
+                results["recall"][lbl] = {index_key: round(row["recall"] * 100, 1)}
+                results["precision"][lbl] = {
+                    index_key: round(row["precision"] * 100, 1)
+                }
+                results["f1"][lbl] = {index_key: round(row["f1"] * 100, 1)}
+
+        # 5. Overall Metrics
+        # We need to calculate overall stats separately
+        # (Polars sum of columns)
+
+        # If df is empty, handle gracefully
+        if df.height == 0:
+            # ... (defaults are 0)
+            pass
+        else:
+            # We can sum the counts from the grouped dataframe or the original df
+            # Using original df is safer/easier for overall
+            strict_correct_all = df.filter(
+                pl.col("code") == pl.col("Predicted_code")
+            ).height
+
+            results["recall_strict"]["overall"] = {
+                index_key: round(strict_correct_all / total_pred_overall * 100, 1)
+                if total_pred_overall
+                else 0.0
+            }
+
+            # Ratio overall
+            if include_ratios:
+                if total_full_count > 0:
+                    ratio_str = f"{round(total_pred_overall / total_full_count * 100, 1)}% ({total_pred_overall}/{total_full_count})"
+                else:
+                    ratio_str = "0% (0/0)"
+                results["ratios"]["overall"] = {index_key: ratio_str}
+            else:
+                results["ratios"]["overall"] = {index_key: "N/A"}
+
+            if compute_all:
+                exact_all = df.filter(pl.col("LLM_Evaluation") == "EXACT").height
+                partial_all = df.filter(pl.col("LLM_Evaluation") == "PARTIAL").height
+                narrow_all = df.filter(pl.col("LLM_Evaluation") == "NARROW").height
+                broad_all = df.filter(pl.col("LLM_Evaluation") == "BROAD").height
+
+                denom = total_pred_overall if total_pred_overall else 1
+                results["recall_exact"]["overall"] = {
+                    index_key: round(exact_all / denom * 100, 1)
+                }
+                results["recall_partial"]["overall"] = {
+                    index_key: round(partial_all / denom * 100, 1)
+                }
+                results["recall_narrow"]["overall"] = {
+                    index_key: round(narrow_all / denom * 100, 1)
+                }
+                results["recall_broad"]["overall"] = {
+                    index_key: round(broad_all / denom * 100, 1)
+                }
+
+            if threshold is not None:
+                # Overall thresholded
+                sel_all = df.filter(pl.col(score_column) >= threshold).height
+                tp_all = df.filter(
+                    (pl.col(score_column) >= threshold)
+                    & (pl.col("code") == pl.col("Predicted_code"))
+                ).height
+
+                rec_all = tp_all / total_pred_overall if total_pred_overall else 0.0
+                prec_all = tp_all / sel_all if sel_all else 0.0
+                f1_all = (
+                    2 * prec_all * rec_all / (prec_all + rec_all)
+                    if (prec_all + rec_all)
+                    else 0.0
+                )
+
+                results["recall"]["overall"] = {index_key: round(rec_all * 100, 1)}
+                results["precision"]["overall"] = {index_key: round(prec_all * 100, 1)}
+                results["f1"]["overall"] = {index_key: round(f1_all * 100, 1)}
+
+        return results
+
+    # ---------------------------------------------------------
+    # SLOW PATH: Bootstrap enabled (fallback to original logic)
+    # ---------------------------------------------------------
+
+    # Base strict metrics (and ratios) computed without threshold
+    base_metrics = compute_metrics_simple(
+        df,
+        df_full,
+        bootstrap=bootstrap,
+        n_bootstrap=n_bootstrap,
+        ci=ci,
+        seed=seed,
+        threshold=None,  # never use threshold for strict/semantic recalls
+        score_column=score_column,
+        include_ratios=include_ratios,
+        index_key=index_key,
+    )
+
+    # Thresholded metrics (recall/precision/F1) computed only if threshold is provided
+    threshold_metrics = (
+        compute_metrics_simple(
+            df,
+            df_full,
+            bootstrap=bootstrap,
+            n_bootstrap=n_bootstrap,
+            ci=ci,
+            seed=seed,
+            threshold=threshold,
+            score_column=score_column,
+            include_ratios=include_ratios,
+            index_key=index_key,
+        )
+        if threshold is not None
+        else None
+    )
+
+    results: dict[str, Any] = {
+        "recall_strict": {},
+        "ratios": {},
     }
-    ratios["overall"] = {
-        index_key: f"{round(total_pred_overall / total_full_overall * 100, 1)}% ({total_pred_overall}/{total_full_overall})"
-    }
+    if bootstrap:
+        results.update({
+            "recall_strict_ci_low": {},
+            "recall_strict_ci_high": {},
+        })
 
     if compute_all:
+        results.update({
+            "recall_exact": {},
+            "recall_partial": {},
+            "recall_narrow": {},
+            "recall_broad": {},
+        })
+    if threshold is not None:
+        results.update({"recall": {}, "precision": {}, "f1": {}})
+        if bootstrap:
+            results.update({
+                "recall_ci_low": {},
+                "recall_ci_high": {},
+                "precision_ci_low": {},
+                "precision_ci_high": {},
+                "f1_ci_low": {},
+                "f1_ci_high": {},
+            })
+
+    # overall entry
+    overall_metrics = base_metrics.get("overall", {})
+    results["recall_strict"]["overall"] = {
+        index_key: overall_metrics.get("recall", 0.0)
+    }
+    results["ratios"]["overall"] = {index_key: overall_metrics.get("ratio", "N/A")}
+    if bootstrap:
+        results["recall_strict_ci_low"]["overall"] = {
+            index_key: overall_metrics.get("ci_low")
+        }
+        results["recall_strict_ci_high"]["overall"] = {
+            index_key: overall_metrics.get("ci_high")
+        }
+
+    if threshold_metrics is not None:
+        tm_overall = threshold_metrics.get("overall", {})
+        results["recall"]["overall"] = {index_key: tm_overall.get("recall", 0.0)}
+        results["precision"]["overall"] = {index_key: tm_overall.get("precision", 0.0)}
+        results["f1"]["overall"] = {index_key: tm_overall.get("f1", 0.0)}
+        if bootstrap:
+            results["recall_ci_low"]["overall"] = {
+                index_key: tm_overall.get("recall_ci_low")
+            }
+            results["recall_ci_high"]["overall"] = {
+                index_key: tm_overall.get("recall_ci_high")
+            }
+            results["precision_ci_low"]["overall"] = {
+                index_key: tm_overall.get("precision_ci_low")
+            }
+            results["precision_ci_high"]["overall"] = {
+                index_key: tm_overall.get("precision_ci_high")
+            }
+            results["f1_ci_low"]["overall"] = {index_key: tm_overall.get("f1_ci_low")}
+            results["f1_ci_high"]["overall"] = {index_key: tm_overall.get("f1_ci_high")}
+
+    if compute_all:
+        total_pred_overall = df.height
         true_exact_overall = df.filter(pl.col("LLM_Evaluation") == "EXACT").height
         true_partial_overall = df.filter(pl.col("LLM_Evaluation") == "PARTIAL").height
         true_narrow_overall = df.filter(pl.col("LLM_Evaluation") == "NARROW").height
         true_broad_overall = df.filter(pl.col("LLM_Evaluation") == "BROAD").height
 
-        recall_exact["overall"] = {
-            index_key: round(true_exact_overall / total_pred_overall * 100, 1)
+        denom_overall = total_pred_overall if total_pred_overall else 1
+        results["recall_exact"]["overall"] = {
+            index_key: round(true_exact_overall / denom_overall * 100, 1)
         }
-        recall_broad["overall"] = {
-            index_key: round(true_broad_overall / total_pred_overall * 100, 1)
+        results["recall_broad"]["overall"] = {
+            index_key: round(true_broad_overall / denom_overall * 100, 1)
         }
-        recall_partial["overall"] = {
-            index_key: round(true_partial_overall / total_pred_overall * 100, 1)
+        results["recall_partial"]["overall"] = {
+            index_key: round(true_partial_overall / denom_overall * 100, 1)
         }
-        recall_narrow["overall"] = {
-            index_key: round(true_narrow_overall / total_pred_overall * 100, 1)
+        results["recall_narrow"]["overall"] = {
+            index_key: round(true_narrow_overall / denom_overall * 100, 1)
         }
-
-    # deterministic label list from df_full
-    unique_labels = sorted(df_full["label"].unique())
 
     for label in unique_labels:
-        # precompute label-specific frames and totals (vectorized-ish)
-        df_label_full = df_full.filter(pl.col("label") == label)
-        df_label_pred = df.filter(pl.col("label") == label)
+        metrics = base_metrics.get(label, {})
+        results["recall_strict"][label] = {index_key: metrics.get("recall", 0.0)}
+        results["ratios"][label] = {index_key: metrics.get("ratio", "N/A")}
+        if bootstrap:
+            results["recall_strict_ci_low"][label] = {index_key: metrics.get("ci_low")}
+            results["recall_strict_ci_high"][label] = {
+                index_key: metrics.get("ci_high")
+            }
 
-        total_full = df_label_full.height
-        total_pred = df_label_pred.height
+        if threshold_metrics is not None:
+            tm_label = threshold_metrics.get(label, {})
+            results["recall"][label] = {index_key: tm_label.get("recall", 0.0)}
+            results["precision"][label] = {index_key: tm_label.get("precision", 0.0)}
+            results["f1"][label] = {index_key: tm_label.get("f1", 0.0)}
+            if bootstrap:
+                results["recall_ci_low"][label] = {
+                    index_key: tm_label.get("recall_ci_low")
+                }
+                results["recall_ci_high"][label] = {
+                    index_key: tm_label.get("recall_ci_high")
+                }
+                results["precision_ci_low"][label] = {
+                    index_key: tm_label.get("precision_ci_low")
+                }
+                results["precision_ci_high"][label] = {
+                    index_key: tm_label.get("precision_ci_high")
+                }
+                results["f1_ci_low"][label] = {index_key: tm_label.get("f1_ci_low")}
+                results["f1_ci_high"][label] = {index_key: tm_label.get("f1_ci_high")}
 
-        # counts for strict / semantic relations
-        true_strict = df_label_pred.filter(
-            pl.col("code") == pl.col("Predicted_code")
-        ).height
-
-        # Only compute semantic-rel counts if compute_all requested (avoid cost otherwise)
-        if compute_all:
-            true_exact = df_label_pred.filter(
-                pl.col("LLM_Evaluation") == "EXACT"
-            ).height
-            true_partial = df_label_pred.filter(
-                pl.col("LLM_Evaluation") == "PARTIAL"
-            ).height
-            true_narrow = df_label_pred.filter(
-                pl.col("LLM_Evaluation") == "NARROW"
-            ).height
-            true_broad = df_label_pred.filter(
-                pl.col("LLM_Evaluation") == "BROAD"
-            ).height
-        else:
-            true_exact = true_narrow = true_broad = true_partial = 0
-
-        # init containers
-        recall_strict[label] = {}
-        ratios[label] = {}
-        if compute_all:
-            recall_exact[label] = {}
-            recall_partial[label] = {}
-            recall_narrow[label] = {}
-            recall_broad[label] = {}
-
-        if total_pred == 0:
-            # no predictions for this label in current df partition
-            recall_strict[label][index_key] = 0.0
-            ratios[label][index_key] = f"0% (0/{total_full})"
-            if compute_all:
-                recall_exact[label][index_key] = 0.0
-                recall_partial[label][index_key] = 0.0
-                recall_narrow[label][index_key] = 0.0
-                recall_broad[label][index_key] = 0.0
+        if not compute_all:
             continue
 
-        # strict recall
-        recall_strict[label][index_key] = round(true_strict / total_pred * 100, 1)
-        # ratios: how much of the full set is present in this partition
-        if index_key == "All":
-            ratios[label][index_key] = (
-                f"{round(total_pred / total_pred_overall * 100, 1)}% ({total_pred}/{total_pred_overall})"
-            )
-        else:
-            ratios[label][index_key] = (
-                f"{round(total_pred / total_full * 100, 1)}% ({total_pred}/{total_full})"
-            )
+        df_label_pred = df.filter(pl.col("label") == label)
+        total_pred = df_label_pred.height
+        denom = total_pred if total_pred else 1
 
-        if compute_all:
-            recall_exact[label][index_key] = round(true_exact / total_pred * 100, 1)
-            recall_partial[label][index_key] = round(true_partial / total_pred * 100, 1)
-            recall_narrow[label][index_key] = round(true_narrow / total_pred * 100, 1)
-            recall_broad[label][index_key] = round(true_broad / total_pred * 100, 1)
+        true_exact = df_label_pred.filter(pl.col("LLM_Evaluation") == "EXACT").height
+        true_partial = df_label_pred.filter(
+            pl.col("LLM_Evaluation") == "PARTIAL"
+        ).height
+        true_narrow = df_label_pred.filter(pl.col("LLM_Evaluation") == "NARROW").height
+        true_broad = df_label_pred.filter(pl.col("LLM_Evaluation") == "BROAD").height
 
-    if compute_all:
-        return (
-            recall_strict,
-            recall_exact,
-            recall_partial,
-            recall_narrow,
-            recall_broad,
-            ratios,
-        )
+        results["recall_exact"][label] = {index_key: round(true_exact / denom * 100, 1)}
+        results["recall_partial"][label] = {
+            index_key: round(true_partial / denom * 100, 1)
+        }
+        results["recall_narrow"][label] = {
+            index_key: round(true_narrow / denom * 100, 1)
+        }
+        results["recall_broad"][label] = {index_key: round(true_broad / denom * 100, 1)}
 
-    return recall_strict, ratios
+    return results
 
 
 # ---------------------------
@@ -284,810 +871,260 @@ def compute_metrics(
     top_100_mentions: set[str],
     unique_pairs: set[tuple[str, str]],
     compute_all_recalls: bool = True,
+    include_ratios: bool = True,
+    threshold: Optional[float] = None,
+    score_column: str = "Prediction_score",
+    bootstrap: bool = False,
+    n_bootstrap: int = 1000,
+    ci: float = 0.95,
+    seed: int = 42,
 ) -> dict[str, dict[str, Any]]:
     """
     Compute full suite of metrics across many partitions.
     - pred_df: predicted dataframe (contains columns: label, code, Predicted_code, semantic_rel_pred, span, annotation, filename, start_span, etc.)
     - train_mentions / train_cuis / top_100_cuis / top_100_mentions / unique_pairs: sets used to build partitions
     - compute_all_recalls: if False, only strict recall + ratios are computed (faster)
+    - include_ratios / threshold / score_column / bootstrap / n_bootstrap / ci / seed: forwarded to compute_partition_metrics
     """
 
     # ensure codes normalized if you use normalize_codes; if you have it available do it here
     # pred_df = pred_df.with_columns(normalize_codes(pl.col("code")), normalize_codes(pl.col("Predicted_code")))
 
-    # We'll call compute_recall_ratios for each partition and then aggregate
+    # Pre-calculate full counts and unique labels once
+    # This avoids re-calculating them for every partition
+    full_counts = (
+        pred_df.group_by(
+            "label"
+        )  # Note: Using pred_df as proxy for df_full if df_full is not available in this scope?
+        # Wait, compute_metrics does NOT take df_full as argument!
+        # It takes pred_df.
+        # In the original code, compute_metrics_simple took df_full.
+        # But compute_metrics calls compute_partition_metrics passing pred_df as df_full?
+        # Let's check the original call:
+        # _call_partition(df_partition, pred_df, ...)
+        # Yes, pred_df is treated as df_full in the context of compute_metrics.
+        .count()
+        .select(["label", "count"])
+        .to_dict(as_series=False)
+    )
+    full_counts_map = dict(zip(full_counts["label"], full_counts["count"]))
+    unique_labels = sorted(pred_df["label"].unique().to_list())
+    total_full_count = pred_df.height
+
+    # We'll call compute_partition_metrics for each partition and then aggregate
     # Helper to call and return a consistent tuple for easier aggregation
 
     def _call_partition(df_partition: pl.DataFrame, index_name: str):
-        if compute_all_recalls:
-            return compute_recall_ratios(
-                df_partition, pred_df, index=index_name, compute_all=True
-            )
-        else:
-            return compute_recall_ratios(
-                df_partition, pred_df, index=index_name, compute_all=False
-            )
-
-    # All
-    if compute_all_recalls:
-        (
-            recall_strict_all,
-            recall_exact_all,
-            recall_partial_all,
-            recall_narrow_all,
-            recall_broad_all,
-            ratios_all,
-        ) = _call_partition(pred_df, "All")
-    else:
-        recall_strict_all, ratios_all = _call_partition(pred_df, "All")
-
-    # seen / unseen CUIs
-    pred_df_seen_cuis = pred_df.filter(pl.col("code").is_in(list(train_cuis)))
-    pred_df_unseen_cuis = pred_df.filter(~pl.col("code").is_in(list(train_cuis)))
-    if compute_all_recalls:
-        (
-            recall_strict_seen_cuis,
-            recall_exact_seen_cuis,
-            recall_partial_seen_cuis,
-            recall_narrow_seen_cuis,
-            recall_broad_seen_cuis,
-            ratios_seen_cuis,
-        ) = _call_partition(pred_df_seen_cuis, "seen_cuis")
-        (
-            recall_strict_unseen_cuis,
-            recall_exact_unseen_cuis,
-            recall_partial_unseen_cuis,
-            recall_narrow_unseen_cuis,
-            recall_broad_unseen_cuis,
-            ratios_unseen_cuis,
-        ) = _call_partition(pred_df_unseen_cuis, "unseen_cuis")
-    else:
-        recall_strict_seen_cuis, ratios_seen_cuis = _call_partition(
-            pred_df_seen_cuis, "seen_cuis"
-        )
-        recall_strict_unseen_cuis, ratios_unseen_cuis = _call_partition(
-            pred_df_unseen_cuis, "unseen_cuis"
+        return compute_partition_metrics(
+            df_partition,
+            pred_df,  # df_full
+            full_counts_map,
+            unique_labels,
+            total_full_count,
+            index=index_name,
+            compute_all=compute_all_recalls,
+            include_ratios=include_ratios,
+            threshold=threshold,
+            score_column=score_column,
+            bootstrap=bootstrap,
+            n_bootstrap=n_bootstrap,
+            ci=ci,
+            seed=seed,
         )
 
-    # seen / unseen mentions
-    pred_df_seen_mentions = pred_df.filter(pl.col("span").is_in(list(train_mentions)))
-    pred_df_unseen_mentions = pred_df.filter(
-        ~pl.col("span").is_in(list(train_mentions))
-    )
-    if compute_all_recalls:
-        (
-            recall_strict_seen_mentions,
-            recall_exact_seen_mentions,
-            recall_partial_seen_mentions,
-            recall_narrow_seen_mentions,
-            recall_broad_seen_mentions,
-            ratios_seen_mentions,
-        ) = _call_partition(pred_df_seen_mentions, "seen_mentions")
-        (
-            recall_strict_unseen_mentions,
-            recall_exact_unseen_mentions,
-            recall_partial_unseen_mentions,
-            recall_narrow_unseen_mentions,
-            recall_broad_unseen_mentions,
-            ratios_unseen_mentions,
-        ) = _call_partition(pred_df_unseen_mentions, "unseen_mentions")
-    else:
-        recall_strict_seen_mentions, ratios_seen_mentions = _call_partition(
-            pred_df_seen_mentions, "seen_mentions"
-        )
-        recall_strict_unseen_mentions, ratios_unseen_mentions = _call_partition(
-            pred_df_unseen_mentions, "unseen_mentions"
-        )
+    has_threshold = threshold is not None
 
-    # seen / unseen top 100 CUIs
-    pred_df_seen_top_100_cuis = pred_df.filter(pl.col("code").is_in(list(top_100_cuis)))
-    pred_df_unseen_top_100_cuis = pred_df.filter(
-        ~pl.col("code").is_in(list(top_100_cuis))
-    )
-    if compute_all_recalls:
-        (
-            recall_strict_seen_top_100_cuis,
-            recall_exact_seen_top_100_cuis,
-            recall_partial_seen_top_100_cuis,
-            recall_narrow_seen_top_100_cuis,
-            recall_broad_seen_top_100_cuis,
-            ratios_seen_top_100_cuis,
-        ) = _call_partition(pred_df_seen_top_100_cuis, "in_top_100_cuis")
-        (
-            recall_strict_unseen_top_100_cuis,
-            recall_exact_unseen_top_100_cuis,
-            recall_partial_unseen_top_100_cuis,
-            recall_narrow_unseen_top_100_cuis,
-            recall_broad_unseen_top_100_cuis,
-            ratios_unseen_top_100_cuis,
-        ) = _call_partition(pred_df_unseen_top_100_cuis, "not_in_top_100_cuis")
-    else:
-        recall_strict_seen_top_100_cuis, ratios_seen_top_100_cuis = _call_partition(
-            pred_df_seen_top_100_cuis, "in_top_100_cuis"
-        )
-        recall_strict_unseen_top_100_cuis, ratios_unseen_top_100_cuis = _call_partition(
-            pred_df_unseen_top_100_cuis, "not_in_top_100_cuis"
-        )
+    # Prepare partitions
+    # We define them as (name, dataframe) tuples
 
-    # seen / unseen top 100 mentions
-    pred_df_seen_top_100_mentions = pred_df.filter(
-        pl.col("span").is_in(list(top_100_mentions))
-    )
-    pred_df_unseen_top_100_mentions = pred_df.filter(
-        ~pl.col("span").is_in(list(top_100_mentions))
-    )
-    if compute_all_recalls:
-        (
-            recall_strict_seen_top_100_mentions,
-            recall_exact_seen_top_100_mentions,
-            recall_partial_seen_top_100_mentions,
-            recall_narrow_seen_top_100_mentions,
-            recall_broad_seen_top_100_mentions,
-            ratios_seen_top_100_mentions,
-        ) = _call_partition(pred_df_seen_top_100_mentions, "in_top_100_mentions")
-        (
-            recall_strict_unseen_top_100_mentions,
-            recall_exact_unseen_top_100_mentions,
-            recall_partial_unseen_top_100_mentions,
-            recall_narrow_unseen_top_100_mentions,
-            recall_broad_unseen_top_100_mentions,
-            ratios_unseen_top_100_mentions,
-        ) = _call_partition(pred_df_unseen_top_100_mentions, "not_in_top_100_mentions")
-    else:
-        recall_strict_seen_top_100_mentions, ratios_seen_top_100_mentions = (
-            _call_partition(pred_df_seen_top_100_mentions, "in_top_100_mentions")
-        )
-        recall_strict_unseen_top_100_mentions, ratios_unseen_top_100_mentions = (
-            _call_partition(pred_df_unseen_top_100_mentions, "not_in_top_100_mentions")
-        )
-
-    # seen / unseen unique pairs
+    # Pre-calculate some filters to avoid repetition
     unique_df = pl.DataFrame(list(unique_pairs), schema=["span", "code"], orient="row")
-    pred_df_seen_unique_pairs = pred_df.join(
-        unique_df, on=["span", "code"], how="inner"
-    )
-    pred_df_unseen_unique_pairs = pred_df.join(
-        unique_df, on=["span", "code"], how="anti"
-    )
-    if compute_all_recalls:
-        (
-            recall_strict_seen_unique_pairs,
-            recall_exact_seen_unique_pairs,
-            recall_partial_seen_unique_pairs,
-            recall_narrow_seen_unique_pairs,
-            recall_broad_seen_unique_pairs,
-            ratios_seen_unique_pairs,
-        ) = _call_partition(pred_df_seen_unique_pairs, "seen_unique_pairs")
-        (
-            recall_strict_unseen_unique_pairs,
-            recall_exact_unseen_unique_pairs,
-            recall_partial_unseen_unique_pairs,
-            recall_narrow_unseen_unique_pairs,
-            recall_broad_unseen_unique_pairs,
-            ratios_unseen_unique_pairs,
-        ) = _call_partition(pred_df_unseen_unique_pairs, "unseen_unique_pairs")
-    else:
-        recall_strict_seen_unique_pairs, ratios_seen_unique_pairs = _call_partition(
-            pred_df_seen_unique_pairs, "seen_unique_pairs"
-        )
-        recall_strict_unseen_unique_pairs, ratios_unseen_unique_pairs = _call_partition(
-            pred_df_unseen_unique_pairs, "unseen_unique_pairs"
-        )
 
-    # identical / not identical (span == annotation)
-    pred_df_is_identical = pred_df.filter(pl.col("span") == pl.col("annotation"))
-    pred_df_is_not_identical = pred_df.filter(pl.col("span") != pl.col("annotation"))
-    if compute_all_recalls:
-        (
-            recall_strict_identical,
-            recall_exact_identical,
-            recall_partial_identical,
-            recall_narrow_identical,
-            recall_broad_identical,
-            ratios_identical,
-        ) = _call_partition(pred_df_is_identical, "identical")
-        (
-            recall_strict_not_identical,
-            recall_exact_not_identical,
-            recall_partial_not_identical,
-            recall_narrow_not_identical,
-            recall_broad_not_identical,
-            ratios_not_identical,
-        ) = _call_partition(pred_df_is_not_identical, "not_identical")
-    else:
-        recall_strict_identical, ratios_identical = _call_partition(
-            pred_df_is_identical, "identical"
-        )
-        recall_strict_not_identical, ratios_not_identical = _call_partition(
-            pred_df_is_not_identical, "not_identical"
-        )
-
-    # word-count buckets
-    pred_df_one_word = pred_df.filter(pl.col("span").str.count_matches(" ") == 0)
-    pred_df_two_words = pred_df.filter(pl.col("span").str.count_matches(" ") == 1)
-    pred_df_three_words = pred_df.filter(pl.col("span").str.count_matches(" ") == 2)
-    pred_df_more_than_three_words = pred_df.filter(
-        pl.col("span").str.count_matches(" ") >= 3
-    )
-
-    if compute_all_recalls:
-        (
-            recall_strict_one_word,
-            recall_exact_one_word,
-            recall_partial_one_word,
-            recall_narrow_one_word,
-            recall_broad_one_word,
-            ratios_one_word,
-        ) = _call_partition(pred_df_one_word, "one_word")
-        (
-            recall_strict_two_words,
-            recall_exact_two_words,
-            recall_partial_two_words,
-            recall_narrow_two_words,
-            recall_broad_two_words,
-            ratios_two_words,
-        ) = _call_partition(pred_df_two_words, "two_words")
-        (
-            recall_strict_three_words,
-            recall_exact_three_words,
-            recall_partial_three_words,
-            recall_narrow_three_words,
-            recall_broad_three_words,
-            ratios_three_words,
-        ) = _call_partition(pred_df_three_words, "three_words")
-        (
-            recall_strict_more_than_three_words,
-            recall_exact_more_than_three_words,
-            recall_partial_more_than_three_words,
-            recall_narrow_more_than_three_words,
-            recall_broad_more_than_three_words,
-            ratios_more_than_three_words,
-        ) = _call_partition(pred_df_more_than_three_words, "more_than_three_words")
-    else:
-        recall_strict_one_word, ratios_one_word = _call_partition(
-            pred_df_one_word, "one_word"
-        )
-        recall_strict_two_words, ratios_two_words = _call_partition(
-            pred_df_two_words, "two_words"
-        )
-        recall_strict_three_words, ratios_three_words = _call_partition(
-            pred_df_three_words, "three_words"
-        )
-        recall_strict_more_than_three_words, ratios_more_than_three_words = (
-            _call_partition(pred_df_more_than_three_words, "more_than_three_words")
-        )
-
-    # Abbreviation buckets
-    pred_df_abbrev_only = pred_df.filter(
-        pl.col("span").str.strip_chars().str.contains(r"^[A-Z0-9\-]{2,}$")
-    )
-    pred_df_abbrev_or_contains = pred_df.filter(
-        pl.col("span").str.contains(r"\b[A-Z0-9\-]{2,}\b")
-    )
-    pred_df_not_abbrev = pred_df.filter(
-        ~pl.col("span").str.contains(r"\b[A-Z0-9\-]{2,}\b")
-    )
-
-    if compute_all_recalls:
-        (
-            recall_strict_abbrev_only,
-            recall_exact_abbrev_only,
-            recall_partial_abbrev_only,
-            recall_narrow_abbrev_only,
-            recall_broad_abbrev_only,
-            ratios_abbrev_only,
-        ) = _call_partition(pred_df_abbrev_only, "abbrev_only")
-        (
-            recall_strict_abbrev_or_contains,
-            recall_exact_abbrev_or_contains,
-            recall_partial_abbrev_or_contains,
-            recall_narrow_abbrev_or_contains,
-            recall_broad_abbrev_or_contains,
-            ratios_abbrev_or_contains,
-        ) = _call_partition(pred_df_abbrev_or_contains, "abbrev_or_contains")
-        (
-            recall_strict_not_abbrev,
-            recall_exact_not_abbrev,
-            recall_partial_not_abbrev,
-            recall_narrow_not_abbrev,
-            recall_broad_not_abbrev,
-            ratios_not_abbrev,
-        ) = _call_partition(pred_df_not_abbrev, "not_abbrev")
-    else:
-        recall_strict_abbrev_only, ratios_abbrev_only = _call_partition(
-            pred_df_abbrev_only, "abbrev_only"
-        )
-        recall_strict_abbrev_or_contains, ratios_abbrev_or_contains = _call_partition(
-            pred_df_abbrev_or_contains, "abbrev_or_contains"
-        )
-        recall_strict_not_abbrev, ratios_not_abbrev = _call_partition(
-            pred_df_not_abbrev, "not_abbrev"
-        )
-
-    # Inconsistency (repeated filename+code)
     repeated = (
         pred_df.group_by(["filename", "code"])
         .agg(pl.count().alias("count"))
         .filter(pl.col("count") >= 2)
         .select(["filename", "code"])
     )
-    pred_df_repeated = pred_df.join(repeated, on=["filename", "code"], how="inner")
-    pred_df_not_repeated = pred_df.join(repeated, on=["filename", "code"], how="anti")
 
-    if compute_all_recalls:
+    partition_specs = [
+        ("All", pred_df),
+        ("seen_cuis", pred_df.filter(pl.col("code").is_in(list(train_cuis)))),
+        ("unseen_cuis", pred_df.filter(~pl.col("code").is_in(list(train_cuis)))),
+        ("seen_mentions", pred_df.filter(pl.col("span").is_in(list(train_mentions)))),
         (
-            recall_strict_repeated,
-            recall_exact_repeated,
-            recall_partial_repeated,
-            recall_narrow_repeated,
-            recall_broad_repeated,
-            ratios_repeated,
-        ) = _call_partition(pred_df_repeated, "repeated")
+            "unseen_mentions",
+            pred_df.filter(~pl.col("span").is_in(list(train_mentions))),
+        ),
+        ("in_top_100_cuis", pred_df.filter(pl.col("code").is_in(list(top_100_cuis)))),
         (
-            recall_strict_not_repeated,
-            recall_exact_not_repeated,
-            recall_partial_not_repeated,
-            recall_narrow_not_repeated,
-            recall_broad_not_repeated,
-            ratios_not_repeated,
-        ) = _call_partition(pred_df_not_repeated, "not_repeated")
-    else:
-        recall_strict_repeated, ratios_repeated = _call_partition(
-            pred_df_repeated, "repeated"
-        )
-        recall_strict_not_repeated, ratios_not_repeated = _call_partition(
-            pred_df_not_repeated, "not_repeated"
-        )
+            "not_in_top_100_cuis",
+            pred_df.filter(~pl.col("code").is_in(list(top_100_cuis))),
+        ),
+        (
+            "in_top_100_mentions",
+            pred_df.filter(pl.col("span").is_in(list(top_100_mentions))),
+        ),
+        (
+            "not_in_top_100_mentions",
+            pred_df.filter(~pl.col("span").is_in(list(top_100_mentions))),
+        ),
+        (
+            "seen_unique_pairs",
+            pred_df.join(unique_df, on=["span", "code"], how="inner"),
+        ),
+        (
+            "unseen_unique_pairs",
+            pred_df.join(unique_df, on=["span", "code"], how="anti"),
+        ),
+        ("identical", pred_df.filter(pl.col("span") == pl.col("annotation"))),
+        ("not_identical", pred_df.filter(pl.col("span") != pl.col("annotation"))),
+        ("one_word", pred_df.filter(pl.col("span").str.count_matches(" ") == 0)),
+        ("two_words", pred_df.filter(pl.col("span").str.count_matches(" ") == 1)),
+        ("three_words", pred_df.filter(pl.col("span").str.count_matches(" ") == 2)),
+        (
+            "more_than_three_words",
+            pred_df.filter(pl.col("span").str.count_matches(" ") >= 3),
+        ),
+        (
+            "abbrev_only",
+            pred_df.filter(
+                pl.col("span").str.strip_chars().str.contains(r"^[A-Z0-9\-]{2,}$")
+            ),
+        ),
+        (
+            "abbrev_or_contains",
+            pred_df.filter(pl.col("span").str.contains(r"\b[A-Z0-9\-]{2,}\b")),
+        ),
+        (
+            "not_abbrev",
+            pred_df.filter(~pl.col("span").str.contains(r"\b[A-Z0-9\-]{2,}\b")),
+        ),
+        ("repeated", pred_df.join(repeated, on=["filename", "code"], how="inner")),
+        ("not_repeated", pred_df.join(repeated, on=["filename", "code"], how="anti")),
+    ]
 
     # -------------------------
     # Aggregation into final_results
     # -------------------------
     final_results: dict[str, dict[str, list[Any]]] = {}
 
-    # initializer factory
     def _init_label_entry(lbl: str):
+        entry = {
+            "index": [],
+            "recall_strict": [],
+            "ratios": [],
+        }
+        if bootstrap:
+            entry.update({
+                "recall_strict_ci_low": [],
+                "recall_strict_ci_high": [],
+            })
+
         if compute_all_recalls:
-            return {
-                "index": [],
-                "recall_strict": [],
+            entry.update({
                 "recall_exact": [],
                 "recall_partial": [],
                 "recall_narrow": [],
                 "recall_broad": [],
-                "ratios": [],
-            }
-        else:
-            return {
-                "index": [],
-                "recall_strict": [],
-                "ratios": [],
-            }
+            })
+        if has_threshold:
+            entry.update({"recall": [], "precision": [], "f1": []})
+            if bootstrap:
+                entry.update({
+                    "recall_ci_low": [],
+                    "recall_ci_high": [],
+                    "precision_ci_low": [],
+                    "precision_ci_high": [],
+                    "f1_ci_low": [],
+                    "f1_ci_high": [],
+                })
+        return entry
 
-    # helper aggregator for each label and partition outputs
-    def _aggregate(
-        label: str,
-        recall_strict_map: dict[str, dict[str, float]],
-        ratios_map: dict[str, dict[str, str]],
-        recall_exact_map=None,
-        recall_partial_map=None,
-        recall_narrow_map=None,
-        recall_broad_map=None,
-    ):
+    def _aggregate(label: str, part: dict[str, Any]):
         if label not in final_results:
             final_results[label] = _init_label_entry(label)
 
-        # safe-get first (and only) kv from maps
-        strict_val = list(recall_strict_map.get(label, {"": 0.0}).values())[0]
-        ratio_val = list(ratios_map.get(label, {"": "0% (0/0)"}).values())[0]
+        rs_map = part.get("recall_strict", {})
+        ratio_map = part.get("ratios", {})
+        exact_map = part.get("recall_exact", {})
+        partial_map = part.get("recall_partial", {})
+        narrow_map = part.get("recall_narrow", {})
+        broad_map = part.get("recall_broad", {})
+        recall_thresh_map = part.get("recall", {})
+        precision_map = part.get("precision", {})
+        f1_map = part.get("f1", {})
 
-        final_results[label]["index"].append(list(ratios_map.get(label, {}).keys())[0])
+        strict_val = list(rs_map.get(label, {"": 0.0}).values())[0]
+        ratio_val = list(ratio_map.get(label, {"": "N/A"}).values())[0]
+        final_results[label]["index"].append(list(ratio_map.get(label, {}).keys())[0])
         final_results[label]["recall_strict"].append(strict_val)
         final_results[label]["ratios"].append(ratio_val)
 
+        if bootstrap:
+            rs_ci_low_map = part.get("recall_strict_ci_low", {})
+            rs_ci_high_map = part.get("recall_strict_ci_high", {})
+            final_results[label]["recall_strict_ci_low"].append(
+                list(rs_ci_low_map.get(label, {"": None}).values())[0]
+            )
+            final_results[label]["recall_strict_ci_high"].append(
+                list(rs_ci_high_map.get(label, {"": None}).values())[0]
+            )
+
         if compute_all_recalls:
-            exact_val = list(recall_exact_map.get(label, {"": 0.0}).values())[0]  # type: ignore
-            partial_val = list(recall_partial_map.get(label, {"": 0.0}).values())[0]  # type: ignore
-            narrow_val = list(recall_narrow_map.get(label, {"": 0.0}).values())[0]  # type: ignore
-            broad_val = list(recall_broad_map.get(label, {"": 0.0}).values())[0]  # type: ignore
+            exact_val = list(exact_map.get(label, {"": 0.0}).values())[0]
+            partial_val = list(partial_map.get(label, {"": 0.0}).values())[0]
+            narrow_val = list(narrow_map.get(label, {"": 0.0}).values())[0]
+            broad_val = list(broad_map.get(label, {"": 0.0}).values())[0]
             final_results[label]["recall_exact"].append(exact_val)
             final_results[label]["recall_partial"].append(partial_val)
             final_results[label]["recall_narrow"].append(narrow_val)
             final_results[label]["recall_broad"].append(broad_val)
 
-    # Now aggregate in the same order you had originally:
-    partitions = []
+        if has_threshold:
+            recall_thresh_val = list(recall_thresh_map.get(label, {"": 0.0}).values())[
+                0
+            ]
+            precision_val = list(precision_map.get(label, {"": 0.0}).values())[0]
+            f1_val = list(f1_map.get(label, {"": 0.0}).values())[0]
+            final_results[label]["recall"].append(recall_thresh_val)
+            final_results[label]["precision"].append(precision_val)
+            final_results[label]["f1"].append(f1_val)
 
-    # For each partition, gather the maps returned above and append a tuple to partitions:
-    # (recall_strict_map, recall_exact_map_or_None, recall_partial_map_or_None, recall_narrow_map_or_None, recall_broad_map_or_None, ratios_map)
-    # "All"
-    if compute_all_recalls:
-        partitions.append((
-            recall_strict_all,
-            recall_exact_all,  # type: ignore
-            recall_partial_all,  # type: ignore
-            recall_narrow_all,  # type: ignore
-            recall_broad_all,  # type: ignore
-            ratios_all,
-        ))
-    else:
-        partitions.append((recall_strict_all, None, None, None, None, ratios_all))
+            if bootstrap:
+                r_ci_low_map = part.get("recall_ci_low", {})
+                r_ci_high_map = part.get("recall_ci_high", {})
+                p_ci_low_map = part.get("precision_ci_low", {})
+                p_ci_high_map = part.get("precision_ci_high", {})
+                f1_ci_low_map = part.get("f1_ci_low", {})
+                f1_ci_high_map = part.get("f1_ci_high", {})
 
-    # seen/unseen cuis
-    if compute_all_recalls:
-        partitions.append((
-            recall_strict_seen_cuis,
-            recall_exact_seen_cuis,  # type: ignore
-            recall_partial_seen_cuis,  # type: ignore
-            recall_narrow_seen_cuis,  # type: ignore
-            recall_broad_seen_cuis,  # type: ignore
-            ratios_seen_cuis,
-        ))  # type: ignore
-        partitions.append((
-            recall_strict_unseen_cuis,
-            recall_exact_unseen_cuis,  # type: ignore
-            recall_partial_unseen_cuis,  # type: ignore
-            recall_narrow_unseen_cuis,  # type: ignore
-            recall_broad_unseen_cuis,  # type: ignore
-            ratios_unseen_cuis,
-        ))
-    else:
-        partitions.append((
-            recall_strict_seen_cuis,
-            None,
-            None,
-            None,
-            None,
-            ratios_seen_cuis,
-        ))
-        partitions.append((
-            recall_strict_unseen_cuis,
-            None,
-            None,
-            None,
-            None,
-            ratios_unseen_cuis,
-        ))
+                final_results[label]["recall_ci_low"].append(
+                    list(r_ci_low_map.get(label, {"": None}).values())[0]
+                )
+                final_results[label]["recall_ci_high"].append(
+                    list(r_ci_high_map.get(label, {"": None}).values())[0]
+                )
+                final_results[label]["precision_ci_low"].append(
+                    list(p_ci_low_map.get(label, {"": None}).values())[0]
+                )
+                final_results[label]["precision_ci_high"].append(
+                    list(p_ci_high_map.get(label, {"": None}).values())[0]
+                )
+                final_results[label]["f1_ci_low"].append(
+                    list(f1_ci_low_map.get(label, {"": None}).values())[0]
+                )
+                final_results[label]["f1_ci_high"].append(
+                    list(f1_ci_high_map.get(label, {"": None}).values())[0]
+                )
 
-    # seen/unseen mentions
-    if compute_all_recalls:
-        partitions.append((
-            recall_strict_seen_mentions,
-            recall_exact_seen_mentions,  # type: ignore
-            recall_partial_seen_mentions,  # type: ignore
-            recall_narrow_seen_mentions,  # type: ignore
-            recall_broad_seen_mentions,  # type: ignore
-            ratios_seen_mentions,
-        ))
-        partitions.append((
-            recall_strict_unseen_mentions,
-            recall_exact_unseen_mentions,  # type: ignore
-            recall_partial_unseen_mentions,  # type: ignore
-            recall_narrow_unseen_mentions,  # type: ignore
-            recall_broad_unseen_mentions,  # type: ignore
-            ratios_unseen_mentions,
-        ))
-    else:
-        partitions.append((
-            recall_strict_seen_mentions,
-            None,
-            None,
-            None,
-            None,
-            ratios_seen_mentions,
-        ))
-        partitions.append((
-            recall_strict_unseen_mentions,
-            None,
-            None,
-            None,
-            None,
-            ratios_unseen_mentions,
-        ))
+    # Iterate with tqdm
+    for name, df_part in tqdm(partition_specs, desc="Computing partitions"):
+        part_res = _call_partition(df_part, name)
 
-    # top 100 cuis
-    if compute_all_recalls:
-        partitions.append((
-            recall_strict_seen_top_100_cuis,
-            recall_exact_seen_top_100_cuis,  # type: ignore
-            recall_partial_seen_top_100_cuis,  # type: ignore
-            recall_narrow_seen_top_100_cuis,  # type: ignore
-            recall_broad_seen_top_100_cuis,  # type: ignore
-            ratios_seen_top_100_cuis,
-        ))
-        partitions.append((
-            recall_strict_unseen_top_100_cuis,
-            recall_exact_unseen_top_100_cuis,  # type: ignore
-            recall_partial_unseen_top_100_cuis,  # type: ignore
-            recall_narrow_unseen_top_100_cuis,  # type: ignore
-            recall_broad_unseen_top_100_cuis,  # type: ignore
-            ratios_unseen_top_100_cuis,
-        ))
-    else:
-        partitions.append((
-            recall_strict_seen_top_100_cuis,
-            None,
-            None,
-            None,
-            None,
-            ratios_seen_top_100_cuis,
-        ))
-        partitions.append((
-            recall_strict_unseen_top_100_cuis,
-            None,
-            None,
-            None,
-            None,
-            ratios_unseen_top_100_cuis,
-        ))
-
-    # top 100 mentions
-    if compute_all_recalls:
-        partitions.append((
-            recall_strict_seen_top_100_mentions,
-            recall_exact_seen_top_100_mentions,  # type: ignore
-            recall_partial_seen_top_100_mentions,  # type: ignore
-            recall_narrow_seen_top_100_mentions,  # type: ignore
-            recall_broad_seen_top_100_mentions,  # type: ignore
-            ratios_seen_top_100_mentions,
-        ))
-        partitions.append((
-            recall_strict_unseen_top_100_mentions,
-            recall_exact_unseen_top_100_mentions,  # type: ignore
-            recall_partial_unseen_top_100_mentions,  # type: ignore
-            recall_narrow_unseen_top_100_mentions,  # type: ignore
-            recall_broad_unseen_top_100_mentions,  # type: ignore
-            ratios_unseen_top_100_mentions,
-        ))
-    else:
-        partitions.append((
-            recall_strict_seen_top_100_mentions,
-            None,
-            None,
-            None,
-            None,
-            ratios_seen_top_100_mentions,
-        ))
-        partitions.append((
-            recall_strict_unseen_top_100_mentions,
-            None,
-            None,
-            None,
-            None,
-            ratios_unseen_top_100_mentions,
-        ))
-
-    # unique pairs
-    if compute_all_recalls:
-        partitions.append((
-            recall_strict_seen_unique_pairs,
-            recall_exact_seen_unique_pairs,  # type: ignore
-            recall_partial_seen_unique_pairs,  # type: ignore
-            recall_narrow_seen_unique_pairs,  # type: ignore
-            recall_broad_seen_unique_pairs,  # type: ignore
-            ratios_seen_unique_pairs,
-        ))
-        partitions.append((
-            recall_strict_unseen_unique_pairs,
-            recall_exact_unseen_unique_pairs,  # type: ignore
-            recall_partial_unseen_unique_pairs,  # type: ignore
-            recall_narrow_unseen_unique_pairs,  # type: ignore
-            recall_broad_unseen_unique_pairs,  # type: ignore
-            ratios_unseen_unique_pairs,
-        ))
-    else:
-        partitions.append((
-            recall_strict_seen_unique_pairs,
-            None,
-            None,
-            None,
-            None,
-            ratios_seen_unique_pairs,
-        ))
-        partitions.append((
-            recall_strict_unseen_unique_pairs,
-            None,
-            None,
-            None,
-            None,
-            ratios_unseen_unique_pairs,
-        ))
-
-    # identical / not identical
-    if compute_all_recalls:
-        partitions.append((
-            recall_strict_identical,
-            recall_exact_identical,  # type: ignore
-            recall_partial_identical,  # type: ignore
-            recall_narrow_identical,  # type: ignore
-            recall_broad_identical,  # type: ignore
-            ratios_identical,
-        ))
-        partitions.append((
-            recall_strict_not_identical,
-            recall_exact_not_identical,  # type: ignore
-            recall_partial_not_identical,  # type: ignore
-            recall_narrow_not_identical,  # type: ignore
-            recall_broad_not_identical,  # type: ignore
-            ratios_not_identical,
-        ))
-    else:
-        partitions.append((
-            recall_strict_identical,
-            None,
-            None,
-            None,
-            None,
-            ratios_identical,
-        ))
-        partitions.append((
-            recall_strict_not_identical,
-            None,
-            None,
-            None,
-            None,
-            ratios_not_identical,
-        ))
-
-    # one / two / three / more_than_three words
-    if compute_all_recalls:
-        partitions.append((
-            recall_strict_one_word,
-            recall_exact_one_word,  # type: ignore
-            recall_partial_one_word,  # type: ignore
-            recall_narrow_one_word,  # type: ignore
-            recall_broad_one_word,  # type: ignore
-            ratios_one_word,
-        ))
-        partitions.append((
-            recall_strict_two_words,
-            recall_exact_two_words,  # type: ignore
-            recall_partial_two_words,  # type: ignore
-            recall_narrow_two_words,  # type: ignore
-            recall_broad_two_words,  # type: ignore
-            ratios_two_words,
-        ))
-        partitions.append((
-            recall_strict_three_words,
-            recall_exact_three_words,  # type: ignore
-            recall_partial_three_words,  # type: ignore
-            recall_narrow_three_words,  # type: ignore
-            recall_broad_three_words,  # type: ignore
-            ratios_three_words,
-        ))
-        partitions.append((
-            recall_strict_more_than_three_words,
-            recall_exact_more_than_three_words,  # type: ignore
-            recall_partial_more_than_three_words,  # type: ignore
-            recall_narrow_more_than_three_words,  # type: ignore
-            recall_broad_more_than_three_words,  # type: ignore
-            ratios_more_than_three_words,
-        ))
-    else:
-        partitions.append((
-            recall_strict_one_word,
-            None,
-            None,
-            None,
-            None,
-            ratios_one_word,
-        ))
-        partitions.append((
-            recall_strict_two_words,
-            None,
-            None,
-            None,
-            None,
-            ratios_two_words,
-        ))
-        partitions.append((
-            recall_strict_three_words,
-            None,
-            None,
-            None,
-            None,
-            ratios_three_words,
-        ))
-        partitions.append((
-            recall_strict_more_than_three_words,
-            None,
-            None,
-            None,
-            None,
-            ratios_more_than_three_words,
-        ))
-
-    # abbreviation buckets
-    if compute_all_recalls:
-        partitions.append((
-            recall_strict_abbrev_only,
-            recall_exact_abbrev_only,  # type: ignore
-            recall_partial_abbrev_only,  # type: ignore
-            recall_narrow_abbrev_only,  # type: ignore
-            recall_broad_abbrev_only,  # type: ignore
-            ratios_abbrev_only,
-        ))
-        partitions.append((
-            recall_strict_abbrev_or_contains,
-            recall_exact_abbrev_or_contains,  # type: ignore
-            recall_partial_abbrev_or_contains,  # type: ignore
-            recall_narrow_abbrev_or_contains,  # type: ignore
-            recall_broad_abbrev_or_contains,  # type: ignore
-            ratios_abbrev_or_contains,
-        ))
-        partitions.append((
-            recall_strict_not_abbrev,
-            recall_exact_not_abbrev,  # type: ignore
-            recall_partial_not_abbrev,  # type: ignore
-            recall_narrow_not_abbrev,  # type: ignore
-            recall_broad_not_abbrev,  # type: ignore
-            ratios_not_abbrev,
-        ))
-    else:
-        partitions.append((
-            recall_strict_abbrev_only,
-            None,
-            None,
-            None,
-            None,
-            ratios_abbrev_only,
-        ))
-        partitions.append((
-            recall_strict_abbrev_or_contains,
-            None,
-            None,
-            None,
-            None,
-            ratios_abbrev_or_contains,
-        ))
-        partitions.append((
-            recall_strict_not_abbrev,
-            None,
-            None,
-            None,
-            None,
-            ratios_not_abbrev,
-        ))
-
-    # repeated / not repeated
-    if compute_all_recalls:
-        partitions.append((
-            recall_strict_repeated,
-            recall_exact_repeated,  # type: ignore
-            recall_partial_repeated,  # type: ignore
-            recall_narrow_repeated,  # type: ignore
-            recall_broad_repeated,  # type: ignore
-            ratios_repeated,
-        ))
-        partitions.append((
-            recall_strict_not_repeated,
-            recall_exact_not_repeated,  # type: ignore
-            recall_partial_not_repeated,  # type: ignore
-            recall_narrow_not_repeated,  # type: ignore
-            recall_broad_not_repeated,  # type: ignore
-            ratios_not_repeated,
-        ))
-    else:
-        partitions.append((
-            recall_strict_repeated,
-            None,
-            None,
-            None,
-            None,
-            ratios_repeated,
-        ))
-        partitions.append((
-            recall_strict_not_repeated,
-            None,
-            None,
-            None,
-            None,
-            ratios_not_repeated,
-        ))
-
-    # iterate partitions in order and aggregate for each label
-    for rs_map, re_map, rp_map, rn_map, rb_map, ratios_map in partitions:
-        # rs_map and ratios_map are always present
+        # Aggregate immediately
+        rs_map = part_res.get("recall_strict", {})
         for label in sorted(rs_map.keys()):
-            _aggregate(label, rs_map, ratios_map, re_map, rp_map, rn_map, rb_map)
+            _aggregate(label, part_res)
 
     return final_results

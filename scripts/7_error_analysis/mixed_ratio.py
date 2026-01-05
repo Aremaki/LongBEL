@@ -4,7 +4,7 @@ from pathlib import Path
 import polars as pl
 from tqdm import tqdm
 
-from syncabel.error_analysis import compute_simple_recall, load_predictions
+from syncabel.error_analysis import compute_metrics_simple, load_predictions
 
 
 def main(datasets: list[str]):
@@ -104,12 +104,11 @@ def main(datasets: list[str]):
                             continue
                         pred_df = load_predictions(
                             preditction_path,
-                            dataset=dataset,
                         )
                         pred_df = pred_df.filter(
                             ~pl.col("code").is_in(list(train_cuis))
                         )
-                        score = compute_simple_recall(pred_df)
+                        score = compute_metrics_simple(pred_df)
                         for label in score.keys():
                             all_scores["dataset"].append(dataset)
                             all_scores["data_augmentation"].append(aug_data)

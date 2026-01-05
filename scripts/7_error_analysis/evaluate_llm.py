@@ -47,11 +47,12 @@ app = typer.Typer()
 @app.command()
 def main(
     datasets: list[str] = typer.Option(
-        ["MedMentions", "EMEA", "MEDLINE"], help="Dataset name (e.g., MEDLINE)"
+        ["SPACCC", "MEDLINE", "EMEA", "MedMentions"],
+        help="Dataset name (e.g., MEDLINE)",
     ),
     model_name: str = typer.Option("Meta-Llama-3-8B-Instruct", help="Model name"),
     aug_data_list: list[str] = typer.Option(
-        ["full_upsampled", "human_only"], help="Augmented data type"
+        ["human_only", "full_upsampled"], help="Augmented data type"
     ),
     data_splits: list[str] = typer.Option(
         ["test"], help="Data split (e.g., test, val, train)"
@@ -86,7 +87,6 @@ def main(
                     f"results/final_outputs/{dataset}/{aug_data}_tfidf/{model_name}_{ckpt}/pred_{data_split}_constraint_5_beams.tsv"
                 )
                 example_results = load_predictions(example_path)
-
                 # loop over the rows
                 llm_evaluation = []
                 relator = LLMRelator()
@@ -126,13 +126,14 @@ def main(
                     )
                     label = relator.compute_relation(gold_concepts, pred_concepts)
                     llm_evaluation.append(label)
+                    # print("Human label:", row["Human_Evaluation"])
                     print("Gold codes:", gold_codes)
                     print("Pred codes:", pred_codes)
                     print("LLM relation:", label)
                     print("-----")
 
                 example_results = example_results.with_columns(
-                    pl.Series("LLM_Evaluation", llm_evaluation)
+                    pl.Series("LLM_Evaluation_v2", llm_evaluation)
                 )
                 example_results.write_csv(
                     example_path,

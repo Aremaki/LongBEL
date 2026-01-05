@@ -45,6 +45,7 @@ dependencies = [
     "ipykernel>=6.31.0",
     "typer>=0.20.0",
     "openai>=2.13.0",
+    "scikit-learn>=1.6.1",
 ]
 
 [project.optional-dependencies]
