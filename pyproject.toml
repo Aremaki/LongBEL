@@ -9,7 +9,7 @@ description = "SynCABEL: Synthetic Contextualized Augmentation for Biomedical En
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
-    {name = "Adam REMAKI", email = "ad.remaki@gmail.com"},
+    {name = "AnonymousARR42", email = "anonymousarr42@gmail.com"},
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

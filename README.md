@@ -18,7 +18,7 @@
 </p>
 
 <h3>
-    <a href="https://huggingface.co/collections/Aremaki/syncabel">🤗 SynCABEL HuggingFace Collection</a>
+    <a href="https://huggingface.co/collections/AnonymousARR42/syncabel">🤗 SynCABEL HuggingFace Collection</a>
 </h3>
 </div>
 
@@ -38,22 +38,22 @@ This repository contains a complete pipeline for:
 
 We constructed synthetic datasets for three corpora: MedMentions-ST21pv (English), QUAERO (French) and SPACCC (Spanish).
 
-🤗 [Aremaki/SynCABEL](https://huggingface.co/datasets/Aremaki/SynCABEL)
+🤗 [AnonymousARR42/SynCABEL](https://huggingface.co/datasets/AnonymousARR42/SynCABEL)
 
 | Dataset | Language | # Generated Examples | # Concepts in KB | KB Source |
 | :--- | :---: | :---: | :---: | :--- |
-| **SynthMM** | English | ~766k | ~2.4M | UMLS 2017AA |
-| **SynthQUAERO** | French | ~658k | ~3.0M | UMLS 2014AB |
-| **SynthSPACCC** | Spanish | TBD | ~257k | SPACCC/UMLS |
+| **SynthMM** | English | ~461k | ~153k | UMLS 2017AA |
+| **SynthQUAERO** | French | ~397k | ~132k | UMLS 2014AB |
+| **SynthSPACCC** | Spanish | ~1810k | ~362k | SNOMED CT 2021 |
 
 ### Fine-tuned Models
 
 Checkpoints are available of our best performing model: **Llama-3-8B** fine-tuned on MM-ST21pv, QUAERO-EMEA, QUAERO-MEDLINE, SPACCC:
 
-🤗 [Aremaki/SynCABEL_MedMentions_st21pv](https://huggingface.co/Aremaki/SynCABEL_MedMentions_st21pv) \
-🤗 [Aremaki/SynCABEL_SPACCC](https://huggingface.co/Aremaki/SynCABEL_SPACCC) \
-🤗 [Aremaki/SynCABEL_QUAERO_EMEA](https://huggingface.co/Aremaki/SynCABEL_QUAERO_EMEA) \
-🤗 [Aremaki/SynCABEL_QUAERO_MEDLINE](https://huggingface.co/Aremaki/SynCABEL_QUAERO_MEDLINE)
+🤗 [AnonymousARR42/SynCABEL_MedMentions_st21pv](https://huggingface.co/AnonymousARR42/SynCABEL_MedMentions_st21pv) \
+🤗 [AnonymousARR42/SynCABEL_SPACCC](https://huggingface.co/AnonymousARR42/SynCABEL_SPACCC) \
+🤗 [AnonymousARR42/SynCABEL_QUAERO_EMEA](https://huggingface.co/AnonymousARR42/SynCABEL_QUAERO_EMEA) \
+🤗 [AnonymousARR42/SynCABEL_QUAERO_MEDLINE](https://huggingface.co/AnonymousARR42/SynCABEL_QUAERO_MEDLINE)
 
 #### Loading
 ```python
@@ -62,7 +62,7 @@ from transformers import AutoModelForCausalLM
 
 # Load the model (requires trust_remote_code for custom architecture)
 model = AutoModelForCausalLM.from_pretrained(
-    "Aremaki/SynCABEL_MedMentions_st21pv",
+    "AnonymousARR42/SynCABEL_MedMentions_st21pv",
     trust_remote_code=True,
     device_map="auto"
 )
@@ -72,8 +72,8 @@ model = AutoModelForCausalLM.from_pretrained(
 ```python
 # The input must follow this format
 sentences = [
-    "[Ibuprofen]{Chemicals & Drugs} is a non-steroidal anti-inflammatory drug",
-    "[Myocardial infarction]{Disorder} requires immediate intervention"
+    "The patient was prescribed [Ibuprofen]{Chemicals & Drugs} to be taken every morning.",
+    "[Myocardial infarction]{Disorders} requires immediate intervention."
 ]
 
 results = model.sample(
@@ -108,7 +108,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 2. **Clone the repository**:
 ```bash
-git clone https://github.com/Aremaki/SynCABEL.git
+git clone https://github.com/AnonymousARR42/SynCABEL.git
 cd SynCABEL
 ```
 3. **Create virtual environment and install dependencies**:
@@ -279,7 +279,7 @@ Issues and pull requests welcome!
 ## Citation
 ```
 @unpublished{syncabel,
-author = {Adam Remaki and Christel Gérardin and Eulàlia Farré-Maduell and Martin Krallinger and Xavier Tannier},
+author = {XXXX and XXXX and XXXX and XXXX and XXXX},
 title = {SynCABEL: Synthetic Contextualized Augmentation for Biomedical Entity Linking},
 note = {Manuscript submitted for publication},
 year = {2026}
