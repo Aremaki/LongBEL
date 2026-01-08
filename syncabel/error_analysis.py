@@ -478,10 +478,26 @@ def compute_partition_metrics(
 
         if compute_all:
             aggs.extend([
-                (pl.col("LLM_Evaluation") == "EXACT").sum().alias("exact_correct"),
-                (pl.col("LLM_Evaluation") == "PARTIAL").sum().alias("partial_correct"),
-                (pl.col("LLM_Evaluation") == "NARROW").sum().alias("narrow_correct"),
-                (pl.col("LLM_Evaluation") == "BROAD").sum().alias("broad_correct"),
+                (
+                    (pl.col("code") == pl.col("Predicted_code"))
+                    | (pl.col("LLM_Evaluation_v2") == "EXACT")
+                )
+                .sum()
+                .alias("correct_correct"),
+                (pl.col("LLM_Evaluation_v2") == "EXACT").sum().alias("exact_correct"),
+                (pl.col("LLM_Evaluation_v2") == "PARTIAL")
+                .sum()
+                .alias("partial_correct"),
+                (pl.col("LLM_Evaluation_v2") == "NARROW").sum().alias("narrow_correct"),
+                (
+                    (pl.col("LLM_Evaluation_v2") == "BROAD")
+                    | (pl.col("LLM_Evaluation_v2") == "PARTIAL")
+                )
+                .sum()
+                .alias("broad_correct"),
+                (pl.col("LLM_Evaluation_v2") == "NO_RELATION")
+                .sum()
+                .alias("no_relation_correct"),
             ])
 
         if threshold is not None:
@@ -515,6 +531,9 @@ def compute_partition_metrics(
         # Semantic Recalls
         if compute_all:
             stats = stats.with_columns([
+                (pl.col("correct_correct") / pl.col("count"))
+                .fill_nan(0.0)
+                .alias("recall_correct"),
                 (pl.col("exact_correct") / pl.col("count"))
                 .fill_nan(0.0)
                 .alias("recall_exact"),
@@ -527,6 +546,9 @@ def compute_partition_metrics(
                 (pl.col("broad_correct") / pl.col("count"))
                 .fill_nan(0.0)
                 .alias("recall_broad"),
+                (pl.col("no_relation_correct") / pl.col("count"))
+                .fill_nan(0.0)
+                .alias("recall_no_relation"),
             ])
 
         # Thresholded Metrics
@@ -555,10 +577,12 @@ def compute_partition_metrics(
         }
         if compute_all:
             results.update({
+                "recall_correct": {},
                 "recall_exact": {},
                 "recall_partial": {},
                 "recall_narrow": {},
                 "recall_broad": {},
+                "recall_no_relation": {},
             })
         if threshold is not None:
             results.update({"recall": {}, "precision": {}, "f1": {}})
@@ -589,6 +613,9 @@ def compute_partition_metrics(
             results["ratios"][lbl] = {index_key: _get_ratio_str(lbl, cnt)}
 
             if compute_all:
+                results["recall_correct"][lbl] = {
+                    index_key: round(row["recall_correct"] * 100, 1)
+                }
                 results["recall_exact"][lbl] = {
                     index_key: round(row["recall_exact"] * 100, 1)
                 }
@@ -600,6 +627,9 @@ def compute_partition_metrics(
                 }
                 results["recall_broad"][lbl] = {
                     index_key: round(row["recall_broad"] * 100, 1)
+                }
+                results["recall_no_relation"][lbl] = {
+                    index_key: round(row["recall_no_relation"] * 100, 1)
                 }
 
             if threshold is not None:
@@ -641,12 +671,25 @@ def compute_partition_metrics(
                 results["ratios"]["overall"] = {index_key: "N/A"}
 
             if compute_all:
-                exact_all = df.filter(pl.col("LLM_Evaluation") == "EXACT").height
-                partial_all = df.filter(pl.col("LLM_Evaluation") == "PARTIAL").height
-                narrow_all = df.filter(pl.col("LLM_Evaluation") == "NARROW").height
-                broad_all = df.filter(pl.col("LLM_Evaluation") == "BROAD").height
+                correct_all = df.filter(
+                    (pl.col("code") == pl.col("Predicted_code"))
+                    | (pl.col("LLM_Evaluation_v2") == "EXACT")
+                ).height
+                exact_all = df.filter(pl.col("LLM_Evaluation_v2") == "EXACT").height
+                partial_all = df.filter(pl.col("LLM_Evaluation_v2") == "PARTIAL").height
+                narrow_all = df.filter(pl.col("LLM_Evaluation_v2") == "NARROW").height
+                broad_all = df.filter(
+                    (pl.col("LLM_Evaluation_v2") == "BROAD")
+                    | (pl.col("LLM_Evaluation_v2") == "PARTIAL")
+                ).height
+                no_relation_all = df.filter(
+                    pl.col("LLM_Evaluation_v2") == "NO_RELATION"
+                ).height
 
                 denom = total_pred_overall if total_pred_overall else 1
+                results["recall_correct"]["overall"] = {
+                    index_key: round(correct_all / denom * 100, 1)
+                }
                 results["recall_exact"]["overall"] = {
                     index_key: round(exact_all / denom * 100, 1)
                 }
@@ -658,6 +701,9 @@ def compute_partition_metrics(
                 }
                 results["recall_broad"]["overall"] = {
                     index_key: round(broad_all / denom * 100, 1)
+                }
+                results["recall_no_relation"]["overall"] = {
+                    index_key: round(no_relation_all / denom * 100, 1)
                 }
 
             if threshold is not None:
@@ -718,6 +764,102 @@ def compute_partition_metrics(
         else None
     )
 
+    ci_correct = {}
+    ci_exact = {}
+    ci_partial = {}
+    ci_narrow = {}
+    ci_broad = {}
+    ci_no_relation = {}
+
+    if bootstrap and compute_all and df.height > 0:
+        rng = np.random.default_rng(seed)
+        filenames = df["filename"].to_numpy()
+        unique_docs_arr = np.unique(filenames)
+        unique_labels_arr = np.array(unique_labels)
+
+        doc_agg_sem = df.group_by(["filename", "label"]).agg([
+            pl.len().alias("denom"),
+            (
+                (pl.col("code") == pl.col("Predicted_code"))
+                | (pl.col("LLM_Evaluation_v2") == "EXACT")
+            )
+            .sum()
+            .alias("correct_num"),
+            (pl.col("LLM_Evaluation_v2") == "EXACT").sum().alias("exact_num"),
+            (pl.col("LLM_Evaluation_v2") == "PARTIAL").sum().alias("partial_num"),
+            (pl.col("LLM_Evaluation_v2") == "NARROW").sum().alias("narrow_num"),
+            (
+                (pl.col("LLM_Evaluation_v2") == "BROAD")
+                | (pl.col("LLM_Evaluation_v2") == "PARTIAL")
+            )
+            .sum()
+            .alias("broad_num"),
+            (pl.col("LLM_Evaluation_v2") == "NO_RELATION")
+            .sum()
+            .alias("no_relation_num"),
+        ])
+
+        ci_correct = _run_vectorized_bootstrap(
+            doc_agg_sem,
+            unique_docs_arr,
+            unique_labels_arr,
+            n_bootstrap,
+            ci,
+            rng,
+            "correct_num",
+            "denom",
+        )
+        ci_exact = _run_vectorized_bootstrap(
+            doc_agg_sem,
+            unique_docs_arr,
+            unique_labels_arr,
+            n_bootstrap,
+            ci,
+            rng,
+            "exact_num",
+            "denom",
+        )
+        ci_partial = _run_vectorized_bootstrap(
+            doc_agg_sem,
+            unique_docs_arr,
+            unique_labels_arr,
+            n_bootstrap,
+            ci,
+            rng,
+            "partial_num",
+            "denom",
+        )
+        ci_narrow = _run_vectorized_bootstrap(
+            doc_agg_sem,
+            unique_docs_arr,
+            unique_labels_arr,
+            n_bootstrap,
+            ci,
+            rng,
+            "narrow_num",
+            "denom",
+        )
+        ci_broad = _run_vectorized_bootstrap(
+            doc_agg_sem,
+            unique_docs_arr,
+            unique_labels_arr,
+            n_bootstrap,
+            ci,
+            rng,
+            "broad_num",
+            "denom",
+        )
+        ci_no_relation = _run_vectorized_bootstrap(
+            doc_agg_sem,
+            unique_docs_arr,
+            unique_labels_arr,
+            n_bootstrap,
+            ci,
+            rng,
+            "no_relation_num",
+            "denom",
+        )
+
     results: dict[str, Any] = {
         "recall_strict": {},
         "ratios": {},
@@ -730,11 +872,28 @@ def compute_partition_metrics(
 
     if compute_all:
         results.update({
+            "recall_correct": {},
             "recall_exact": {},
             "recall_partial": {},
             "recall_narrow": {},
             "recall_broad": {},
+            "recall_no_relation": {},
         })
+        if bootstrap:
+            results.update({
+                "recall_correct_ci_low": {},
+                "recall_correct_ci_high": {},
+                "recall_exact_ci_low": {},
+                "recall_exact_ci_high": {},
+                "recall_partial_ci_low": {},
+                "recall_partial_ci_high": {},
+                "recall_narrow_ci_low": {},
+                "recall_narrow_ci_high": {},
+                "recall_broad_ci_low": {},
+                "recall_broad_ci_high": {},
+                "recall_no_relation_ci_low": {},
+                "recall_no_relation_ci_high": {},
+            })
     if threshold is not None:
         results.update({"recall": {}, "precision": {}, "f1": {}})
         if bootstrap:
@@ -784,12 +943,27 @@ def compute_partition_metrics(
 
     if compute_all:
         total_pred_overall = df.height
-        true_exact_overall = df.filter(pl.col("LLM_Evaluation") == "EXACT").height
-        true_partial_overall = df.filter(pl.col("LLM_Evaluation") == "PARTIAL").height
-        true_narrow_overall = df.filter(pl.col("LLM_Evaluation") == "NARROW").height
-        true_broad_overall = df.filter(pl.col("LLM_Evaluation") == "BROAD").height
+        true_correct_overall = df.filter(
+            (pl.col("code") == pl.col("Predicted_code"))
+            | (pl.col("LLM_Evaluation_v2") == "EXACT")
+        ).height
+        true_exact_overall = df.filter(pl.col("LLM_Evaluation_v2") == "EXACT").height
+        true_partial_overall = df.filter(
+            pl.col("LLM_Evaluation_v2") == "PARTIAL"
+        ).height
+        true_narrow_overall = df.filter(pl.col("LLM_Evaluation_v2") == "NARROW").height
+        true_broad_overall = df.filter(
+            (pl.col("LLM_Evaluation_v2") == "BROAD")
+            | (pl.col("LLM_Evaluation_v2") == "PARTIAL")
+        ).height
+        true_no_relation_overall = df.filter(
+            pl.col("LLM_Evaluation_v2") == "NO_RELATION"
+        ).height
 
         denom_overall = total_pred_overall if total_pred_overall else 1
+        results["recall_correct"]["overall"] = {
+            index_key: round(true_correct_overall / denom_overall * 100, 1)
+        }
         results["recall_exact"]["overall"] = {
             index_key: round(true_exact_overall / denom_overall * 100, 1)
         }
@@ -802,6 +976,28 @@ def compute_partition_metrics(
         results["recall_narrow"]["overall"] = {
             index_key: round(true_narrow_overall / denom_overall * 100, 1)
         }
+        results["recall_no_relation"]["overall"] = {
+            index_key: round(true_no_relation_overall / denom_overall * 100, 1)
+        }
+
+        if bootstrap:
+
+            def _set_boot(k_low, k_high, src_dict):
+                val = src_dict.get("overall")
+                if val:
+                    results[k_low]["overall"] = {index_key: round(val[0] * 100, 1)}
+                    results[k_high]["overall"] = {index_key: round(val[1] * 100, 1)}
+
+            _set_boot("recall_correct_ci_low", "recall_correct_ci_high", ci_correct)
+            _set_boot("recall_exact_ci_low", "recall_exact_ci_high", ci_exact)
+            _set_boot("recall_partial_ci_low", "recall_partial_ci_high", ci_partial)
+            _set_boot("recall_narrow_ci_low", "recall_narrow_ci_high", ci_narrow)
+            _set_boot("recall_broad_ci_low", "recall_broad_ci_high", ci_broad)
+            _set_boot(
+                "recall_no_relation_ci_low",
+                "recall_no_relation_ci_high",
+                ci_no_relation,
+            )
 
     for label in unique_labels:
         metrics = base_metrics.get(label, {})
@@ -841,13 +1037,28 @@ def compute_partition_metrics(
         total_pred = df_label_pred.height
         denom = total_pred if total_pred else 1
 
-        true_exact = df_label_pred.filter(pl.col("LLM_Evaluation") == "EXACT").height
-        true_partial = df_label_pred.filter(
-            pl.col("LLM_Evaluation") == "PARTIAL"
+        true_correct = df_label_pred.filter(
+            (pl.col("code") == pl.col("Predicted_code"))
+            | (pl.col("LLM_Evaluation_v2") == "EXACT")
         ).height
-        true_narrow = df_label_pred.filter(pl.col("LLM_Evaluation") == "NARROW").height
-        true_broad = df_label_pred.filter(pl.col("LLM_Evaluation") == "BROAD").height
+        true_exact = df_label_pred.filter(pl.col("LLM_Evaluation_v2") == "EXACT").height
+        true_partial = df_label_pred.filter(
+            pl.col("LLM_Evaluation_v2") == "PARTIAL"
+        ).height
+        true_narrow = df_label_pred.filter(
+            pl.col("LLM_Evaluation_v2") == "NARROW"
+        ).height
+        true_broad = df_label_pred.filter(
+            (pl.col("LLM_Evaluation_v2") == "BROAD")
+            | (pl.col("LLM_Evaluation_v2") == "PARTIAL")
+        ).height
+        true_no_relation = df_label_pred.filter(
+            pl.col("LLM_Evaluation_v2") == "NO_RELATION"
+        ).height
 
+        results["recall_correct"][label] = {
+            index_key: round(true_correct / denom * 100, 1)
+        }
         results["recall_exact"][label] = {index_key: round(true_exact / denom * 100, 1)}
         results["recall_partial"][label] = {
             index_key: round(true_partial / denom * 100, 1)
@@ -856,6 +1067,39 @@ def compute_partition_metrics(
             index_key: round(true_narrow / denom * 100, 1)
         }
         results["recall_broad"][label] = {index_key: round(true_broad / denom * 100, 1)}
+        results["recall_no_relation"][label] = {
+            index_key: round(true_no_relation / denom * 100, 1)
+        }
+
+        if bootstrap:
+
+            def _set_boot_lbl(k_low, k_high, src_dict, label):
+                val = src_dict.get(label)
+                if val:
+                    results[k_low][label] = {index_key: round(val[0] * 100, 1)}
+                    results[k_high][label] = {index_key: round(val[1] * 100, 1)}
+
+            _set_boot_lbl(
+                "recall_correct_ci_low", "recall_correct_ci_high", ci_correct, label
+            )
+            _set_boot_lbl(
+                "recall_exact_ci_low", "recall_exact_ci_high", ci_exact, label
+            )
+            _set_boot_lbl(
+                "recall_partial_ci_low", "recall_partial_ci_high", ci_partial, label
+            )
+            _set_boot_lbl(
+                "recall_narrow_ci_low", "recall_narrow_ci_high", ci_narrow, label
+            )
+            _set_boot_lbl(
+                "recall_broad_ci_low", "recall_broad_ci_high", ci_broad, label
+            )
+            _set_boot_lbl(
+                "recall_no_relation_ci_low",
+                "recall_no_relation_ci_high",
+                ci_no_relation,
+                label,
+            )
 
     return results
 
@@ -893,21 +1137,12 @@ def compute_metrics(
     # Pre-calculate full counts and unique labels once
     # This avoids re-calculating them for every partition
     full_counts = (
-        pred_df.group_by(
-            "label"
-        )  # Note: Using pred_df as proxy for df_full if df_full is not available in this scope?
-        # Wait, compute_metrics does NOT take df_full as argument!
-        # It takes pred_df.
-        # In the original code, compute_metrics_simple took df_full.
-        # But compute_metrics calls compute_partition_metrics passing pred_df as df_full?
-        # Let's check the original call:
-        # _call_partition(df_partition, pred_df, ...)
-        # Yes, pred_df is treated as df_full in the context of compute_metrics.
-        .count()
-        .select(["label", "count"])
+        pred_df.group_by("label")
+        .len()
+        .select(["label", "len"])
         .to_dict(as_series=False)
     )
-    full_counts_map = dict(zip(full_counts["label"], full_counts["count"]))
+    full_counts_map = dict(zip(full_counts["label"], full_counts["len"]))
     unique_labels = sorted(pred_df["label"].unique().to_list())
     total_full_count = pred_df.height
 
@@ -1023,10 +1258,12 @@ def compute_metrics(
 
         if compute_all_recalls:
             entry.update({
+                "recall_correct": [],
                 "recall_exact": [],
                 "recall_partial": [],
                 "recall_narrow": [],
                 "recall_broad": [],
+                "recall_no_relation": [],
             })
         if has_threshold:
             entry.update({"recall": [], "precision": [], "f1": []})
@@ -1039,6 +1276,22 @@ def compute_metrics(
                     "f1_ci_low": [],
                     "f1_ci_high": [],
                 })
+        if compute_all_recalls and bootstrap:
+            entry.update({
+                "recall_correct_ci_low": [],
+                "recall_correct_ci_high": [],
+                "recall_exact_ci_low": [],
+                "recall_exact_ci_high": [],
+                "recall_partial_ci_low": [],
+                "recall_partial_ci_high": [],
+                "recall_narrow_ci_low": [],
+                "recall_narrow_ci_high": [],
+                "recall_broad_ci_low": [],
+                "recall_broad_ci_high": [],
+                "recall_no_relation_ci_low": [],
+                "recall_no_relation_ci_high": [],
+            })
+
         return entry
 
     def _aggregate(label: str, part: dict[str, Any]):
@@ -1051,6 +1304,8 @@ def compute_metrics(
         partial_map = part.get("recall_partial", {})
         narrow_map = part.get("recall_narrow", {})
         broad_map = part.get("recall_broad", {})
+        no_relation_map = part.get("recall_no_relation", {})
+        correct_map = part.get("recall_correct", {})
         recall_thresh_map = part.get("recall", {})
         precision_map = part.get("precision", {})
         f1_map = part.get("f1", {})
@@ -1072,14 +1327,66 @@ def compute_metrics(
             )
 
         if compute_all_recalls:
+            correct_val = list(correct_map.get(label, {"": 0.0}).values())[0]
             exact_val = list(exact_map.get(label, {"": 0.0}).values())[0]
             partial_val = list(partial_map.get(label, {"": 0.0}).values())[0]
             narrow_val = list(narrow_map.get(label, {"": 0.0}).values())[0]
             broad_val = list(broad_map.get(label, {"": 0.0}).values())[0]
+            no_relation_val = list(no_relation_map.get(label, {"": 0.0}).values())[0]
+
+            final_results[label]["recall_correct"].append(correct_val)
             final_results[label]["recall_exact"].append(exact_val)
             final_results[label]["recall_partial"].append(partial_val)
             final_results[label]["recall_narrow"].append(narrow_val)
             final_results[label]["recall_broad"].append(broad_val)
+            final_results[label]["recall_no_relation"].append(no_relation_val)
+
+        if bootstrap and compute_all_recalls:
+
+            def _append_boot(key_low, key_high, part_low, part_high):
+                final_results[label][key_low].append(
+                    list(part.get(part_low, {}).get(label, {"": None}).values())[0]
+                )
+                final_results[label][key_high].append(
+                    list(part.get(part_high, {}).get(label, {"": None}).values())[0]
+                )
+
+            _append_boot(
+                "recall_correct_ci_low",
+                "recall_correct_ci_high",
+                "recall_correct_ci_low",
+                "recall_correct_ci_high",
+            )
+            _append_boot(
+                "recall_exact_ci_low",
+                "recall_exact_ci_high",
+                "recall_exact_ci_low",
+                "recall_exact_ci_high",
+            )
+            _append_boot(
+                "recall_partial_ci_low",
+                "recall_partial_ci_high",
+                "recall_partial_ci_low",
+                "recall_partial_ci_high",
+            )
+            _append_boot(
+                "recall_narrow_ci_low",
+                "recall_narrow_ci_high",
+                "recall_narrow_ci_low",
+                "recall_narrow_ci_high",
+            )
+            _append_boot(
+                "recall_broad_ci_low",
+                "recall_broad_ci_high",
+                "recall_broad_ci_low",
+                "recall_broad_ci_high",
+            )
+            _append_boot(
+                "recall_no_relation_ci_low",
+                "recall_no_relation_ci_high",
+                "recall_no_relation_ci_low",
+                "recall_no_relation_ci_high",
+            )
 
         if has_threshold:
             recall_thresh_val = list(recall_thresh_map.get(label, {"": 0.0}).values())[
