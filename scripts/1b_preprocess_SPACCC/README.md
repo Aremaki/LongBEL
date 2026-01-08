@@ -1,25 +1,52 @@
-# SPACCC Preprocessing
+# Step 1b: SPACCC Preprocessing
 
-This directory contains scripts to preprocess the SPACCC dataset, including terminology resolution and corpus preparation for model training.
+This directory contains the preprocessing pipeline for the **Spanish Clinical Case Corpus (SPACCC)**. This step is necessary to normalize the Spanish terminology and standardize the dataset format before it can be used for training or evaluation in the SynCABEL pipeline.
 
 ## Scripts
 
-- `prepare_terminology.py`: This script preprocesses the SPACCC terminology file (`terminology.tsv`). It resolves ambiguous entities where a single term might be associated with multiple CUIs (Concept Unique Identifiers). It creates a disambiguated terminology file and a mapping file for corrected CUIs.
-- `prepare_corpus.py`: This script takes the preprocessed terminology and the SPACCC corpus (train/test sets) to generate model-ready training, development, and test sets in a pickled format. It formats the data into source and target files for sequence-to-sequence models.
-- `run.sh`: This is a bash script to orchestrate the entire preprocessing pipeline. It runs `prepare_terminology.py` first, followed by `prepare_corpus.py`.
+### 1. `prepare_terminology.py`
+**Purpose**: Cleans and preprocesses the SPACCC terminology dictionary.
+-   Reads `terminology.tsv` (raw SNOMED data).
+-   Resolves entities with multiple SNOMED codes based on priority heuristics.
+-   Outputs a disambiguated terminology file (`all_disambiguated.parquet`) and a corrected code mapping.
+
+### 2. `prepare_corpus.py`
+**Purpose**: Converts the dataset splits into the standard BigBio format.
+-   Reads the train/test splits from `data/SPACCC/Normalization/` (TSV annotations + Text files).
+-   Converts them into JSON Lines format (`SPACCC_train.json`, `SPACCC_test.json`, etc.).
+-   **Note**: This script does *not* generate model-specific embeddings or pickle files; that is done in Step 3a.
+
+### 3. `run.sh`
+**Purpose**: Orchestrates the entire pipeline by running the above scripts in order.
 
 ## Usage
 
-To run the complete preprocessing pipeline, execute the `run.sh` script from the root of the repository:
+To run the full preprocessing pipeline for SPACCC:
 
 ```bash
+# Run from the root of the repository
 bash scripts/1b_preprocess_SPACCC/run.sh
 ```
 
-This will:
-1.  Generate a disambiguated terminology file (`all_disambiguated.parquet`) in `data/UMLS_processed/SPACCC/`.
-2.  Generate a CUI correction map (`SPACCC_adapted.csv`) in `data/corrected_code/`.
-3.  Generate model-specific data files (e.g., `train_tfidf_source.pkl`, `test_tfidf_target.pkl`) in `data/final_data/SPACCC/`.
+Or run individual steps using `uv`:
 
-Make sure the required input files are in place as specified in the scripts, primarily within `data/SPACCC/`.
+```bash
+# Step 1: Terminology
+uv run scripts/1b_preprocess_SPACCC/prepare_terminology.py
+
+# Step 2: Corpus Conversion
+uv run scripts/1b_preprocess_SPACCC/prepare_corpus.py
+```
+
+## Outputs
+
+After running this pipeline, you will find:
+
+1.  **Processed Terminology**:
+    -   `data/UMLS_processed/SPACCC/all_disambiguated.parquet`
+    -   `data/corrected_code/SPACCC_adapted.csv`
+
+2.  **Standardized Dataset (BigBio JSONs)**:
+    -   `data/bigbio/SPACCC/SPACCC_train.json`
+    -   `data/bigbio/SPACCC/SPACCC_test.json`
 

@@ -47,12 +47,12 @@ app = typer.Typer()
 @app.command()
 def main(
     datasets: list[str] = typer.Option(
-        ["SPACCC", "MEDLINE", "EMEA", "MedMentions"],
+        ["SPACCC"],
         help="Dataset name (e.g., MEDLINE)",
     ),
     model_name: str = typer.Option("Meta-Llama-3-8B-Instruct", help="Model name"),
     aug_data_list: list[str] = typer.Option(
-        ["human_only", "full_upsampled"], help="Augmented data type"
+        ["full_upsampled"], help="Augmented data type"
     ),
     data_splits: list[str] = typer.Option(
         ["test"], help="Data split (e.g., test, val, train)"
@@ -84,7 +84,7 @@ def main(
                     f"Evaluating dataset: {dataset}, aug_data: {aug_data}, split: {data_split}"
                 )
                 example_path = Path(
-                    f"results/final_outputs/{dataset}/{aug_data}_tfidf/{model_name}_{ckpt}/pred_{data_split}_constraint_5_beams.tsv"
+                    f"results/final_outputs/{dataset}/{aug_data}_tfidf/{model_name}_{ckpt}/pred_{data_split}_constraint_5_beams_annotated.tsv"
                 )
                 example_results = load_predictions(example_path)
                 # loop over the rows
@@ -133,7 +133,7 @@ def main(
                     print("-----")
 
                 example_results = example_results.with_columns(
-                    pl.Series("LLM_Evaluation_v2", llm_evaluation)
+                    pl.Series("LLM_Evaluation_final", llm_evaluation)
                 )
                 example_results.write_csv(
                     example_path,

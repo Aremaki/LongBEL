@@ -1,17 +1,21 @@
-# UMLS Extraction + Preparation (Automation)
+# Step 1a: Preprocess UMLS
 
-This folder contains a small runner that extracts specific UMLS releases and prepares dataset-specific synonym files for the SynCABEL pipeline.
+This directory contains the scripts to extract specific UMLS releases (RRF files from zip) and prepare dataset-specific synonym files for the SynCABEL pipeline.
 
 ## What it does
-- Extracts UMLS zip archives and converts RRF files to parquet.
-- Builds dataset-tailored synonym tables used later in training.
+- Extracts UMLS zip archives and converts RRF files to Parquet format.
+- Builds dataset-tailored synonym tables used later in training (e.g., for MedMentions or QUAERO).
 
-Default mapping of zip → dataset:
-- `UMLS_2014AB.zip` → `QUAERO`
-- `UMLS_2017AA.zip` → `MM`
+## Configuration
 
-## Expected input layout
-Place the raw UMLS zip files under `data/UMLS_raw/` with this structure:
+Default mapping of UMLS release zip to dataset:
+
+-   `UMLS_2014AB.zip` → `QUAERO` (French corpus)
+-   `UMLS_2017AA.zip` → `MM` (MedMentions)
+
+## Expected Input Layout
+
+Place the raw UMLS zip files under `data/UMLS_raw/` in the project root:
 
 ```
 SynCABEL/
@@ -21,38 +25,39 @@ SynCABEL/
       UMLS_2017AA.zip
 ```
 
-Inside each zip, we expect exactly one top-level folder named like the release and containing the three files MRCONSO, MRDEF, MRSTY (RRF). For example:
+Inside each zip, the script expects exactly one top-level folder named like the release, containing the RRF files (`MRCONSO.RRF`, `MRDEF.RRF`, `MRSTY.RRF`).
 
-```
-UMLS_2014AB.zip
-└── UMLS_2014AB/
-    ├── MRCONSO.RRF
-    ├── MRDEF.RRF
-    └── MRSTY.RRF
+## Files
 
-UMLS_2017AA.zip
-└── UMLS_2017AA/
-    ├── MRCONSO.RRF
-    ├── MRDEF.RRF
-    └── MRSTY.RRF
-```
+-   **`extract_umls_data.py`**: Extracts the RRF files from the zips and converts them to raw Parquet files (codes, semantic types, titles).
+-   **`prepare_umls_data.py`**: Processes the raw Parquet tables to create the final disambiguated synonym lists (`all_disambiguated.parquet`).
+-   **`run_extract_and_prepare_umls.py`**: A master runner script that automates the extraction and preparation for all defined releases.
 
-## Outputs
-For each dataset (`QUAERO`, `MM`):
-- Extracted parquet files under `data/UMLS_processed/<DATASET>/`:
-  - `codes.parquet`, `semantic.parquet`, `title_syn.parquet`
-- Prepared synonym parquets under `data/UMLS_processed/<DATASET>/`:
-  - `all_disambiguated.parquet`, `fr_disambiguated.parquet`
+## Usage
 
-## Run
-From the repository root:
+From the repository root, run the automation script:
 
 ```bash
-python scripts/1_preprocess_UMLS/run_extract_and_prepare_umls.py
+uv run scripts/1a_preprocess_UMLS/run_extract_and_prepare_umls.py
 ```
 
-This will iterate the default releases list and produce the processed artifacts in `data/UMLS_processed/`.
+This will process the available zips and output the artifacts to `data/UMLS_processed/<DATASET>/`.
 
-## Notes
-- You can edit the `RELEASES` list in `run_extract_and_prepare_umls.py` to add or remove releases or change the dataset mapping.
-- The scripts rely on Typer CLIs under the hood (`extract_umls_data.py`, `prepare_umls_data.py`). See `--help` on those files for advanced usage.
+### Advanced Usage
+
+You can also run the individual steps using their Typer CLIs:
+
+**Extract:**
+```bash
+uv run scripts/1a_preprocess_UMLS/extract_umls_data.py \
+    --zip-path data/UMLS_raw/UMLS_2017AA.zip \
+    --output-dir data/UMLS_processed/MM
+```
+
+**Prepare:**
+```bash
+uv run scripts/1a_preprocess_UMLS/prepare_umls_data.py \
+    --dataset-name MM \
+    --input-dir data/UMLS_processed/MM \
+    --output-dir data/UMLS_processed/MM
+```

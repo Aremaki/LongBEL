@@ -119,59 +119,129 @@ source .venv/bin/activate
 uv sync
 ```
 
-### Step by step pipeline
+### Step-by-Step Pipeline
+
+This framework is modular. You can start from raw data (Step 1) or jump to training if you have processed data.
+
+#### Step 1: Preprocess Knowledge Base & Data
+Prepare the entity gazetteer (dictionaries) and the training corpora. Choose the script corresponding to your data source:
+
+**Option A: UMLS-based Datasets (MedMentions, QUAERO)**
+If your target Knowledge Base is the UMLS (e.g. for MedMentions or QUAERO), use the extraction script to process the RRF files:
+```bash
+# Extracts UMLS RRF files, filters by language/source, creates synonym parquets
+uv run python scripts/1a_preprocess_UMLS/run_extract_and_prepare_umls.py
+```
+
+**Option B: Dedicated Gazetteers in tsv format (SPACCC)**
+If your dataset uses a specific gazetteer in tsv format like SPACCC:
+```bash
+# Resolves terminology ambiguities and creates CUI mapping for SNOMED
+uv run bash scripts/1b_preprocess_SPACCC/run.sh
+```
+
+#### Step 2: Generate Synthetic Data (SynCABEL)
+Augment your training data by generating synthetic examples using an LLM.
+
+1.  **Prepare Concept Prompts**: Select concepts from your KB and create prompts.
+    ```bash
+    uv run python scripts/2_generate_synthetic_data/prepare_concepts.py
+    ```
+2.  **Generate Data**: Run the LLM inference (supports slurm or local run).
+    ```bash
+    uv run bash scripts/2_generate_synthetic_data/run_generate.sh
+    ```
+
+#### Step 3: Prepare Final Training Data
+Format the processed data into the final inputs required by the generative model.
+
+Prepares source/target sequences (e.g., for T5, BART, Llama).
+```bash
+# default: prepares MedMentions, EMEA, MEDLINE, SPACCC
+uv run python scripts/3_prepare_data/run.py 
+```
+
+#### Step 4: Train Model
+Fine-tune your model on the prepared data. Choose between a standard Seq2Seq model (Encoder-Decoder) or a Decoder-only model.
+
+**Option A: Encoder-Decoder (Seq2Seq)**
+Suitable for models like BART, T5, mBART.
+```bash
+uv run python scripts/4a_training_seq2seq/train.py \
+    --model-name facebook/mbart-large-50 \
+    --dataset-name MedMentions \
+    --augmented-data
+```
+
+**Option B: Decoder-Only**
+Suitable for models like Llama.
+```bash
+# Train on MedMentions with augmented data
+uv run python scripts/4b_training_decoder/train.py \
+    --model-name meta-llama/Meta-Llama-3-8B-Instruct \
+    --dataset-name MedMentions \
+    --augmented-data \
+```
+*(See `scripts/4b_training_decoder/README.md` for full training options)*
+
+#### Step 5: Run Inference
+Generate predictions on the test set.
 
 ```bash
-# Step 1: Preprocess UMLS data
-uv run python scripts/1a_preprocess_UMLS/run_extract_and_prepare_umls.py
-
-# Step 2: Generate synthetic data
-# (See scripts/2_generate_synthetic_data/README.md for details)
-uv run python scripts/2_generate_synthetic_data/prepare_concepts.py
-uv run bash scripts/2_generate_synthetic_data/run_generate.sh
-
-# Step 3: Prepare final training data
-uv run python scripts/3a_prepare_data_seq2seq/run.py # For seq2seq
-uv run python scripts/3b_prepare_data_encoder/run.py # For encoder
-
-# Step 4: Train model
-uv run python scripts/4b_training_decoder/train.py # Example for decoder
-
-# Step 5: Run inference
-uv run python scripts/5_inference/infer.py
-
-# Step 6-8: Evaluate results
-uv run python scripts/6_evaluate_syncabel/evaluate.py
-uv run python scripts/7_evaluate_scispacy.py
-uv run python scripts/8_evaluate_embedding.py
+uv run python scripts/5_inference/infer.py \
+    --model-name <path_to_checkpoint> \
+    --dataset-name MedMentions \
+    --constrained  # Use Trie-based constrained decoding
 ```
+
+#### Step 6: Evaluation & Analysis
+Evaluate performance using standard metrics or advanced semantic analysis.
+
+**Option A: Standard Metrics (Exact Match)**
+Computes Recall@1 and stratified performance (Seen/Unseen).
+```bash
+uv run python scripts/6_evaluate/error_analysis.py
+```
+
+**Option B: LLM-as-a-judge (Semantic Analysis)**
+Uses an LLM to assess the semantic validity of predictions (`Correct`, `Broader`, `Narrower`).
+```bash
+uv run python scripts/6_evaluate/evaluate_llm.py \
+    --datasets SPACCC \
+    --model-name Meta-Llama-3-8B-Instruct
+```
+
+### Computing Resources
+
+**Note on GPU Requirements**: Several steps in this pipeline require GPU resources. The provided slurm scripts (`*.sbatch`) are configured for our specific cluster setup. You will need to:
+
+1. **Adapt slurm scripts**: Modify the slurm configuration (partition, GPU type, memory, etc.) in all `.sbatch` files to match your cluster environment
+2. **Alternative execution**: For local execution without slurm, modify the scripts to use direct Python commands instead of `sbatch`
 
 ## Project Structure
 
 ```
 SynCABEL/
-├── scripts/                    # Training and evaluation pipeline
-│   ├── 1a_preprocess_UMLS/    # UMLS data extraction & prep
-│   ├── 1b_preprocess_SPACCC/  # SPACCC specific prep
-│   ├── 2_generate_synthetic_data/  # LLM augmentation
-│   ├── 3a_prepare_data_seq2seq/    # Data prep for seq2seq
-│   ├── 3b_prepare_data_encoder/    # Data prep for encoders
-│   ├── 4b_training_decoder/   # Training decoder models
-│   ├── 5_inference/           # Inference scripts
-│   ├── 6_evaluate_syncabel/   # Evaluation logic
-│   ├── 7_evaluate_scispacy.py # Baseline eval
-│   └── 8_evaluate_embedding.py # Embedding analyses
-├── syncabel/                   # Main package
-│   ├── utils.py               # Helper functions
-│   ├── guided_inference.py    # Guided inference logic
-│   ├── models.py              # Model definitions
-│   ├── parse_data.py          # Data parsing utilities
-│   └── trie.py                # Trie data structure
-├── arboEL/                     # Submodule/dependency
-├── data/                       # Datasets
-├── notebooks/                  # Analysis notebooks
-├── pyproject.toml             # Dependencies
-└── README.md                  # This file
+├── scripts/                        # Pipeline stages (numbered)
+│   ├── 1a_preprocess_UMLS/         # Extract & prepare UMLS based datasets
+│   ├── 1b_preprocess_SPACCC/       # Prepare SPACCC (SNOMED)
+│   ├── 2_generate_synthetic_data/  # LLM augmentation pipeline
+│   ├── 3_prepare_data/             # Data prep for Generative models
+│   ├── 4a_training_seq2seq/        # Train Encoder-Decoder (e.g. mBART)
+│   ├── 4b_training_decoder/        # Train Decoder-Only (e.g. Llama)
+│   ├── 5_inference/                # Run inference & constrained decoding
+│   └── 6_evaluate/                 # Evaluation (Exact match, LLM-Judge, Ontology)
+├── syncabel/                       # Core library
+│   ├── error_analysis.py           # Metric computation & bootstrapping
+│   ├── guided_inference.py         # Constrained decoding logic
+│   ├── llm_as_a_judge.py           # Semantic evaluation (LLM-Judge)
+│   ├── models.py                   # Encoder-Decoder model wrappers
+│   ├── parse_data.py               # Data parsing & processing
+│   ├── trie.py                     # Prefix tree for constraints
+│   └── utils.py                    # General utilities
+├── arboEL/                         # Submodule (Baseline)
+├── data/                           # Data directory
+├── pyproject.toml                  # Dependencies (uv/pip)
 ```
 
 ## Scores
@@ -200,7 +270,13 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 Issues and pull requests welcome!
 
-# Citation
+## Acknowledgments
+
+- **Guided inference**: While its design was originally inspired by ideas from the [GENRE](https://github.com/facebookresearch/GENRE) repository, the guided inference script has been fully refactored for BEL.
+- **Computing Resources**: Experiments were conducted using HPC resources from GENCI–IDRIS.
+- **Collaboration**: This work was supported by the LIMICS research laboratory, with significant contributions from the Barcelona Supercomputing Center (BSC), particularly regarding the Spanish datasets, annotations, and valuable methodological insights.
+
+## Citation
 ```
 @unpublished{syncabel,
 author = {Adam Remaki and Christel Gérardin and Eulàlia Farré-Maduell and Martin Krallinger and Xavier Tannier},

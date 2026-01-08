@@ -1,48 +1,38 @@
-# Step 4: Model Training
+# Step 4a: Train Seq2Seq Model (Encoder-Decoder)
 
-This directory contains the scripts for training the Named Entity Disambiguation (NED) models.
+This directory contains the scripts for training Sequence-to-Sequence (Seq2Seq) models like mBART or T5 for the Entity Linking task. These models take the clinical text as input and generate the target entity name or identifier.
 
 ## Files
 
--   `train.py`: The main Python script for training the sequence-to-sequence models.
--   `run.slurm`: A Slurm script for submitting a training job to a cluster.
--   `run_all_trainings.sh`: A bash script that automates the process of submitting multiple training jobs with different configurations.
+-   **`train.py`**: The main training script using Hugging Face Transformers. It handles data loading, model initialization, and the training loop.
+-   **`run.slurm`**: A Slurm submission script for running the training on a cluster environment.
+-   **`run_all_trainings.sh`**: A shell script to automate running multiple experiments with different hyperparameters or datasets.
 
 ## Usage
 
-### `train.py`
+### Single Training Run
 
-This script trains a model with the specified parameters.
+To train a single model, use `train.py`.
+
+```bash
+uv run scripts/4a_training_seq2seq/train.py \
+    --model-name "facebook/mbart-large-50" \
+    --dataset-name "MedMentions" \
+    --use-augmented-data
+```
 
 **Arguments:**
 
--   `--model-name`: (Required) The name or path of the pre-trained model to use (e.g., `google/mt5-large`).
--   `--lr`: (Optional) The learning rate for the optimizer. Default is `3e-05`.
--   `--dataset-name`: (Required) The name of the dataset to use for training (e.g., `MedMentions`).
--   `--augmented-data`: (Optional) A flag to indicate whether to use augmented data for training.
--   `--with-group`: (Optional) A flag to indicate whether to use data with group annotations.
--   `--selection-method`: (Optional) The method used for selecting concept synonyms. Choices are `embedding`, `tfidf`, and `levenshtein`. Default is `embedding`.
+-   `--model-name`: The pre-trained model checkpoint (e.g., `facebook/mbart-large-50`, `google/mt5-large`).
+-   `--dataset-name`: The dataset to train on (e.g., `MedMentions`, `SPACCC`).
+-   `--use-augmented-data`: Flag to include synthetic data in the training set.
+-   `--batch-size`: Batch size for training.
+-   `--learning-rate`: Learning rate for the optimizer.
 
-**Example:**
+### Batch Experiments
 
-```bash
-python scripts/4a_training_seq2seq/train.py --model-name google/mt5-large --dataset-name MedMentions --augmented-data --with-group --selection-method embedding
-```
-
-### `run.slurm`
-
-This script is configured to submit a training job to a Slurm-managed cluster. It sets up the environment, loads the necessary modules, and then executes `train.py` with the arguments passed to it.
-
-The script is designed to be launched via `sbatch`, and it expects the python script arguments to be passed through the `SCRIPT_ARGS` environment variable.
-
-### `run_all_trainings.sh`
-
-This script automates running multiple training experiments. It iterates through different datasets, selection methods, and data augmentation options, submitting a separate Slurm job for each combination.
-
-**To run all training configurations:**
+To run a suite of experiments:
 
 ```bash
-bash scripts/4a_training_seq2seq/run_all_trainings.sh
+uv run scripts/4a_training_seq2seq/run_all_trainings.sh
 ```
-
-This will submit multiple jobs to the Slurm scheduler based on the configurations defined in the script.

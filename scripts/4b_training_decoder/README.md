@@ -1,48 +1,35 @@
-# Step 4: Model Training
+# Step 4b: Train Decoder-Only Model (LLM)
 
-This directory contains the scripts for training the Named Entity Disambiguation (NED) models.
+This directory contains the scripts for fine-tuning Decoder-only Large Language Models (LLMs) like Llama-3 or Mistral for Generative Entity Linking. Unlike the Seq2Seq approach, this methods fine-tunes a causal language model to generate the entity given the context.
 
 ## Files
 
--   `train.py`: The main Python script for training the sequence-to-sequence models.
--   `run.slurm`: A Slurm script for submitting a training job to a cluster.
--   `run_all_trainings.sh`: A bash script that automates the process of submitting multiple training jobs with different configurations.
+-   **`train.py`**: The training script using `trl` (Transformer Reinforcement Learning) library's `SFTTrainer` for Supervised Fine-Tuning. It supports PEFT (LoRA/QLoRA) and other advanced training techniques.
+-   **`run.slurm`**: Slurm script for cluster job submission.
+-   **`run_all_trainings.sh`**: Automation script for multiple experiments.
 
 ## Usage
 
-### `train.py`
+### Single Training Run
 
-This script trains a model with the specified parameters.
+To fine-tune a model:
+
+```bash
+uv run scripts/4b_training_decoder/train.py \
+    --model-name "meta-llama/Meta-Llama-3-8B" \
+    --dataset-name "MedMentions" \
+    --augmented-data
+```
 
 **Arguments:**
 
--   `--model-name`: (Required) The name or path of the pre-trained model to use (e.g., `google/mt5-large`).
--   `--lr`: (Optional) The learning rate for the optimizer. Default is `3e-05`.
--   `--dataset-name`: (Required) The name of the dataset to use for training (e.g., `MedMentions`).
--   `--augmented-data`: (Optional) A flag to indicate whether to use augmented data for training.
--   `--with-group`: (Optional) A flag to indicate whether to use data with group annotations.
--   `--selection-method`: (Optional) The method used for selecting concept synonyms. Choices are `embedding`, `tfidf`, and `levenshtein`. Default is `embedding`.
+-   `--model-name`: The pre-trained LLM path or identifier (e.g., `meta-llama/Meta-Llama-3-8B`).
+-   `--dataset-name`: Target dataset (e.g., `MedMentions`).
+-   `--augmented-data`: Include synthetic data.
+-   `--selection-method`: Method for candidate selection/negative sampling (e.g., `embedding`, `tfidf`).
 
-**Example:**
+### Batch Experiments
 
 ```bash
-python scripts/4b_training_decoder/train.py --model-name google/mt5-large --dataset-name MedMentions --augmented-data --with-group --selection-method embedding
+uv run scripts/4b_training_decoder/run_all_trainings.sh
 ```
-
-### `run.slurm`
-
-This script is configured to submit a training job to a Slurm-managed cluster. It sets up the environment, loads the necessary modules, and then executes `train.py` with the arguments passed to it.
-
-The script is designed to be launched via `sbatch`, and it expects the python script arguments to be passed through the `SCRIPT_ARGS` environment variable.
-
-### `run_all_trainings.sh`
-
-This script automates running multiple training experiments. It iterates through different datasets, selection methods, and data augmentation options, submitting a separate Slurm job for each combination.
-
-**To run all training configurations:**
-
-```bash
-bash scripts/4b_training_decoder/run_all_trainings.sh
-```
-
-This will submit multiple jobs to the Slurm scheduler based on the configurations defined in the script.
