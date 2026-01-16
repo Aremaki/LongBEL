@@ -108,7 +108,9 @@ def main(datasets: list[str]):
                         pred_df = pred_df.filter(
                             ~pl.col("code").is_in(list(train_cuis))
                         )
-                        score = compute_metrics_simple(pred_df)
+                        score = compute_metrics_simple(
+                            pred_df, pred_df, bootstrap=True, n_bootstrap=1000
+                        )
                         for label in score.keys():
                             all_scores["dataset"].append(dataset)
                             all_scores["data_augmentation"].append(aug_data)
