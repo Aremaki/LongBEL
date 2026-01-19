@@ -62,6 +62,7 @@ We evaluate SynCABEL using established **human-annotated biomedical entity linki
   - SympTEMIST ([https://zenodo.org/records/8223654](https://zenodo.org/records/8223654)),
   - DisTEMIST ([https://zenodo.org/records/7614764](https://zenodo.org/records/7614764)),
   - MedProcNER ([https://zenodo.org/records/8224056](https://zenodo.org/records/8224056))
+  **Note**: Due to submission file size limits, the dataset is not included in this repository and is instead available at 🤗 https://huggingface.co/datasets/AnonymousARR42/SPACCC
 
 ### Fine-tuned Models
 
