@@ -11,7 +11,7 @@
     <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v2.json"
     alt="Ruff">
 </a>
-<a href="https://github.com/dmis-lab/ANGEL/blob/main/LICENSE">
+<a href="https://anonymous.4open.science/r/SynCABEL-83B1/LICENSE">
    <img alt="GitHub" src="https://img.shields.io/badge/license-MIT-blue">
 </a>
 </p>
