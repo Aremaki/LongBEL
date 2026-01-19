@@ -45,6 +45,24 @@ We constructed synthetic datasets for three corpora: MedMentions-ST21pv (English
 | **SynthQUAERO** | French | ~397k | ~132k | UMLS 2014AB |
 | **SynthSPACCC** | Spanish | ~1810k | ~362k | SNOMED CT 2021 |
 
+### Human-Annotated Datasets
+
+We evaluate SynCABEL using established **human-annotated biomedical entity linking benchmarks**, all obtained from publicly available sources and used under their original licenses.
+
+* **MedMentions ST21pv (English)**
+  UMLS-annotated corpus restricted to the ST21pv semantic types.
+  🤗 HuggingFace: [`bigbio/medmentions`](https://huggingface.co/datasets/bigbio/medmentions)
+
+* **QUAERO (French)**
+  UMLS-annotated biomedical corpus derived from MEDLINE abstracts and EMEA documents.
+  🤗 HuggingFace: [`bigbio/quaero`](https://huggingface.co/datasets/bigbio/quaero) (QUAERO-MEDLINE, QUAERO-EMEA)
+
+* **SPACCC (Spanish)**
+  SNOMED CT–based clinical entity linking corpus. The merged dataset is provided in this repository and was sourced from:
+  - SympTEMIST ([https://zenodo.org/records/8223654](https://zenodo.org/records/8223654)),
+  - DisTEMIST ([https://zenodo.org/records/7614764](https://zenodo.org/records/7614764)),
+  - MedProcNER ([https://zenodo.org/records/8224056](https://zenodo.org/records/8224056))
+
 ### Fine-tuned Models
 
 Checkpoints are available of our best performing model: **Llama-3-8B** fine-tuned on MM-ST21pv, QUAERO-EMEA, QUAERO-MEDLINE, SPACCC:
