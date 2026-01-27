@@ -17,13 +17,13 @@
 </p>
 
 <h3>
-    <a href="https://huggingface.co/collections/AnonymousARR42/syncabel">🤗 SynCABEL HuggingFace Collection</a>
+    <a href="https://huggingface.co/collections/Aremaki/syncabel">🤗 SynCABEL HuggingFace Collection</a>
 </h3>
 </div>
 
 ## Introduction
 
-**SynCABEL** is a novel framework designed to enhance generative biomedical entity linking (BEL) by leveraging Large Language Models (LLMs) to generate synthetic, contextualized training data for every concept in a target knowledge base (KB).
+**SynCABEL** is a novel framework designed to enhance generative biomedical entity linking (BEL) by leveraging Large Language Models (LLMs) to generate synthetic, contextualized training data for all candidate concepts in a target knowledge base (KB).
 
 This repository contains a complete pipeline for:
 - **Synthetic Data Generation**: Scripts and prompts to build custom synthetic datasets covering your entire KB.
@@ -37,7 +37,7 @@ This repository contains a complete pipeline for:
 
 We constructed synthetic datasets for three corpora: MedMentions-ST21pv (English), QUAERO (French) and SPACCC (Spanish).
 
-🤗 [AnonymousARR42/SynCABEL](https://huggingface.co/datasets/AnonymousARR42/SynCABEL)
+🤗 [Aremaki/SynCABEL](https://huggingface.co/datasets/Aremaki/SynCABEL)
 
 | Dataset | Language | # Generated Examples | # Concepts in KB | KB Source |
 | :--- | :---: | :---: | :---: | :--- |
@@ -62,16 +62,16 @@ We evaluate SynCABEL using established **human-annotated biomedical entity linki
   - SympTEMIST ([https://zenodo.org/records/8223654](https://zenodo.org/records/8223654)),
   - DisTEMIST ([https://zenodo.org/records/7614764](https://zenodo.org/records/7614764)),
   - MedProcNER ([https://zenodo.org/records/8224056](https://zenodo.org/records/8224056))
-  **Note**: Due to submission file size limits, the dataset is not included in this repository and is instead available at 🤗 https://huggingface.co/datasets/AnonymousARR42/SPACCC
+  **Note**: The dataset is included in this repository and is also available at 🤗 https://huggingface.co/datasets/Aremaki/SPACCC
 
 ### Fine-tuned Models
 
 Checkpoints are available of our best performing model: **Llama-3-8B** fine-tuned on MM-ST21pv, QUAERO-EMEA, QUAERO-MEDLINE, SPACCC:
 
-🤗 [AnonymousARR42/SynCABEL_MedMentions_st21pv](https://huggingface.co/AnonymousARR42/SynCABEL_MedMentions_st21pv) \
-🤗 [AnonymousARR42/SynCABEL_SPACCC](https://huggingface.co/AnonymousARR42/SynCABEL_SPACCC) \
-🤗 [AnonymousARR42/SynCABEL_QUAERO_EMEA](https://huggingface.co/AnonymousARR42/SynCABEL_QUAERO_EMEA) \
-🤗 [AnonymousARR42/SynCABEL_QUAERO_MEDLINE](https://huggingface.co/AnonymousARR42/SynCABEL_QUAERO_MEDLINE)
+🤗 [Aremaki/SynCABEL_MedMentions_st21pv](https://huggingface.co/Aremaki/SynCABEL_MedMentions_st21pv) \
+🤗 [Aremaki/SynCABEL_SPACCC](https://huggingface.co/Aremaki/SynCABEL_SPACCC) \
+🤗 [Aremaki/SynCABEL_QUAERO_EMEA](https://huggingface.co/Aremaki/SynCABEL_QUAERO_EMEA) \
+🤗 [Aremaki/SynCABEL_QUAERO_MEDLINE](https://huggingface.co/Aremaki/SynCABEL_QUAERO_MEDLINE)
 
 #### Loading
 ```python
@@ -80,24 +80,24 @@ from transformers import AutoModelForCausalLM
 
 # Load the model (requires trust_remote_code for custom architecture)
 model = AutoModelForCausalLM.from_pretrained(
-    "AnonymousARR42/SynCABEL_MedMentions_st21pv",
+    "Aremaki/SynCABEL_MedMentions_st21pv",
     trust_remote_code=True,
     device_map="auto"
 )
 ```
 
-### Inference
+#### Inference
 ```python
 # The input must follow this format
 sentences = [
-    "The patient was prescribed [Ibuprofen]{Chemicals & Drugs} to be taken every morning.",
-    "[Myocardial infarction]{Disorders} requires immediate intervention."
+    "[TCA]{Chemicals & Drugs} was prescribed for depression",
+    "Patient diagnosed with [AS]{Disorders}"
 ]
 
 results = model.sample(
     sentences=sentences,
-    constrained=True, # With or without guided inference
-    num_beams=3,
+    constrained=True,
+    num_beams=2,
 )
 
 for i, beam_results in enumerate(results):
@@ -108,11 +108,38 @@ for i, beam_results in enumerate(results):
 
     for j, result in enumerate(beam_results):
         print(
-            f"Beam {j+1}"
-            f"Predicted concept name:{result['pred_concept_name']}"
-            f"Predicted code: {result['pred_concept_code']} "
-            f"Beam score: {result['beam_score']:.3f})"
+            f"Beam {j+1}:\n"
+            f"Predicted concept name:{result['pred_concept_name']}\n"
+            f"Predicted code: {result['pred_concept_code']}\n"
+            f"Beam score: {result['beam_score']:.3f}\n"
         )
+```
+
+**Output:**
+```
+Input: [TCA]{Chemicals & Drugs} was prescribed for depression
+Mention: TCA
+Beam 1:
+Predicted concept name:Tricyclic antidepressant
+Predicted code: C0003290
+Beam score: 0.566
+
+Beam 2:
+Predicted concept name:Tricyclic Antidepressants
+Predicted code: C0003290
+Beam score: 0.287
+
+Input: Patient diagnosed with [AS]{Disorders}
+Mention: AS
+Beam 1:
+Predicted concept name:AS - Ankylosing spondylitis
+Predicted code: C0038013
+Beam score: 0.968
+
+Beam 2:
+Predicted concept name:AS - Aortic stenosis
+Predicted code: C0003507
+Beam score: 0.851
 ```
 
 ## Customize your own
@@ -125,7 +152,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 2. **Clone the repository**:
 ```bash
-git clone https://github.com/AnonymousARR42/SynCABEL.git
+git clone https://github.com/Aremaki/SynCABEL.git
 cd SynCABEL
 ```
 3. **Create virtual environment and install dependencies**:
@@ -260,6 +287,32 @@ SynCABEL/
 ├── data/                           # Data directory
 ├── pyproject.toml                  # Dependencies (uv/pip)
 ```
+
+## Hyperparmeters
+
+Hyperparameters for decoder-only model (llama-3-8B) were selected empirically and are summarized below:
+
+| **Hyperparameter**              | **Value**                          |
+|---------------------------------|------------------------------------|
+| **Epochs**                      | 5				       |
+| **Warmup steps**                | 500				       |
+| **Learning Rate**               | 3e-5  	                       |
+| **Learning Scheduler**          | Linear                             |
+| **Batch Size**                  | 1 				       |
+| **Packing**	                  | True(concatenate multiple examples)|
+| **Optimizer**                   | AdamW                              |
+| **Adam $\epsilon$**             | 1e-8                               |
+| **Adam $\beta$**                | (0.9, 0.999)                       |
+| **Attention Dropout**           | 0.1                                |
+| **Max Length**                  | 2048 			       |
+| **Evaluation Strategy**         | "steps" (with `eval_steps=2000`)   |
+| **Save Strategy**               | "steps" (with `save_steps=2000`)   |
+| **Logging Strategy**            | "steps" (with `logging_steps=2000`)|
+| **Warmup Ratio**                | 0.03                               |
+| **Seed**                        | 42                                 |
+| **Mixed Precision Training**    | bf16 			       |
+
+*Training hyperparameters used for fine-tuning our BEL models.*
 
 ## Scores
 

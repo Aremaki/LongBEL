@@ -9,7 +9,7 @@ description = "SynCABEL: Synthetic Contextualized Augmentation for Biomedical En
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
-    {name = "AnonymousARR42", email = "anonymousarr42@gmail.com"},
+    {name = "Adam REMAKI", email = "ad.remaki@gmail.com"},
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -55,7 +55,7 @@ scipacy = [
 ]
 
 [project.urls]
-Repository = "https://github.com/anonymous/syncabel"
+Repository = "https://github.com/Aremaki/syncabel"
 
 [tool.ruff]
 # Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.
