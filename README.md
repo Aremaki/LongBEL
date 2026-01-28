@@ -3,6 +3,7 @@
 <div align="center">
     <img src="figures/overall.png" alt="SynCABEL">
     <p align="center">
+<a href="https://doi.org/10.48550/arXiv.2601.19667"><img src="https://zenodo.org/badge/DOI/paper.svg" alt="DOI"></a>
 <a href="https://github.com/astral-sh/uv" target="_blank">
     <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json"
     alt="UV">
@@ -11,7 +12,7 @@
     <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v2.json"
     alt="Ruff">
 </a>
-<a href="https://anonymous.4open.science/r/SynCABEL-83B1/LICENSE">
+<a href="https://github.com/Aremaki/SynCABEL/blob/main/LICENSE">
    <img alt="GitHub" src="https://img.shields.io/badge/license-MIT-blue">
 </a>
 </p>
@@ -374,10 +375,16 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Citation
 ```
-@unpublished{syncabel,
-author = {XXXX and XXXX and XXXX and XXXX and XXXX},
-title = {SynCABEL: Synthetic Contextualized Augmentation for Biomedical Entity Linking},
-note = {Manuscript submitted for publication},
-year = {2026}
+@misc{remaki_syncabel_2026,
+author = {Remaki, Adam and Gérardin, Christel and Farré-Maduell, Eulàlia and Krallinger, Martin and Tannier, Xavier},
+title = {{SynCABEL}: {Synthetic} {Contextualized} {Augmentation} for {Biomedical} {Entity} {Linking}},
+shorttitle = {{SynCABEL}},
+url = {http://arxiv.org/abs/2601.19667},
+doi = {10.48550/arXiv.2601.19667},
+urldate = {2026-01-28},
+publisher = {arXiv},
+month = jan,
+year = {2026},
+note = {arXiv:2601.19667 [cs]},
 }
 ```
