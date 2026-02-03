@@ -1,5 +1,5 @@
 """
-Core models for SynCABEL
+Core models for LongBEL
 """
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.

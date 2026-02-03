@@ -1,6 +1,6 @@
 # Step 1b: SPACCC Preprocessing
 
-This directory contains the preprocessing pipeline for the **Spanish Clinical Case Corpus (SPACCC)**. This step is necessary to normalize the Spanish terminology and standardize the dataset format before it can be used for training or evaluation in the SynCABEL pipeline.
+This directory contains the preprocessing pipeline for the **Spanish Clinical Case Corpus (SPACCC)**. This step is necessary to normalize the Spanish terminology and standardize the dataset format before it can be used for training or evaluation in the LongBEL pipeline.
 
 ## Scripts
 

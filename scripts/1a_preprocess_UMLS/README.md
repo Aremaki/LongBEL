@@ -1,6 +1,6 @@
 # Step 1a: Preprocess UMLS
 
-This directory contains the scripts to extract specific UMLS releases (RRF files from zip) and prepare dataset-specific synonym files for the SynCABEL pipeline.
+This directory contains the scripts to extract specific UMLS releases (RRF files from zip) and prepare dataset-specific synonym files for the LongBEL pipeline.
 
 ## What it does
 - Extracts UMLS zip archives and converts RRF files to Parquet format.
@@ -18,7 +18,7 @@ Default mapping of UMLS release zip to dataset:
 Place the raw UMLS zip files under `data/UMLS_raw/` in the project root:
 
 ```
-SynCABEL/
+LongBEL/
   data/
     UMLS_raw/
       UMLS_2014AB.zip

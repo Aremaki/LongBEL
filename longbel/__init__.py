@@ -1,5 +1,5 @@
 """
-SynCABEL: Synthetic Contextualized Augmentation for Biomedical Entity Linking
+LongBEL: Synthetic Contextualized Augmentation for Biomedical Entity Linking
 """
 
 __version__ = "0.1.0"

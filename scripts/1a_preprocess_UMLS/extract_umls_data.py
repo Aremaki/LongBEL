@@ -1,4 +1,4 @@
-"""Typer CLI to extract and prepare UMLS resources for SynCABEL.
+"""Typer CLI to extract and prepare UMLS resources for LongBEL.
 
 Subcommands:
   codes       -> Extract unique CUIs from MRCONSO.RRF

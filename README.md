@@ -10,17 +10,17 @@
     <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v2.json"
     alt="Ruff">
 </a>
-<a href="https://github.com/Aremaki/SynCABEL/blob/main/LICENSE">
+<a href="https://github.com/Aremaki/LongBEL/blob/main/LICENSE">
    <img alt="GitHub" src="https://img.shields.io/badge/license-MIT-blue">
 </a>
 <h3>
-    <a href="https://huggingface.co/collections/Aremaki/syncabel">🤗 SynCABEL HuggingFace Collection</a>
+    <a href="https://huggingface.co/collections/Aremaki/syncabel">🤗 LongBEL HuggingFace Collection</a>
 </h3>
 </div>
 
 ## Introduction
 
-**SynCABEL** is a novel framework designed to enhance generative biomedical entity linking (BEL) by leveraging Large Language Models (LLMs) to generate synthetic, contextualized training data for all candidate concepts in a target knowledge base (KB).
+**LongBEL** is a novel framework designed to enhance generative biomedical entity linking (BEL) by leveraging Large Language Models (LLMs) to generate synthetic, contextualized training data for all candidate concepts in a target knowledge base (KB).
 
 This repository contains a complete pipeline for:
 - **Synthetic Data Generation**: Scripts and prompts to build custom synthetic datasets covering your entire KB.
@@ -34,7 +34,7 @@ This repository contains a complete pipeline for:
 
 We constructed synthetic datasets for three corpora: MedMentions-ST21pv (English), QUAERO (French) and SPACCC (Spanish).
 
-🤗 [Aremaki/SynCABEL](https://huggingface.co/datasets/Aremaki/SynCABEL)
+🤗 [Aremaki/LongBEL](https://huggingface.co/datasets/Aremaki/LongBEL)
 
 | Dataset | Language | # Generated Examples | # Concepts in KB | KB Source |
 | :--- | :---: | :---: | :---: | :--- |
@@ -44,7 +44,7 @@ We constructed synthetic datasets for three corpora: MedMentions-ST21pv (English
 
 ### Human-Annotated Datasets
 
-We evaluate SynCABEL using established **human-annotated biomedical entity linking benchmarks**, all obtained from publicly available sources and used under their original licenses.
+We evaluate LongBEL using established **human-annotated biomedical entity linking benchmarks**, all obtained from publicly available sources and used under their original licenses.
 
 * **MedMentions ST21pv (English)**
   UMLS-annotated corpus restricted to the ST21pv semantic types.
@@ -65,10 +65,10 @@ We evaluate SynCABEL using established **human-annotated biomedical entity linki
 
 Checkpoints are available of our best performing model: **Llama-3-8B** fine-tuned on MM-ST21pv, QUAERO-EMEA, QUAERO-MEDLINE, SPACCC:
 
-🤗 [Aremaki/SynCABEL_MedMentions_st21pv](https://huggingface.co/Aremaki/SynCABEL_MedMentions_st21pv) \
-🤗 [Aremaki/SynCABEL_SPACCC](https://huggingface.co/Aremaki/SynCABEL_SPACCC) \
-🤗 [Aremaki/SynCABEL_QUAERO_EMEA](https://huggingface.co/Aremaki/SynCABEL_QUAERO_EMEA) \
-🤗 [Aremaki/SynCABEL_QUAERO_MEDLINE](https://huggingface.co/Aremaki/SynCABEL_QUAERO_MEDLINE)
+🤗 [Aremaki/LongBEL_MedMentions_st21pv](https://huggingface.co/Aremaki/LongBEL_MedMentions_st21pv) \
+🤗 [Aremaki/LongBEL_SPACCC](https://huggingface.co/Aremaki/LongBEL_SPACCC) \
+🤗 [Aremaki/LongBEL_QUAERO_EMEA](https://huggingface.co/Aremaki/LongBEL_QUAERO_EMEA) \
+🤗 [Aremaki/LongBEL_QUAERO_MEDLINE](https://huggingface.co/Aremaki/LongBEL_QUAERO_MEDLINE)
 
 #### Loading
 ```python
@@ -77,7 +77,7 @@ from transformers import AutoModelForCausalLM
 
 # Load the model (requires trust_remote_code for custom architecture)
 model = AutoModelForCausalLM.from_pretrained(
-    "Aremaki/SynCABEL_MedMentions_st21pv",
+    "Aremaki/LongBEL_MedMentions_st21pv",
     trust_remote_code=True,
     device_map="auto"
 )
@@ -149,8 +149,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 2. **Clone the repository**:
 ```bash
-git clone https://github.com/Aremaki/SynCABEL.git
-cd SynCABEL
+git clone https://github.com/Aremaki/LongBEL.git
+cd LongBEL
 ```
 3. **Create virtual environment and install dependencies**:
 
@@ -181,7 +181,7 @@ If your dataset uses a specific gazetteer in tsv format like SPACCC:
 uv run bash scripts/1b_preprocess_SPACCC/run.sh
 ```
 
-#### Step 2: Generate Synthetic Data (SynCABEL)
+#### Step 2: Generate Synthetic Data (LongBEL)
 Augment your training data by generating synthetic examples using an LLM.
 
 1.  **Prepare Concept Prompts**: Select concepts from your KB and create prompts.
@@ -262,7 +262,7 @@ uv run python scripts/6_evaluate/evaluate_llm.py \
 ## Project Structure
 
 ```
-SynCABEL/
+LongBEL/
 ├── scripts/                        # Pipeline stages (numbered)
 │   ├── 1a_preprocess_UMLS/         # Extract & prepare UMLS based datasets
 │   ├── 1b_preprocess_SPACCC/       # Prepare SPACCC (SNOMED)
@@ -324,10 +324,10 @@ Entity linking performance (Recall@1) on biomedical benchmarks. The best results
 | ArboEL | <u>74.5</u> | 70.9 | 62.8 | 49.0 | 64.2 |
 | mBART-large | 65.5 | 61.5 | 58.6 | 57.7 | 60.8 |
 | + Guided inference | 70.0 | 72.8 | 71.1 | 61.8 | 68.9 |
-| **+ SynCABEL (Our method)** | 71.5 | 77.1 | <u>75.3</u> | 64.0 | 72.0 |
+| **+ LongBEL (Our method)** | 71.5 | 77.1 | <u>75.3</u> | 64.0 | 72.0 |
 | Llama-3-8B | 69.0 | 66.4 | 65.5 | 59.9 | 65.2 |
 | + Guided inference | 74.4 | <u>77.5</u> | 72.9 | <u>64.2</u> | <u>72.3</u> |
-| **+ SynCABEL (Our method)** | **75.4** | **79.7** | **79.0** | **67.0** | **75.3** |
+| **+ LongBEL (Our method)** | **75.4** | **79.7** | **79.0** | **67.0** | **75.3** |
 
 Here, we provide the source repositories for the baselines:
 - [**SciSpacy**](https://github.com/allenai/scispacy)
@@ -373,8 +373,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 ```
 @misc{remaki_syncabel_2026,
 author = {Remaki, Adam and Gérardin, Christel and Farré-Maduell, Eulàlia and Krallinger, Martin and Tannier, Xavier},
-title = {{SynCABEL}: {Synthetic} {Contextualized} {Augmentation} for {Biomedical} {Entity} {Linking}},
-shorttitle = {{SynCABEL}},
+title = {{LongBEL}: {Synthetic} {Contextualized} {Augmentation} for {Biomedical} {Entity} {Linking}},
+shorttitle = {{LongBEL}},
 url = {http://arxiv.org/abs/2601.19667},
 doi = {10.48550/arXiv.2601.19667},
 urldate = {2026-01-28},

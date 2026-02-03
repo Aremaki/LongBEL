@@ -1,6 +1,6 @@
 # Step 6: Evaluation & Error Analysis
 
-This directory contains scripts for evaluating the SynCABEL model's performance, ranging from standard metrics (Recall) to advanced semantic analysis (LLM-as-a-judge).
+This directory contains scripts for evaluating the LongBEL model's performance, ranging from standard metrics (Recall) to advanced semantic analysis (LLM-as-a-judge).
 
 ## Scripts
 

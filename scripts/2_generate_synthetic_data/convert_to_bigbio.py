@@ -127,7 +127,7 @@ def write_bigbio_json(df: pl.DataFrame, out_path: Path) -> int:
 
 @app.command()
 def from_hub(
-    repo_id: str = typer.Option("XXXX/SynCABEL", help="HuggingFace dataset repo id"),
+    repo_id: str = typer.Option("XXXX/LongBEL", help="HuggingFace dataset repo id"),
     split: str = typer.Option("train", help="Dataset split to convert"),
     json_out: Path = typer.Option(..., help="Output BigBio JSON path"),
 ) -> None:

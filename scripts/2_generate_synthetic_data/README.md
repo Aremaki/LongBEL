@@ -98,7 +98,7 @@ python scripts/2_generate_synthetic_data/convert_to_bigbio.py from-hub \
   --split SynthMedMentions \
   --json-out data/synthetic_data/SynthMM/SynthMM_bigbio_def.json
 ```
-  --repo-id XXXX/SynCABEL \
+  --repo-id XXXX/LongBEL \
   --split train \
   --cui-col concept_id \
   --text-col generations \
