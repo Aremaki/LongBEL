@@ -1,8 +1,6 @@
-# SynCABEL: Synthetic Contextualized Augmentation for Biomedical Entity Linking
+# LongBEL in progress...
 
-<div align="center">
-    <img src="figures/overall.png" alt="SynCABEL">
-    <p align="center">
+<!-- <div align="center">
 <a href="https://doi.org/10.48550/arXiv.2601.19667"><img src="https://zenodo.org/badge/DOI/paper.svg" alt="DOI"></a>
 <a href="https://github.com/astral-sh/uv" target="_blank">
     <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json"
@@ -15,8 +13,6 @@
 <a href="https://github.com/Aremaki/SynCABEL/blob/main/LICENSE">
    <img alt="GitHub" src="https://img.shields.io/badge/license-MIT-blue">
 </a>
-</p>
-
 <h3>
     <a href="https://huggingface.co/collections/Aremaki/syncabel">🤗 SynCABEL HuggingFace Collection</a>
 </h3>
@@ -387,4 +383,4 @@ month = jan,
 year = {2026},
 note = {arXiv:2601.19667 [cs]},
 }
-```
+``` -->

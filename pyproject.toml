@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "syncabel"
+name = "longbel"
 version = "0.1.0"
-description = "SynCABEL: Synthetic Contextualized Augmentation for Biomedical Entity Linking"
+description = "LongBEL: A Biomedical Entity Linking Framework using long context"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [

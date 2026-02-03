@@ -5,8 +5,8 @@ import polars as pl
 import typer
 from tqdm import tqdm
 
-from syncabel.error_analysis import load_predictions
-from syncabel.llm_as_a_judge import LLMRelator
+from longbel.error_analysis import load_predictions
+from longbel.llm_as_a_judge import LLMRelator
 
 
 def get_concepts_from_codes(

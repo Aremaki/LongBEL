@@ -10,8 +10,8 @@ import polars as pl
 import torch
 from tqdm import tqdm
 
-from syncabel.models import Llama_GENRE
-from syncabel.trie import Trie
+from longbel.models import Llama_GENRE
+from longbel.trie import Trie
 
 sys.setrecursionlimit(5000)
 
@@ -86,7 +86,8 @@ def main(
         raise ValueError(f"Unknown dataset: {dataset_name}")
 
     model = (
-        Llama_GENRE.from_pretrained(
+        Llama_GENRE
+        .from_pretrained(
             full_path,
             lang=lang,
             text_to_code_path=text_to_code_path,
@@ -124,7 +125,8 @@ def main(
         )
         umls_df = pl.read_parquet(umls_path)
         umls_df = umls_df.with_columns(
-            pl.col("Entity")
+            pl
+            .col("Entity")
             .str.replace_all("\xa0", " ", literal=True)
             .str.replace_all(r"[\{\[]", "(", literal=False)
             .str.replace_all(r"[\}\]]", ")", literal=False)

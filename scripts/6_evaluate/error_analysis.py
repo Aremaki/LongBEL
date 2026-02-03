@@ -6,7 +6,7 @@ import polars as pl
 # from keycare.RelExtractor import RelExtractor
 from tqdm import tqdm
 
-from syncabel.error_analysis import compute_metrics, load_predictions
+from longbel.error_analysis import compute_metrics, load_predictions
 
 
 def main(datasets: list[str]):

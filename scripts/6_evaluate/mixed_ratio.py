@@ -4,7 +4,7 @@ from pathlib import Path
 import polars as pl
 from tqdm import tqdm
 
-from syncabel.error_analysis import compute_metrics_simple, load_predictions
+from longbel.error_analysis import compute_metrics_simple, load_predictions
 
 
 def main(datasets: list[str]):

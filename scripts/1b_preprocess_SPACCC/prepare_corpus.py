@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 
-from syncabel.utils import load_tsv_as_bigbio
+from longbel.utils import load_tsv_as_bigbio
 
 app = typer.Typer(help="Preprocess SPACCC dataset into BigBio JSON format.")
 

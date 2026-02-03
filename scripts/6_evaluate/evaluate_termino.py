@@ -4,7 +4,7 @@ import polars as pl
 from owlready2 import default_world, get_ontology
 from tqdm import tqdm
 
-from syncabel.error_analysis import load_predictions
+from longbel.error_analysis import load_predictions
 
 # Load UMLS into a local SQLite database
 default_world.set_backend(filename="pym_2023AA.sqlite3")
