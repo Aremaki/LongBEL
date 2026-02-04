@@ -446,7 +446,7 @@ def main(
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     # Define file paths
-    terminology_file = spaccc_dir / "terminology_umls.tsv"
+    terminology_file = spaccc_dir / "terminology.tsv"
     train_file = spaccc_dir / "train.tsv"
     test_file = spaccc_dir / "test.tsv"
     corrected_code_file = corrected_dir / "SPACCC_adapted.csv"
