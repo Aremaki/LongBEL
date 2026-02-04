@@ -451,6 +451,7 @@ def main(
     test_file = spaccc_dir / "test.tsv"
     corrected_code_file = corrected_dir / "SPACCC_adapted.csv"
     clean_terminology_file = terminology_dir / "all_disambiguated.parquet"
+    semantic_info_file = terminology_dir / "semantic_info.parquet"
     # Create output directory
     corrected_dir.mkdir(exist_ok=True)
     terminology_dir.mkdir(exist_ok=True)
@@ -525,6 +526,13 @@ def main(
         logging.warning(
             f"SNOMED_FSN.tsv file not found at {snomed_fsn_file}, skipping join."
         )
+    # Semantic Info file
+    semantic_info = clean_terminology.group_by("SNOMED_code").agg([
+        pl.col("GROUP").first(),
+        pl.col("CATEGORY").first().alias("SEM_CODE"),
+        pl.col("CATEGORY").first(),
+    ])
+
     # Save results
     logging.info(
         f"💾 Saving {mapping_df.height} mapping entries to {corrected_code_file}"
@@ -535,6 +543,11 @@ def main(
         f"💾 Saving {clean_terminology.height} clean terminology entries to {clean_terminology_file}"
     )
     clean_terminology.write_parquet(clean_terminology_file)
+
+    logging.info(
+        f"💾 Saving {semantic_info.height} semantic info entries to {semantic_info_file}"
+    )
+    semantic_info.write_parquet(semantic_info_file)
 
     logging.info("📊 Final statistics:")
     logging.info(f"   - Unique entities: {clean_terminology['Entity'].n_unique()}")

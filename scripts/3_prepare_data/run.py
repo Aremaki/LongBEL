@@ -84,9 +84,9 @@ def _compute_or_load_best_syn(
     return best_syn_df, best_syn_map
 
 
-def _process_spaccc_bigbio_dataset(
+def _process_hf_dataset(
     name: str,
-    bigbio_dir: Path,
+    hf_id: str,
     cui_to_title,
     cui_to_syn,
     cui_to_groups,
@@ -100,125 +100,22 @@ def _process_spaccc_bigbio_dataset(
     out_root: Path,
     selection_method: str,
     corrected_code_path: Optional[Path] = None,
-):
-    typer.echo(f"→ Loading dataset {name} from {bigbio_dir} ...")
-    data_folder = out_root / name
-    _ensure_dir(data_folder)
-
-    language = "spanish"
-
-    corrected_code = None
-    if corrected_code_path and corrected_code_path.exists():
-        typer.echo(f"  • Using corrected code mapping from {corrected_code_path}...")
-        corrected_code = {
-            str(row[0]): str(row[1])
-            for row in pl.read_csv(corrected_code_path).iter_rows()
-        }
-
-    # Load splits from JSONs
-    # Expecting SPACCC_train.json, SPACCC_test.json, etc.
-    splits_files = {
-        "train": str(bigbio_dir / f"{name}_train.json"),
-        "test": str(bigbio_dir / f"{name}_test.json"),
-        "test_simple": str(bigbio_dir / f"{name}_test_simple.json"),
-        "test_ner": str(bigbio_dir / f"{name}_test_ner.json"),
-    }
-    # Filter only existing files
-    splits_files = {k: v for k, v in splits_files.items() if Path(v).exists()}
-
-    if not splits_files:
-        typer.echo(f"⚠️ No JSON files found in {bigbio_dir} for {name}.")
-        return
-
-    ds = load_dataset("json", data_files=splits_files)
-
-    # Precompute best synonyms on this dataset's splits only
-    def _iter_pages_all():
-        for split_key in splits_files.keys():
-            if split_key in ds:
-                yield from ds[split_key]  # type: ignore
-
-    best_syn_map = None
-    if selection_method == "embedding":
-        best_syn_path = data_folder / "best_synonyms.parquet"
-        _, best_syn_map = _compute_or_load_best_syn(
-            cast(Iterable[dict], list(_iter_pages_all())),
-            CUI_to_Syn=cui_to_syn,
-            encoder_name=encoder_name,
-            cache_path=best_syn_path,
-            corrected_code=corrected_code,
-        )
-
-    typer.echo(f"Processing dataset {name} ...")
-    processed = {}
-    for split_name in splits_files.keys():
-        if split_name not in ds:
-            continue
-        split_data = ds[split_name]  # type: ignore
-        # ner_mode for test_ner? Original script had ner_mode="ner" in split_name
-        ner_mode = "ner" in split_name
-
-        src, tgt, tsv_data = process_bigbio_dataset(
-            split_data,  # type: ignore
-            start_entity,
-            end_entity,
-            start_group,
-            end_group,
-            CUI_to_Title=cui_to_title,
-            CUI_to_Syn=cui_to_syn,
-            CUI_to_GROUP=cui_to_groups,
-            semantic_info=semantic_info,
-            encoder_name=encoder_name,
-            tfidf_vectorizer_path=tfidf_vectorizer_path,
-            corrected_code=corrected_code,
-            language=language,
-            selection_method=selection_method,
-            best_syn_map=best_syn_map,
-            ner_mode=ner_mode,
-        )
-        processed[split_name] = (src, tgt, tsv_data)
-
-    # Write outputs
-    for split_name, (src, tgt, tsv_data) in processed.items():
-        _dump(
-            src,
-            data_folder / f"{split_name}_{selection_method}_source.pkl",
-        )
-        _dump(
-            tgt,
-            data_folder / f"{split_name}_{selection_method}_target.pkl",
-        )
-        pl.DataFrame(tsv_data).write_csv(
-            file=data_folder / f"{split_name}_{selection_method}_annotations.tsv",
-            separator="\t",
-            include_header=True,
-        )
-
-
-def _process_hf_dataset(
-    name: str,
-    hf_id: str,
-    hf_config: str,
-    cui_to_title,
-    cui_to_syn,
-    cui_to_groups,
-    semantic_info,
-    encoder_name: str,
-    tfidf_vectorizer_path: Path,
-    start_entity: str,
-    end_entity: str,
-    start_group: str,
-    end_group: str,
-    out_root: Path,
-    selection_method: str,
+    hf_config: Optional[str] = None,
 ):
     typer.echo(f"→ Loading dataset {hf_id}:{hf_config} ...")
     ds = load_dataset(hf_id, name=hf_config)
     data_folder = out_root / name
     _ensure_dir(data_folder)
 
-    # Determine sentence tokenizer language: MedMentions (English), else French for QUAERO variants.
-    language = "english" if name == "MedMentions" else "french"
+    # Determine language: MedMentions (English), QUAERO (French) and SPACCC (Spanish).
+    if name == "MedMentions":
+        language = "english"
+    elif name in ("EMEA", "MEDLINE"):
+        language = "french"
+    elif name == "SPACCC":
+        language = "spanish"
+    else:
+        raise ValueError(f"Unknown dataset name for language detection: {name}")
 
     # Precompute best synonyms on this dataset's splits only, cache per dataset
     def _iter_pages_all():
@@ -228,13 +125,12 @@ def _process_hf_dataset(
 
     # Optional: corrected CUI mapping for QUAERO (from manual review)
     corrected_code = None
-    if name in ("EMEA", "MEDLINE"):
-        corrected_code_path = (
-            Path("data") / "corrected_code" / "QUAERO_2014_adapted.csv"
-        )
-        if corrected_code_path.exists():
-            typer.echo("Using corrected CUI mapping...")
-            corrected_code = dict(pl.read_csv(corrected_code_path).iter_rows())
+    if corrected_code_path is not None and corrected_code_path.exists():
+        typer.echo(f"  • Using corrected code mapping from {corrected_code_path}...")
+        corrected_code = {
+            str(row[0]): str(row[1])
+            for row in pl.read_csv(corrected_code_path).iter_rows()
+        }
 
     best_syn_map = None
     if selection_method == "embedding":
@@ -358,8 +254,8 @@ def _process_synth_dataset(
 @app.command()
 def run(
     datasets: list[str] = typer.Option(
-        ["MedMentions", "EMEA", "MEDLINE"],
-        help="Datasets to process (subset of MedMentions, EMEA, MEDLINE)",
+        ["MedMentions", "EMEA", "MEDLINE", "SPACCC"],
+        help="Datasets to process (subset of MedMentions, EMEA, MEDLINE, SPACCC)",
     ),
     start_entity: str = typer.Option("[", help="Start entity marker"),
     end_entity: str = typer.Option("]", help="End entity marker"),
@@ -423,9 +319,9 @@ def run(
         Path("data/termino_processed/SPACCC/semantic_info.parquet"),
         help="UMLS semantic info parquet",
     ),
-    spaccc_bigbio_dir: Path = typer.Option(
-        Path("data/bigbio/SPACCC"),
-        help="Directory containing SPACCC BigBio JSONs",
+    corrected_code_quaero_path: Path = typer.Option(
+        Path("data/corrected_code/QUAERO_2014_adapted"),
+        help="Corrected CUI mapping file for QUAERO",
     ),
     corrected_code_spaccc_path: Path = typer.Option(
         Path("data/corrected_code/SPACCC_adapted.csv"),
@@ -472,7 +368,6 @@ def run(
         _process_hf_dataset(
             "MedMentions",
             "bigbio/medmentions",
-            "medmentions_st21pv_bigbio_kb",
             cui_to_title_mm,
             cui_to_syn_mm,
             cui_to_groups_mm,
@@ -485,6 +380,7 @@ def run(
             end_group,
             out_root,
             selection_method,
+            hf_config="medmentions_st21pv_bigbio_kb",
         )
         # Synthetic MM as its own dataset
         if synth_mm is not None and "SynthMM" not in processed_synth:
@@ -509,7 +405,6 @@ def run(
         _process_hf_dataset(
             "EMEA",
             "bigbio/quaero",
-            "quaero_emea_bigbio_kb",
             cui_to_title_quaero,
             cui_to_syn_quaero,
             cui_to_groups_quaero,
@@ -522,6 +417,8 @@ def run(
             end_group,
             out_root,
             selection_method,
+            corrected_code_path=corrected_code_quaero_path,
+            hf_config="quaero_emea_bigbio_kb",
         )
         if synth_quaero is not None and "SynthQUAERO" not in processed_synth:
             _process_synth_dataset(
@@ -545,7 +442,6 @@ def run(
         _process_hf_dataset(
             "MEDLINE",
             "bigbio/quaero",
-            "quaero_medline_bigbio_kb",
             cui_to_title_quaero,
             cui_to_syn_quaero,
             cui_to_groups_quaero,
@@ -558,6 +454,8 @@ def run(
             end_group,
             out_root,
             selection_method,
+            corrected_code_path=corrected_code_quaero_path,
+            hf_config="quaero_medline_bigbio_kb",
         )
         if synth_quaero is not None and "SynthQUAERO" not in processed_synth:
             _process_synth_dataset(
@@ -578,9 +476,9 @@ def run(
             )
             processed_synth.add("SynthQUAERO")
     if "SPACCC" in datasets and cui_to_syn_spaccc:
-        _process_spaccc_bigbio_dataset(
+        _process_hf_dataset(
             "SPACCC",
-            spaccc_bigbio_dir,
+            "Aremaki/SPACCC",
             cui_to_title_spaccc,
             cui_to_syn_spaccc,
             cui_to_groups_spaccc,
@@ -594,6 +492,7 @@ def run(
             out_root,
             selection_method,
             corrected_code_path=corrected_code_spaccc_path,
+            hf_config=None,
         )
 
         # Synthetic SPACCC
