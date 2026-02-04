@@ -15,12 +15,12 @@ Default mapping of UMLS release zip to dataset:
 
 ## Expected Input Layout
 
-Place the raw UMLS zip files under `data/UMLS_raw/` in the project root:
+Place the raw UMLS zip files under `data/termino_raw/` in the project root:
 
 ```
 LongBEL/
   data/
-    UMLS_raw/
+    termino_raw/
       UMLS_2014AB.zip
       UMLS_2017AA.zip
 ```
@@ -42,7 +42,7 @@ From the repository root, run the automation script:
 uv run scripts/1a_preprocess_UMLS/run_extract_and_prepare_termino.py
 ```
 
-This will process the available zips and output the artifacts to `data/UMLS_processed/<DATASET>/`.
+This will process the available zips and output the artifacts to `data/termino_processed/<DATASET>/`.
 
 ### Advanced Usage
 
@@ -51,16 +51,16 @@ You can also run the individual steps using their Typer CLIs:
 **Extract UMLS:**
 ```bash
 uv run scripts/1a_preprocess_UMLS/extract_umls.py \
-    --zip-path data/UMLS_raw/UMLS_2017AA.zip \
-    --output-dir data/UMLS_processed/MM
+    --zip-path data/termino_raw/UMLS_2017AA.zip \
+    --output-dir data/termino_processed/MM
 ```
 
 **Prepare UMLS:**
 ```bash
 uv run scripts/1a_preprocess_UMLS/prepare_umls.py \
     --dataset-name MM \
-    --input-dir data/UMLS_processed/MM \
-    --output-dir data/UMLS_processed/MM
+    --input-dir data/termino_processed/MM \
+    --output-dir data/termino_processed/MM
 ```
 
 **Prepare SNOMED:**

@@ -9,9 +9,9 @@ It expects the extraction step to have produced the three parquet files:
   umls_codes.parquet
   umls_title_syn.parquet
   umls_semantic.parquet
-inside a directory passed via --umls-dir (typically data/UMLS_processed/<dataset>/).
+inside a directory passed via --umls-dir (typically data/termino_processed/<dataset>/).
 
-Outputs (by default written under data/UMLS_processed/<dataset>/): all_disambiguated.parquet, fr_disambiguated.parquet
+Outputs (by default written under data/termino_processed/<dataset>/): all_disambiguated.parquet, fr_disambiguated.parquet
 """
 
 from __future__ import annotations

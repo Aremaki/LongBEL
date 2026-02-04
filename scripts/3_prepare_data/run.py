@@ -397,29 +397,30 @@ def run(
         help="SynthSPACCC filtered JSON",
     ),
     umls_mm_parquet: Path = typer.Option(
-        Path("data/UMLS_processed/MM/all_disambiguated.parquet"), help="UMLS MM parquet"
+        Path("data/termino_processed/MM/all_disambiguated.parquet"),
+        help="UMLS MM parquet",
     ),
     umls_quaero_parquet: Path = typer.Option(
-        Path("data/UMLS_processed/QUAERO/all_disambiguated.parquet"),
+        Path("data/termino_processed/QUAERO/all_disambiguated.parquet"),
         help="UMLS QUAERO parquet",
     ),
     umls_spaccc_parquet: Path = typer.Option(
-        Path("data/UMLS_processed/SPACCC/all_disambiguated.parquet"),
+        Path("data/termino_processed/SPACCC/all_disambiguated.parquet"),
         help="UMLS SPACCC parquet",
     ),
     out_root: Path = typer.Option(
         Path("data/final_data"), help="Root output directory"
     ),
     semantic_info_mm_parquet: Path = typer.Option(
-        Path("data/UMLS_processed/MM/semantic_info.parquet"),
+        Path("data/termino_processed/MM/semantic_info.parquet"),
         help="UMLS semantic info parquet",
     ),
     semantic_info_quaero_parquet: Path = typer.Option(
-        Path("data/UMLS_processed/QUAERO/semantic_info.parquet"),
+        Path("data/termino_processed/QUAERO/semantic_info.parquet"),
         help="UMLS semantic info parquet",
     ),
     semantic_info_spaccc_parquet: Path = typer.Option(
-        Path("data/UMLS_processed/SPACCC/semantic_info.parquet"),
+        Path("data/termino_processed/SPACCC/semantic_info.parquet"),
         help="UMLS semantic info parquet",
     ),
     spaccc_bigbio_dir: Path = typer.Option(

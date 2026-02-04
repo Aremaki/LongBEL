@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 """Extract specified UMLS releases then prepare dataset-specific synonym files.
 
-It expects UMLS release zip archives to be located under data/UMLS_raw/.
+It expects UMLS release zip archives to be located under data/termino_raw/.
 Default mapping:
   UMLS_2014AB.zip -> QUAERO
   UMLS_2017AA.zip -> MM
 
 Outputs:
-  Extracted parquet files -> data/UMLS_processed/<DATASET>/ (codes, semantic, title_syn)
-  Prepared synonym parquets -> data/UMLS_processed/<DATASET>/ (all_disambiguated.parquet, fr_disambiguated.parquet)
+  Extracted parquet files -> data/termino_processed/<DATASET>/ (codes, semantic, title_syn)
+  Prepared synonym parquets -> data/termino_processed/<DATASET>/ (all_disambiguated.parquet, fr_disambiguated.parquet)
 
 Run:
   python scripts/1_preprocess_termino/run_extract_and_prepare_termino.py
@@ -19,8 +19,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-RAW_DIR = Path("data/UMLS_raw")
-EXTRACT_OUT_BASE = Path("data/UMLS_processed")
+RAW_DIR = Path("data/termino_raw")
+EXTRACT_OUT_BASE = Path("data/termino_processed")
 EXTRACT_UMLS_SCRIPT = Path("scripts/1_preprocess_termino/extract_umls.py")
 PREPARE_UMLS_SCRIPT = Path("scripts/1_preprocess_termino/prepare_umls.py")
 PREPARE_SNOMED_SCRIPT = Path("scripts/1_preprocess_termino/prepare_snomed.py")

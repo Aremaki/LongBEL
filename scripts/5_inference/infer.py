@@ -86,8 +86,7 @@ def main(
         raise ValueError(f"Unknown dataset: {dataset_name}")
 
     model = (
-        Llama_GENRE
-        .from_pretrained(
+        Llama_GENRE.from_pretrained(
             full_path,
             lang=lang,
             text_to_code_path=text_to_code_path,
@@ -119,14 +118,13 @@ def main(
     if not os.path.exists(candidate_trie_path) or not os.path.exists(text_to_code_path):
         umls_path = (
             Path("data")
-            / "UMLS_processed"
+            / "termino_processed"
             / dataset_short
             / "all_disambiguated.parquet"
         )
         umls_df = pl.read_parquet(umls_path)
         umls_df = umls_df.with_columns(
-            pl
-            .col("Entity")
+            pl.col("Entity")
             .str.replace_all("\xa0", " ", literal=True)
             .str.replace_all(r"[\{\[]", "(", literal=False)
             .str.replace_all(r"[\}\]]", ")", literal=False)

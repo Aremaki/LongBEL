@@ -19,15 +19,15 @@ You can run generation for multiple datasets (MM, QUAERO, SPACCC) in one go by p
 python scripts/2_generate_synthetic_data/prepare_concepts.py \
   --chunk-size 2500 \
   --mm-train-path data/final_data/MedMentions/train_tfidf_annotations.tsv \
-  --mm-path data/UMLS_processed/MM/all_disambiguated.parquet \
-  --mm-def data/UMLS_processed/MM/umls_def.parquet \
+  --mm-path data/termino_processed/MM/all_disambiguated.parquet \
+  --mm-def data/termino_processed/MM/umls_def.parquet \
   --medline-train-path data/final_data/MEDLINE/train_tfidf_annotations.tsv \
   --emea-train-path data/final_data/EMEA/train_tfidf_annotations.tsv \
-  --quaero-path data/UMLS_processed/QUAERO/all_disambiguated.parquet \
-  --quaero-def data/UMLS_processed/QUAERO/umls_def.parquet \
+  --quaero-path data/termino_processed/QUAERO/all_disambiguated.parquet \
+  --quaero-def data/termino_processed/QUAERO/umls_def.parquet \
   --spaccc-train-path data/final_data/SPACCC/train_tfidf_annotations.tsv \
-  --spaccc-path data/UMLS_processed/SPACCC/all_disambiguated.parquet \
-  --spaccc-def data/UMLS_processed/SPACCC/umls_def.parquet
+  --spaccc-path data/termino_processed/SPACCC/all_disambiguated.parquet \
+  --spaccc-def data/termino_processed/SPACCC/umls_def.parquet
 ```
 
 **Common Options:**

@@ -75,7 +75,7 @@ def main(
         else:
             raise ValueError(f"Unknown dataset: {dataset}")
         umls_path = Path(
-            f"data/UMLS_processed/{dataset_short}/all_disambiguated.parquet"
+            f"data/termino_processed/{dataset_short}/all_disambiguated.parquet"
         )
         umls_df = pl.read_parquet(umls_path)
         for aug_data in aug_data_list:

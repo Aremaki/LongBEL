@@ -435,7 +435,7 @@ def main(
         help="Directory for corrected code mapping file",
     ),
     terminology_dir: Path = typer.Option(
-        Path("data/UMLS_processed/SPACCC"),
+        Path("data/termino_processed/SPACCC"),
         "--terminology-dir",
         "-t",
         help="Directory for filtered terminology file",
