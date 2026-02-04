@@ -11,7 +11,7 @@ Outputs:
   Prepared synonym parquets -> data/UMLS_processed/<DATASET>/ (all_disambiguated.parquet, fr_disambiguated.parquet)
 
 Run:
-  python scripts/1_preprocess_UMLS/run_extract_and_prepare_umls.py
+  python scripts/1a_preprocess_UMLS/run_extract_and_prepare_umls.py
 """
 
 from __future__ import annotations
@@ -21,11 +21,11 @@ from pathlib import Path
 
 RAW_DIR = Path("data/UMLS_raw")
 EXTRACT_OUT_BASE = Path("data/UMLS_processed")
-EXTRACT_SCRIPT = Path("scripts/1_preprocess_UMLS/extract_umls_data.py")
-PREPARE_SCRIPT = Path("scripts/1_preprocess_UMLS/prepare_umls_data.py")
+EXTRACT_SCRIPT = Path("scripts/1a_preprocess_UMLS/extract_umls_data.py")
+PREPARE_SCRIPT = Path("scripts/1a_preprocess_UMLS/prepare_umls_data.py")
 
 # You may edit this list to add more releases.
-RELEASES = [("2014AB", "QUAERO"), ("2017AA", "MM"), ("2023AA", "SPACCC_UMLS")]
+RELEASES = [("2014AB", "QUAERO"), ("2017AA", "MM")]
 
 
 def run(cmd: list[str]) -> None:
@@ -53,6 +53,9 @@ def extract(release: tuple[str, str]) -> Path:
     ]
     if semantic_group_path.exists():
         cmd.extend(["--semantic-group-path", str(semantic_group_path)])
+        print(f"[INFO] Using semantic group file: {semantic_group_path}")
+    else:
+        print(f"[WARN] Semantic group file not found: {semantic_group_path}")
     run(cmd)
     return out_dir
 
@@ -82,8 +85,6 @@ def main() -> None:
     for release in RELEASES:
         out_dir = extract(release)
         if out_dir is None:
-            continue
-        if release[1] == "SPACCC_UMLS":
             continue
         prepare(release, out_dir)
 
