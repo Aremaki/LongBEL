@@ -119,6 +119,53 @@ def clean_natural(text):
     )
 
 
+def _insert_entity_markers(
+    text: str, spans: list[tuple[int, int]], start_entity: str, end_entity: str
+) -> str:
+    """Insert entity markers into text using original offsets, handling nested spans.
+
+    The insertion is done in a single pass using start/end events, so offsets
+    remain valid even when spans are nested or adjacent.
+    """
+    if not spans:
+        return text
+
+    text_len = len(text)
+    starts: dict[int, list[tuple[int, int]]] = {}
+    ends: dict[int, list[tuple[int, int]]] = {}
+
+    for start, end in spans:
+        if 0 <= start < end <= text_len:
+            starts.setdefault(start, []).append((start, end))
+            ends.setdefault(end, []).append((start, end))
+
+    if not starts and not ends:
+        return text
+
+    positions = sorted(set(starts) | set(ends))
+    out: list[str] = []
+    last_idx = 0
+
+    for idx in positions:
+        if last_idx < idx:
+            out.append(text[last_idx:idx])
+
+        # Close inner spans first when multiple end at the same position
+        for _ in sorted(ends.get(idx, []), key=lambda x: x[0], reverse=True):
+            out.append(end_entity)
+
+        # Open outer spans first when multiple start at the same position
+        for _ in sorted(starts.get(idx, []), key=lambda x: x[1], reverse=True):
+            out.append(start_entity)
+
+        last_idx = idx
+
+    if last_idx < text_len:
+        out.append(text[last_idx:])
+
+    return "".join(out)
+
+
 def parse_text(
     data,
     start_entity,
@@ -591,17 +638,11 @@ def parse_text_long(
             )
             target_text += f"{target_entity_text} {transition_verb} {annotation}\n"
 
-        # Sort spans in reverse to mark from the end, preventing offset shifts
-        all_spans.sort(key=lambda x: x[0][-1], reverse=True)
-        for entity_span in all_spans:
-            for start_in_sent, end_in_sent in entity_span:
-                passage_text = (
-                    passage_text[:start_in_sent]
-                    + start_entity
-                    + passage_text[start_in_sent:end_in_sent]
-                    + end_entity
-                    + passage_text[end_in_sent:]
-                )
+        # Insert all entity markers in a single pass to avoid offset shifts
+        flat_spans = [span for entity_span in all_spans for span in entity_span]
+        passage_text = _insert_entity_markers(
+            passage_text, flat_spans, start_entity=start_entity, end_entity=end_entity
+        )
         if source_text:
             source_text += "\n\n"
         source_text += passage_text
