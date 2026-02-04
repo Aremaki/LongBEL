@@ -533,6 +533,9 @@ def main(
         pl.col("CATEGORY").first(),
     ])
 
+    # Add lang column
+    clean_terminology = clean_terminology.with_columns(pl.lit("es").alias("lang"))
+
     # Save results
     logging.info(
         f"💾 Saving {mapping_df.height} mapping entries to {corrected_code_file}"
