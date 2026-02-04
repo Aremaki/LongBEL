@@ -671,20 +671,18 @@ def process_bigbio_dataset(
         print(f"Using embedding-based selection with encoder '{encoder_name}'.")
     else:
         encoder = None
-    if selection_method == "tfidf" and tfidf_vectorizer_path:
-        try:
+
+    tfidf_vectorizer = None
+    if selection_method == "tfidf":
+        if tfidf_vectorizer_path:
             tfidf_vectorizer = joblib.load(tfidf_vectorizer_path)
             print(
                 f"Using TF-IDF-based selection with vectorizer at '{tfidf_vectorizer_path}'."
             )
-        except Exception as e:
-            print(
-                f"⚠️ Failed to load TF-IDF vectorizer from '{tfidf_vectorizer_path}': {e}"
+        else:
+            raise ValueError(
+                "TF-IDF selection method requested but no vectorizer path provided."
             )
-            tfidf_vectorizer = None
-    else:
-        tfidf_vectorizer = None
-
     for page in tqdm(bigbio_dataset, total=len(bigbio_dataset)):
         if not long_format:
             source_texts, target_texts, tsv_lines = parse_text(
