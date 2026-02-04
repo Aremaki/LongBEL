@@ -41,16 +41,16 @@ def _build_mappings(umls_parquet: Path):
         raise ValueError(
             "Termino parquet must contain either 'CUI' or 'SNOMED_code' column."
         )
-    cui_to_title = dict(
+    code_to_title = dict(
         df.group_by(code_col).agg([pl.col("Title").first()]).iter_rows()
     )
-    cui_to_syn = dict(
+    code_to_syn = dict(
         df.group_by(code_col).agg([pl.col("Entity").unique()]).iter_rows()
     )
-    cui_to_groups = dict(
+    code_to_group = dict(
         df.group_by(code_col).agg([pl.col("GROUP").unique()]).iter_rows()
     )
-    return cui_to_syn, cui_to_title, cui_to_groups
+    return code_to_syn, code_to_title, code_to_group
 
 
 def _ensure_dir(path: Path):
@@ -70,7 +70,7 @@ def _iter_selected(options: Optional[Iterable[str]], all_list: list[str]) -> lis
 
 def _compute_or_load_best_syn(
     pages: Iterable[dict],
-    CUI_to_Syn: dict,
+    code_to_syn: dict,
     encoder_name: str,
     cache_path: Path,
     batch_size: int = 4096,
@@ -84,7 +84,7 @@ def _compute_or_load_best_syn(
         typer.echo("  • Precomputing best synonyms (batched embeddings)…")
         best_syn_df = compute_best_synonym_df(
             cast(Iterable[dict], list(pages)),
-            CUI_to_Syn=CUI_to_Syn,
+            code_to_syn=code_to_syn,
             encoder_name=encoder_name,
             batch_size=batch_size,
             corrected_code=corrected_code,
@@ -92,7 +92,7 @@ def _compute_or_load_best_syn(
         best_syn_df.write_parquet(cache_path)
     # Use polars DataFrame -> list of dicts
     best_syn_map = {
-        (row["CUI"], row["entity"]): row["best_synonym"]
+        (row["code"], row["entity"]): row["best_synonym"]
         for row in best_syn_df.to_dicts()
     }
     return best_syn_df, best_syn_map
@@ -101,9 +101,9 @@ def _compute_or_load_best_syn(
 def _process_hf_dataset(
     name: str,
     hf_id: str,
-    cui_to_title,
-    cui_to_syn,
-    cui_to_groups,
+    code_to_title,
+    code_to_syn,
+    code_to_group,
     semantic_info,
     encoder_name: str,
     tfidf_vectorizer_path: Path,
@@ -138,7 +138,7 @@ def _process_hf_dataset(
             if split_key in ds:
                 yield from ds[split_key]  # type: ignore
 
-    # Optional: corrected CUI mapping for QUAERO (from manual review)
+    # Optional: corrected code mapping for QUAERO (from manual review)
     corrected_code = None
     if corrected_code_path is not None and corrected_code_path.exists():
         typer.echo(f"  • Using corrected code mapping from {corrected_code_path}...")
@@ -152,7 +152,7 @@ def _process_hf_dataset(
         best_syn_path = data_folder / "best_synonyms.parquet"
         _, best_syn_map = _compute_or_load_best_syn(
             cast(Iterable[dict], list(_iter_pages_all())),
-            CUI_to_Syn=cui_to_syn,
+            code_to_syn=code_to_syn,
             encoder_name=encoder_name,
             cache_path=best_syn_path,
             corrected_code=corrected_code,
@@ -174,9 +174,9 @@ def _process_hf_dataset(
             end_entity,
             start_group,
             end_group,
-            CUI_to_Title=cui_to_title,
-            CUI_to_Syn=cui_to_syn,
-            CUI_to_GROUP=cui_to_groups,
+            code_to_title=code_to_title,
+            code_to_syn=code_to_syn,
+            code_to_group=code_to_group,
             semantic_info=semantic_info,
             encoder_name=encoder_name,
             tfidf_vectorizer_path=tfidf_vectorizer_path,
@@ -211,9 +211,9 @@ def _process_hf_dataset(
 def _process_synth_dataset(
     name: str,
     synth_pages: Optional[list[dict]],
-    cui_to_title,
-    cui_to_syn,
-    cui_to_groups,
+    code_to_title,
+    code_to_syn,
+    code_to_group,
     semantic_info,
     encoder_name: str,
     tfidf_vectorizer_path: Path,
@@ -243,7 +243,7 @@ def _process_synth_dataset(
         best_syn_path = data_folder / "best_synonyms.parquet"
         _, best_syn_map = _compute_or_load_best_syn(
             cast(Iterable[dict], synth_pages),
-            CUI_to_Syn=cui_to_syn,
+            code_to_syn=code_to_syn,
             encoder_name=encoder_name,
             cache_path=best_syn_path,
         )
@@ -255,9 +255,9 @@ def _process_synth_dataset(
         end_entity,
         start_group,
         end_group,
-        CUI_to_Title=cui_to_title,
-        CUI_to_Syn=cui_to_syn,
-        CUI_to_GROUP=cui_to_groups,
+        code_to_title=code_to_title,
+        code_to_syn=code_to_syn,
+        code_to_group=code_to_group,
         semantic_info=semantic_info,
         encoder_name=encoder_name,
         tfidf_vectorizer_path=tfidf_vectorizer_path,
@@ -321,7 +321,7 @@ def run(
     ),
     umls_spaccc_parquet: Path = typer.Option(
         Path("data/termino_processed/SPACCC/all_disambiguated.parquet"),
-        help="UMLS SPACCC parquet",
+        help="SNOMED SPACCC parquet",
     ),
     out_root: Path = typer.Option(
         Path("data/final_data"), help="Root output directory"
@@ -336,11 +336,11 @@ def run(
     ),
     semantic_info_spaccc_parquet: Path = typer.Option(
         Path("data/termino_processed/SPACCC/semantic_info.parquet"),
-        help="UMLS semantic info parquet",
+        help="SNOMED semantic info parquet",
     ),
     corrected_code_quaero_path: Path = typer.Option(
         Path("data/corrected_code/QUAERO_2014_adapted"),
-        help="Corrected CUI mapping file for QUAERO",
+        help="Corrected code mapping file for QUAERO",
     ),
     corrected_code_spaccc_path: Path = typer.Option(
         Path("data/corrected_code/SPACCC_adapted.csv"),
@@ -351,22 +351,6 @@ def run(
     ),
 ) -> None:
     """Run preprocessing pipeline for selected datasets and models."""
-    # Load UMLS mapping resources
-    semantic_info_mm = pl.read_parquet(semantic_info_mm_parquet)
-    semantic_info_quaero = pl.read_parquet(semantic_info_quaero_parquet)
-    semantic_info_spaccc = None
-    if semantic_info_spaccc_parquet.exists():
-        semantic_info_spaccc = pl.read_parquet(semantic_info_spaccc_parquet)
-
-    cui_to_syn_mm, cui_to_title_mm, cui_to_groups_mm = _build_mappings(umls_mm_parquet)
-    cui_to_syn_quaero, cui_to_title_quaero, cui_to_groups_quaero = _build_mappings(
-        umls_quaero_parquet
-    )
-    cui_to_syn_spaccc, cui_to_title_spaccc, cui_to_groups_spaccc = (None, None, None)
-    if umls_spaccc_parquet.exists():
-        cui_to_syn_spaccc, cui_to_title_spaccc, cui_to_groups_spaccc = _build_mappings(
-            umls_spaccc_parquet
-        )
 
     # Synthetic data (optional)
     synth_mm = _load_json_if_exists(synth_mm_path)
@@ -385,14 +369,21 @@ def run(
         )
 
     # Dispatch per dataset
-    processed_synth: set[str] = set()
-    if "MedMentions" in datasets:
+    if (
+        "MedMentions" in datasets
+        and umls_mm_parquet.exists()
+        and semantic_info_mm_parquet.exists()
+    ):
+        semantic_info_mm = pl.read_parquet(semantic_info_mm_parquet)
+        code_to_syn_mm, code_to_title_mm, code_to_group_mm = _build_mappings(
+            umls_mm_parquet
+        )
         _process_hf_dataset(
             "MedMentions",
             "bigbio/medmentions",
-            cui_to_title_mm,
-            cui_to_syn_mm,
-            cui_to_groups_mm,
+            code_to_title_mm,
+            code_to_syn_mm,
+            code_to_group_mm,
             semantic_info_mm,
             encoder_name,
             tfidf_vectorizer_path,
@@ -406,13 +397,13 @@ def run(
             long_format=long_format,
         )
         # Synthetic MM as its own dataset
-        if synth_mm is not None and "SynthMM" not in processed_synth:
+        if synth_mm is not None:
             _process_synth_dataset(
                 "SynthMM",
                 synth_mm,
-                cui_to_title_mm,
-                cui_to_syn_mm,
-                cui_to_groups_mm,
+                code_to_title_mm,
+                code_to_syn_mm,
+                code_to_group_mm,
                 semantic_info_mm,
                 encoder_name,
                 tfidf_vectorizer_path,
@@ -423,90 +414,85 @@ def run(
                 out_root,
                 selection_method,
             )
-            processed_synth.add("SynthMM")
-    if "EMEA" in datasets:
-        _process_hf_dataset(
-            "EMEA",
-            "bigbio/quaero",
-            cui_to_title_quaero,
-            cui_to_syn_quaero,
-            cui_to_groups_quaero,
-            semantic_info_quaero,
-            encoder_name,
-            tfidf_vectorizer_path,
-            start_entity,
-            end_entity,
-            start_group,
-            end_group,
-            out_root,
-            selection_method,
-            corrected_code_path=corrected_code_quaero_path,
-            hf_config="quaero_emea_bigbio_kb",
-            long_format=long_format,
-        )
-        if synth_quaero is not None and "SynthQUAERO" not in processed_synth:
-            _process_synth_dataset(
-                "SynthQUAERO",
-                synth_quaero,
-                cui_to_title_quaero,
-                cui_to_syn_quaero,
-                cui_to_groups_quaero,
-                semantic_info_quaero,
-                encoder_name,
-                tfidf_vectorizer_path,
-                start_entity,
-                end_entity,
-                start_group,
-                end_group,
-                out_root,
-                selection_method,
+    if "EMEA" in datasets or "MEDLINE" in datasets:
+        if umls_quaero_parquet.exists() and semantic_info_quaero_parquet.exists():
+            code_to_syn_quaero, code_to_title_quaero, code_to_group_quaero = (
+                _build_mappings(umls_quaero_parquet)
             )
-            processed_synth.add("SynthQUAERO")
-    if "MEDLINE" in datasets:
-        _process_hf_dataset(
-            "MEDLINE",
-            "bigbio/quaero",
-            cui_to_title_quaero,
-            cui_to_syn_quaero,
-            cui_to_groups_quaero,
-            semantic_info_quaero,
-            encoder_name,
-            tfidf_vectorizer_path,
-            start_entity,
-            end_entity,
-            start_group,
-            end_group,
-            out_root,
-            selection_method,
-            corrected_code_path=corrected_code_quaero_path,
-            hf_config="quaero_medline_bigbio_kb",
-            long_format=long_format,
+            semantic_info_quaero = pl.read_parquet(semantic_info_quaero_parquet)
+            if "EMEA" in datasets:
+                _process_hf_dataset(
+                    "EMEA",
+                    "bigbio/quaero",
+                    code_to_title_quaero,
+                    code_to_syn_quaero,
+                    code_to_group_quaero,
+                    semantic_info_quaero,
+                    encoder_name,
+                    tfidf_vectorizer_path,
+                    start_entity,
+                    end_entity,
+                    start_group,
+                    end_group,
+                    out_root,
+                    selection_method,
+                    corrected_code_path=corrected_code_quaero_path,
+                    hf_config="quaero_emea_bigbio_kb",
+                    long_format=long_format,
+                )
+
+            if "MEDLINE" in datasets:
+                _process_hf_dataset(
+                    "MEDLINE",
+                    "bigbio/quaero",
+                    code_to_title_quaero,
+                    code_to_syn_quaero,
+                    code_to_group_quaero,
+                    semantic_info_quaero,
+                    encoder_name,
+                    tfidf_vectorizer_path,
+                    start_entity,
+                    end_entity,
+                    start_group,
+                    end_group,
+                    out_root,
+                    selection_method,
+                    corrected_code_path=corrected_code_quaero_path,
+                    hf_config="quaero_medline_bigbio_kb",
+                    long_format=long_format,
+                )
+            if synth_quaero is not None:
+                _process_synth_dataset(
+                    "SynthQUAERO",
+                    synth_quaero,
+                    code_to_title_quaero,
+                    code_to_syn_quaero,
+                    code_to_group_quaero,
+                    semantic_info_quaero,
+                    encoder_name,
+                    tfidf_vectorizer_path,
+                    start_entity,
+                    end_entity,
+                    start_group,
+                    end_group,
+                    out_root,
+                    selection_method,
+                )
+    if (
+        "SPACCC" in datasets
+        and umls_spaccc_parquet.exists()
+        and semantic_info_spaccc_parquet.exists()
+    ):
+        semantic_info_spaccc = pl.read_parquet(semantic_info_spaccc_parquet)
+        code_to_syn_spaccc, code_to_title_spaccc, code_to_group_spaccc = (
+            _build_mappings(umls_spaccc_parquet)
         )
-        if synth_quaero is not None and "SynthQUAERO" not in processed_synth:
-            _process_synth_dataset(
-                "SynthQUAERO",
-                synth_quaero,
-                cui_to_title_quaero,
-                cui_to_syn_quaero,
-                cui_to_groups_quaero,
-                semantic_info_quaero,
-                encoder_name,
-                tfidf_vectorizer_path,
-                start_entity,
-                end_entity,
-                start_group,
-                end_group,
-                out_root,
-                selection_method,
-            )
-            processed_synth.add("SynthQUAERO")
-    if "SPACCC" in datasets and cui_to_syn_spaccc:
         _process_hf_dataset(
             "SPACCC",
             "Aremaki/SPACCC",
-            cui_to_title_spaccc,
-            cui_to_syn_spaccc,
-            cui_to_groups_spaccc,
+            code_to_title_spaccc,
+            code_to_syn_spaccc,
+            code_to_group_spaccc,
             semantic_info_spaccc,
             encoder_name,
             tfidf_vectorizer_path,
@@ -522,16 +508,13 @@ def run(
         )
 
         # Synthetic SPACCC
-        if (
-            synth_spaccc_filtered is not None
-            and "SynthSPACCC_Filtered" not in processed_synth
-        ):
+        if synth_spaccc_filtered is not None:
             _process_synth_dataset(
                 "SynthSPACCC_Filtered",
                 synth_spaccc_filtered,
-                cui_to_title_spaccc,
-                cui_to_syn_spaccc,
-                cui_to_groups_spaccc,
+                code_to_title_spaccc,
+                code_to_syn_spaccc,
+                code_to_group_spaccc,
                 semantic_info_spaccc,
                 encoder_name,
                 tfidf_vectorizer_path,
@@ -542,15 +525,13 @@ def run(
                 out_root,
                 selection_method,
             )
-            processed_synth.add("SynthSPACCC_Filtered")
-
-        if synth_spaccc_def is not None and "SynthSPACCC_Def" not in processed_synth:
+        if synth_spaccc_def is not None:
             _process_synth_dataset(
                 "SynthSPACCC_Def",
                 synth_spaccc_def,
-                cui_to_title_spaccc,
-                cui_to_syn_spaccc,
-                cui_to_groups_spaccc,
+                code_to_title_spaccc,
+                code_to_syn_spaccc,
+                code_to_group_spaccc,
                 semantic_info_spaccc,
                 encoder_name,
                 tfidf_vectorizer_path,
@@ -561,18 +542,13 @@ def run(
                 out_root,
                 selection_method,
             )
-            processed_synth.add("SynthSPACCC_Def")
-
-        if (
-            synth_spaccc_no_def is not None
-            and "SynthSPACCC_No_Def" not in processed_synth
-        ):
+        if synth_spaccc_no_def is not None:
             _process_synth_dataset(
                 "SynthSPACCC_No_Def",
                 synth_spaccc_no_def,
-                cui_to_title_spaccc,
-                cui_to_syn_spaccc,
-                cui_to_groups_spaccc,
+                code_to_title_spaccc,
+                code_to_syn_spaccc,
+                code_to_group_spaccc,
                 semantic_info_spaccc,
                 encoder_name,
                 tfidf_vectorizer_path,
@@ -583,7 +559,6 @@ def run(
                 out_root,
                 selection_method,
             )
-            processed_synth.add("SynthSPACCC_No_Def")
     typer.echo("✅ Preprocessing complete.")
 
 
