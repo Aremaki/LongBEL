@@ -336,7 +336,7 @@ def run(
         help="SNOMED semantic info parquet",
     ),
     corrected_code_quaero_path: Path = typer.Option(
-        Path("data/corrected_code/QUAERO_2014_adapted"),
+        Path("data/corrected_code/QUAERO_2014_adapted.csv"),
         help="Corrected code mapping file for QUAERO",
     ),
     corrected_code_spaccc_path: Path = typer.Option(
