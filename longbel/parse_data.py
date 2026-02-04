@@ -457,9 +457,9 @@ def parse_text_long(
       - target: "<entity> is <annotation>" where <annotation> is the best synonym
         if available (or the normalized id otherwise).
     """
-    target_texts_dict: dict[list[tuple[int, int]], str] = {}
+    target_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
     target_text: str = ""
-    tsv_lines_dict: dict[list[tuple[int, int]], dict[str, str]] = {}
+    tsv_lines_dict: dict[tuple[tuple[int, int], ...], dict[str, str]] = {}
     tsv_lines: list[dict[str, str]] = []
     source_text: str = ""
     for passage in data.get("passages", []):
@@ -612,6 +612,7 @@ def parse_text_long(
                 rel_end_off = global_end_off - start_offset_passage
                 entity_spans.append((rel_start_off, rel_end_off))
             entity_spans.sort(key=lambda x: x[0])
+            entity_span_key = tuple(entity_spans)
             all_spans.append(entity_spans)
 
             # Emit the pair
@@ -626,7 +627,7 @@ def parse_text_long(
                 "semantic_rel": "EXACT" if len(normalized_ids) == 1 else "COMPOSITE",
                 "annotation": annotation,
             }
-            tsv_lines_dict[entity_spans] = tsv_line
+            tsv_lines_dict[entity_span_key] = tsv_line
             target_entity_text = (
                 start_entity
                 + entity_text
@@ -635,7 +636,7 @@ def parse_text_long(
                 + group_annotation
                 + end_group
             )
-            target_texts_dict[entity_spans] = (
+            target_texts_dict[entity_span_key] = (
                 f"{target_entity_text} {transition_verb} {annotation}\n"
             )
 
