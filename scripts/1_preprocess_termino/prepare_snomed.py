@@ -422,9 +422,9 @@ def _complete_snomed_entity_group_combinations(df: pl.DataFrame) -> pl.DataFrame
 
 @app.command()
 def main(
-    termino_dir: Path = typer.Option(
-        Path("data/termino_raw"),
-        "--termino-dir",
+    spaccc_dir: Path = typer.Option(
+        Path("data/termino_raw/SPACCC"),
+        "--spaccc-dir",
         "-i",
         help="Path to Terminology data directory with terminology.tsv and FSN files",
     ),
@@ -446,16 +446,16 @@ def main(
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     # Define file paths
-    terminology_file = termino_dir / "terminology_umls.tsv"
-    train_file = termino_dir / "train.tsv"
-    test_file = termino_dir / "test.tsv"
+    terminology_file = spaccc_dir / "terminology_umls.tsv"
+    train_file = spaccc_dir / "train.tsv"
+    test_file = spaccc_dir / "test.tsv"
     corrected_code_file = corrected_dir / "SPACCC_adapted.csv"
     clean_terminology_file = terminology_dir / "all_disambiguated.parquet"
     # Create output directory
     corrected_dir.mkdir(exist_ok=True)
     terminology_dir.mkdir(exist_ok=True)
 
-    logging.info(f"Processing data from: {termino_dir}")
+    logging.info(f"Processing data from: {spaccc_dir}")
 
     # Load priority pairs
     priority_pairs = load_priority_pairs(train_file, test_file)
@@ -500,7 +500,7 @@ def main(
         )
 
     # --- Load SNOMED_FSN.tsv ---
-    snomed_fsn_file = termino_dir / "SNOMED_FSN.tsv"
+    snomed_fsn_file = spaccc_dir / "SNOMED_FSN.tsv"
     if snomed_fsn_file.exists():
         snomed_df = pl.read_csv(
             snomed_fsn_file,
