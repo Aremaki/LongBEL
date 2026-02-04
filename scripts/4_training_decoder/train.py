@@ -32,40 +32,52 @@ def load_pickle(file_path):
         return pickle.load(file)
 
 
-def create_prompt_completion_dataset(dataset, dataset_name):
+def tokenize_message(tokenizer, role, content):
+    return tokenizer.apply_chat_template(
+        [{"role": role, "content": content}], tokenize=True, add_generation_prompt=False
+    )
+
+
+def create_chat_lm_dataset(dataset, dataset_name):
     # Determine verb based on dataset
-    verb = "est"
     if dataset_name == "MedMentions":
         verb = "is"
     elif dataset_name == "SPACCC":
         verb = "es"
+    elif dataset_name in ["EMEA", "MEDLINE"]:
+        verb = "est"
+    else:
+        raise ValueError(f"Unknown dataset_name: {dataset_name}")
 
-    split_marker = f"] {verb}"
+    split_marker = "} " + verb
 
     def format_example(example):
-        prompts = []
-        completions = []
-        for s, t in zip(example["source"], example["target"]):
-            try:
-                split_pos = t.find(split_marker)
-                if split_pos == -1:
-                    # If marker is not found, treat the whole target as completion
-                    prompt = f"{s}<SEP>{t}"
-                    completion = ""
-                    print(
-                        f"Warning: split_marker '{split_marker}' not found in target: {t}"
-                    )
+        messages = []
+        for i, (source, target) in enumerate(zip(example["source"], example["target"])):
+            # Targets may contain multiple mentions separated by <SEP>.
+            # Create one prompt/completion per mention so loss applies only
+            # to the completion segment.
+            chat = []
+            target_entities = target.split("\n")
+            for target_entity in target_entities:
+                split_pos = target_entity.find(split_marker)
+                target_prefix = target_entity[: split_pos + len(split_marker)]
+                if i == 0:
+                    chat.append({
+                        "role": "user",
+                        "content": f"{source}<SEP>{target_prefix}",
+                    })
                 else:
-                    target_prefix = t[: split_pos + len(split_marker)]
-                    prompt = f"{s}<SEP>{target_prefix}"
-                    completion = t[split_pos + len(split_marker) :]
-                prompts.append(prompt)
-                completions.append(completion)
-            except Exception:
-                # Fallback for any unexpected error
-                prompts.append(f"{s}<SEP>{t}")
-                completions.append("")
-        return {"prompt": prompts, "completion": completions}
+                    chat.append({
+                        "role": "user",
+                        "content": target_prefix,
+                    })
+                chat.append({
+                    "role": "assistant",
+                    "content": target_entity[split_pos + len(split_marker) :],
+                })
+            messages.append(chat)
+        return {"messages": messages}
 
     return dataset.map(
         format_example,
@@ -73,6 +85,45 @@ def create_prompt_completion_dataset(dataset, dataset_name):
         remove_columns=dataset.column_names,
         desc=f"Formatting {dataset_name} dataset",
     )
+
+
+def preprocess_chat_example(example, tokenizer):
+    """
+    example["messages"] = [
+        {"role": "user", "content": "..."},
+        {"role": "assistant", "content": "..."},
+        ...
+    ]
+    """
+    messages = example["messages"]
+
+    # 1) Full sequence
+    full_input_ids = tokenizer.apply_chat_template(
+        messages, tokenize=True, add_generation_prompt=False
+    )
+
+    labels = [-100] * len(full_input_ids)
+
+    # 2) Walk message-by-message and track offsets
+    cursor = 0
+    for msg in messages:
+        msg_ids = tokenize_message(tokenizer, msg["role"], msg["content"])
+        msg_len = len(msg_ids)
+
+        if msg["role"] == "assistant":
+            labels[cursor : cursor + msg_len] = full_input_ids[
+                cursor : cursor + msg_len
+            ]
+
+        cursor += msg_len
+
+    assert cursor == len(full_input_ids)
+
+    return {
+        "input_ids": full_input_ids,
+        "labels": labels,
+        "attention_mask": [1] * len(full_input_ids),
+    }
 
 
 # ---------- compute_metrics using generation ----------
@@ -139,7 +190,6 @@ def main(
     lr: float,
     dataset_name: str,
     augmented_data: str,
-    human_ratio: float = 1.0,
     selection_method: str = "tfidf",
 ):
     # init distributed (if needed)
@@ -279,11 +329,6 @@ def main(
                 human_train_dataset,
                 dev_dataset.select(split_train),
             ])
-        # Reduce train dataset according to human_ratio
-        if human_ratio < 1.0:
-            indexes = list(range(len(human_train_dataset)))
-            split = int(len(human_train_dataset) * human_ratio)
-            human_train_dataset = human_train_dataset.select(indexes[:split])
 
     if augmented_data not in ["human_only", "human_only_ft"]:
         if dataset_name == "MedMentions":
@@ -383,40 +428,42 @@ def main(
                 num_train_epochs = 70
             else:
                 num_train_epochs = 20
-    # Format datasets into prompt/completion format
-    train_dataset = create_prompt_completion_dataset(train_dataset, dataset_name)
-    validation_dataset = create_prompt_completion_dataset(
-        validation_dataset, dataset_name
+    # Format datasets into chat lm format
+    train_dataset = create_chat_lm_dataset(train_dataset, dataset_name)
+    validation_dataset = create_chat_lm_dataset(validation_dataset, dataset_name)
+
+    train_dataset = train_dataset.map(
+        lambda x: preprocess_chat_example(x, tokenizer),
+        remove_columns=train_dataset.column_names,
+        num_proc=8,
     )
 
+    validation_dataset = validation_dataset.map(
+        lambda x: preprocess_chat_example(x, tokenizer),
+        remove_columns=validation_dataset.column_names,
+        num_proc=8,
+    )
+
+    # Sanity check for tokenization and formatting
+    example = train_dataset[0]
+    decoded = tokenizer.decode([
+        t if lab != -100 else tokenizer.pad_token_id
+        for t, lab in zip(example["input_ids"], example["labels"])
+    ])
+    print(decoded)
     # ---------- SFT TrainingArguments ----------
-    if human_ratio < 1.0:
-        human_ratio_str = (
-            "_" + str(round(human_ratio * 100, 0)).replace(".0", "") + "pct"
-        )
-    else:
-        human_ratio_str = ""
+
     output_dir = (
-        Path("/lustre/fsn1/projects/rech/ssq/usk98ia/expe_data_ratio")
-        / f"{dataset_name}_{augmented_data}_{selection_method}{human_ratio_str}"
+        Path("models")
+        / "NED"
+        / f"{dataset_name}_{augmented_data}_{selection_method}"
         / model_short_name
     )
     logging_dir = (
-        Path("/lustre/fsn1/projects/rech/ssq/usk98ia/logs")
-        / f"{dataset_name}_{augmented_data}_{selection_method}{human_ratio_str}"
+        Path("logs")
+        / f"{dataset_name}_{augmented_data}_{selection_method}"
         / model_short_name
     )
-    # output_dir = (
-    #     Path("models")
-    #     / "NED"
-    #     / f"{dataset_name}_{augmented_data}_{selection_method}"
-    #     / model_short_name
-    # )
-    # logging_dir = (
-    #     Path("logs")
-    #     / f"{dataset_name}_{augmented_data}_{selection_method!}"
-    #     / model_short_name
-    # )
     model.gradient_checkpointing_enable()
     sft_args = SFTConfig(
         output_dir=str(output_dir),
@@ -443,9 +490,8 @@ def main(
         report_to="tensorboard",
         save_total_limit=2,
         eval_packing=False,
-        packing=True,
+        packing=False,
         max_length=max_length,
-        completion_only_loss=True,
     )
 
     # ---------- SFTTrainer ----------
@@ -518,12 +564,6 @@ if __name__ == "__main__":
         help="Whether to use augmented data for training",
     )
     parser.add_argument(
-        "--human-ratio",
-        type=float,
-        default=1.0,
-        help="The ratio of augmented data to use for training",
-    )
-    parser.add_argument(
         "--selection-method",
         type=str,
         default="embedding",
@@ -537,6 +577,5 @@ if __name__ == "__main__":
         lr=args.lr,
         dataset_name=args.dataset_name,
         augmented_data=args.augmented_data,
-        human_ratio=args.human_ratio,
         selection_method=args.selection_method,
     )
