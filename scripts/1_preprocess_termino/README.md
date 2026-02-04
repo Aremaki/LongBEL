@@ -39,7 +39,7 @@ Inside each zip, the script expects exactly one top-level folder named like the 
 From the repository root, run the automation script:
 
 ```bash
-uv run scripts/1a_preprocess_UMLS/run_extract_and_prepare_termino.py
+uv run scripts/1_preprocess_termino/run_extract_and_prepare_termino.py
 ```
 
 This will process the available zips and output the artifacts to `data/termino_processed/<DATASET>/`.
@@ -50,14 +50,14 @@ You can also run the individual steps using their Typer CLIs:
 
 **Extract UMLS:**
 ```bash
-uv run scripts/1a_preprocess_UMLS/extract_umls.py \
+uv run scripts/1_preprocess_termino/extract_umls.py \
     --zip-path data/termino_raw/UMLS_2017AA.zip \
     --output-dir data/termino_processed/MM
 ```
 
 **Prepare UMLS:**
 ```bash
-uv run scripts/1a_preprocess_UMLS/prepare_umls.py \
+uv run scripts/1_preprocess_termino/prepare_umls.py \
     --dataset-name MM \
     --input-dir data/termino_processed/MM \
     --output-dir data/termino_processed/MM
@@ -65,5 +65,5 @@ uv run scripts/1a_preprocess_UMLS/prepare_umls.py \
 
 **Prepare SNOMED:**
 ```bash
-uv run scripts/1a_preprocess_UMLS/prepare_snomed.py 
+uv run scripts/1_preprocess_termino/prepare_snomed.py 
 ```

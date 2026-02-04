@@ -171,7 +171,7 @@ Prepare the entity gazetteer (dictionaries) and the training corpora. Choose the
 If your target Knowledge Base is the UMLS (e.g. for MedMentions or QUAERO), use the extraction script to process the RRF files:
 ```bash
 # Extracts UMLS RRF files, filters by language/source, creates synonym parquets
-uv run python scripts/1a_preprocess_UMLS/run_extract_and_prepare_umls.py
+uv run python scripts/1_preprocess_termino/run_extract_and_prepare_umls.py
 ```
 
 **Option B: Dedicated Gazetteers in tsv format (SPACCC)**
@@ -264,7 +264,7 @@ uv run python scripts/6_evaluate/evaluate_llm.py \
 ```
 LongBEL/
 ├── scripts/                        # Pipeline stages (numbered)
-│   ├── 1a_preprocess_UMLS/         # Extract & prepare UMLS based datasets
+│   ├── 1_preprocess_termino/         # Extract & prepare UMLS based datasets
 │   ├── 1b_preprocess_SPACCC/       # Prepare SPACCC (SNOMED)
 │   ├── 2_generate_synthetic_data/  # LLM augmentation pipeline
 │   ├── 3_prepare_data/             # Data prep for Generative models
