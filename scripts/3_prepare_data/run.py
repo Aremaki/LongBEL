@@ -365,7 +365,15 @@ def run(
         )
     if synth_quaero is None:
         typer.echo(
-            "⚠️ SynthQUAERO not found; skipping synthetic augmentation for QUAERO-based datasets."
+            "⚠️ SynthQUAERO not found; skipping synthetic augmentation for EMEA and MEDLINE."
+        )
+    if (
+        synth_spaccc_def is None
+        and synth_spaccc_no_def is None
+        and synth_spaccc_filtered is None
+    ):
+        typer.echo(
+            "⚠️ SynthSPACCC not found; skipping synthetic augmentation for SPACCC."
         )
 
     # Dispatch per dataset

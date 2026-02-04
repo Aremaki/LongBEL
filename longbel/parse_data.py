@@ -137,7 +137,7 @@ def parse_text(
     encoder: Optional[TextEncoder] = None,
     tfidf_vectorizer=None,
     best_syn_map: Optional[dict[tuple[str, str], str]] = None,
-):
+) -> tuple[list[str], list[str], list[dict[str, str]]]:
     """Create simple (source, target) pairs per entity.
 
     For each entity in the BigBio page, returns one pair where:
@@ -402,7 +402,7 @@ def parse_text_long(
     encoder: Optional[TextEncoder] = None,
     tfidf_vectorizer=None,
     best_syn_map: Optional[dict[tuple[str, str], str]] = None,
-):
+) -> tuple[str, str, list[dict[str, str]]]:
     """Create simple (source, target) pairs per entity.
 
     For each entity in the BigBio page, returns one pair where:
@@ -410,12 +410,11 @@ def parse_text_long(
       - target: "<entity> is <annotation>" where <annotation> is the best synonym
         if available (or the normalized id otherwise).
     """
-    target_texts: list[str] = []
+    target_text: str = ""
     tsv_lines: list[dict[str, str]] = []
-    source_texts: list[str] = []
+    source_text: str = ""
     entity_id = 1
     for passage in data.get("passages", []):
-        target_text = ""
         passage_text = passage["text"][0]
         start_offset_passage = passage["offsets"][0][0]
         end_offset_passage = passage["offsets"][0][1]
@@ -565,7 +564,7 @@ def parse_text_long(
                 rel_end_off = global_end_off - start_offset_passage
                 entity_spans.append((rel_start_off, rel_end_off))
             entity_spans.sort(key=lambda x: x[0], reverse=True)
-            all_spans.append(entity_spans)
+            all_spans.append((entity_spans, group_annotation))
 
             # Emit the pair
             doc_id = data.get("document_id", "")
@@ -586,8 +585,7 @@ def parse_text_long(
 
         # Sort spans in reverse to mark from the end, preventing offset shifts
         all_spans.sort(key=lambda x: x[0][0], reverse=True)
-        group_annotation = "GROUP"
-        for entity_span in all_spans:
+        for entity_span, group_annotation in all_spans:
             for i, (start_in_sent, end_in_sent) in enumerate(entity_span):
                 if i == 0:
                     passage_text = (
@@ -608,10 +606,11 @@ def parse_text_long(
                         + end_entity
                         + passage_text[end_in_sent:]
                     )
-        source_texts.append(passage_text)
-        target_texts.append(target_text)
+        if source_text:
+            source_text += "\n\n"
+        source_text += passage_text
 
-    return source_texts, target_texts, tsv_lines
+    return source_text, target_text, tsv_lines
 
 
 def process_bigbio_dataset(
@@ -704,8 +703,10 @@ def process_bigbio_dataset(
                 tfidf_vectorizer,
                 best_syn_map,
             )
+            target_data.extend(target_texts)
+            source_data.extend(source_texts)
         else:
-            source_texts, target_texts, tsv_lines = parse_text_long(
+            source_text, target_text, tsv_lines = parse_text_long(
                 page,
                 start_entity,
                 end_entity,
@@ -723,9 +724,10 @@ def process_bigbio_dataset(
                 tfidf_vectorizer,
                 best_syn_map,
             )
+            target_data.append(target_text)
+            source_data.append(source_text)
+
         # Each entity yields one pair; extend the global lists accordingly.
-        target_data.extend(target_texts)
-        source_data.extend(source_texts)
         tsv_data.extend(tsv_lines)
 
     return source_data, target_data, tsv_data
