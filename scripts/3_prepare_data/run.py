@@ -113,6 +113,7 @@ def _compute_or_load_best_syn(
 def _process_hf_dataset(
     name: str,
     hf_id: str,
+    lang: str,
     code_to_title,
     code_to_syn,
     code_to_group,
@@ -133,16 +134,6 @@ def _process_hf_dataset(
     ds = load_dataset(hf_id, name=hf_config, trust_remote_code=True)
     data_folder = out_root / name
     _ensure_dir(data_folder)
-
-    # Determine language: MedMentions (English), QUAERO (French) and SPACCC (Spanish).
-    if name == "MedMentions":
-        language = "english"
-    elif name in ("EMEA", "MEDLINE"):
-        language = "french"
-    elif name == "SPACCC":
-        language = "spanish"
-    else:
-        raise ValueError(f"Unknown dataset name for language detection: {name}")
 
     # Precompute best synonyms on this dataset's splits only, cache per dataset
     def _iter_pages_all():
@@ -193,7 +184,7 @@ def _process_hf_dataset(
             encoder_name=encoder_name,
             tfidf_vectorizer_path=tfidf_vectorizer_path,
             corrected_code=corrected_code,
-            language=language,
+            lang=lang,
             selection_method=selection_method,
             best_syn_map=best_syn_map,
             long_format=long_format,
@@ -223,6 +214,7 @@ def _process_hf_dataset(
 def _process_synth_dataset(
     name: str,
     synth_pages: Optional[list[dict]],
+    lang: str,
     code_to_title,
     code_to_syn,
     code_to_group,
@@ -242,13 +234,6 @@ def _process_synth_dataset(
         return
     data_folder = out_root / name
     _ensure_dir(data_folder)
-
-    # Language: assume English for SynthMM, French for SynthQUAERO, Spanish for SynthSPACCC
-    language = (
-        "english"
-        if "MM" in name or "MedMentions" in name
-        else ("spanish" if "SPACCC" in name else "french")
-    )
 
     best_syn_map = None
     if selection_method == "embedding":
@@ -273,7 +258,7 @@ def _process_synth_dataset(
         semantic_info=semantic_info,
         encoder_name=encoder_name,
         tfidf_vectorizer_path=tfidf_vectorizer_path,
-        language=language,
+        lang=lang,
         selection_method=selection_method,
         best_syn_map=best_syn_map,
     )
@@ -394,13 +379,15 @@ def run(
         and umls_mm_parquet.exists()
         and semantic_info_mm_parquet.exists()
     ):
+        lang = "en"
         semantic_info_mm = pl.read_parquet(semantic_info_mm_parquet)
         code_to_syn_mm, code_to_title_mm, code_to_group_mm = _build_mappings(
-            umls_mm_parquet, "english"
+            umls_mm_parquet, lang
         )
         _process_hf_dataset(
             "MedMentions",
             "bigbio/medmentions",
+            lang,
             code_to_title_mm,
             code_to_syn_mm,
             code_to_group_mm,
@@ -421,6 +408,7 @@ def run(
             _process_synth_dataset(
                 "SynthMM",
                 synth_mm,
+                lang,
                 code_to_title_mm,
                 code_to_syn_mm,
                 code_to_group_mm,
@@ -435,15 +423,17 @@ def run(
                 selection_method,
             )
     if "EMEA" in datasets or "MEDLINE" in datasets:
+        lang = "fr"
         if umls_quaero_parquet.exists() and semantic_info_quaero_parquet.exists():
             code_to_syn_quaero, code_to_title_quaero, code_to_group_quaero = (
-                _build_mappings(umls_quaero_parquet, "french")
+                _build_mappings(umls_quaero_parquet, lang)
             )
             semantic_info_quaero = pl.read_parquet(semantic_info_quaero_parquet)
             if "EMEA" in datasets:
                 _process_hf_dataset(
                     "EMEA",
                     "bigbio/quaero",
+                    lang,
                     code_to_title_quaero,
                     code_to_syn_quaero,
                     code_to_group_quaero,
@@ -465,6 +455,7 @@ def run(
                 _process_hf_dataset(
                     "MEDLINE",
                     "bigbio/quaero",
+                    lang,
                     code_to_title_quaero,
                     code_to_syn_quaero,
                     code_to_group_quaero,
@@ -485,6 +476,7 @@ def run(
                 _process_synth_dataset(
                     "SynthQUAERO",
                     synth_quaero,
+                    lang,
                     code_to_title_quaero,
                     code_to_syn_quaero,
                     code_to_group_quaero,
@@ -503,13 +495,15 @@ def run(
         and umls_spaccc_parquet.exists()
         and semantic_info_spaccc_parquet.exists()
     ):
+        lang = "es"
         semantic_info_spaccc = pl.read_parquet(semantic_info_spaccc_parquet)
         code_to_syn_spaccc, code_to_title_spaccc, code_to_group_spaccc = (
-            _build_mappings(umls_spaccc_parquet, "spanish")
+            _build_mappings(umls_spaccc_parquet, lang)
         )
         _process_hf_dataset(
             "SPACCC",
             "Aremaki/SPACCC",
+            lang,
             code_to_title_spaccc,
             code_to_syn_spaccc,
             code_to_group_spaccc,
@@ -532,6 +526,7 @@ def run(
             _process_synth_dataset(
                 "SynthSPACCC_Filtered",
                 synth_spaccc_filtered,
+                lang,
                 code_to_title_spaccc,
                 code_to_syn_spaccc,
                 code_to_group_spaccc,
@@ -549,6 +544,7 @@ def run(
             _process_synth_dataset(
                 "SynthSPACCC_Def",
                 synth_spaccc_def,
+                lang,
                 code_to_title_spaccc,
                 code_to_syn_spaccc,
                 code_to_group_spaccc,
@@ -566,6 +562,7 @@ def run(
             _process_synth_dataset(
                 "SynthSPACCC_No_Def",
                 synth_spaccc_no_def,
+                lang,
                 code_to_title_spaccc,
                 code_to_syn_spaccc,
                 code_to_group_spaccc,

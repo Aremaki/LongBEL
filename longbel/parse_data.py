@@ -626,7 +626,7 @@ def process_bigbio_dataset(
     encoder_name=None,
     tfidf_vectorizer_path: Optional[Path] = None,
     corrected_code=None,
-    language: str = "english",
+    lang: str = "en",
     selection_method: str = "levenshtein",
     best_syn_map: Optional[dict[tuple[str, str], str]] = None,
     long_format: bool = False,
@@ -647,21 +647,19 @@ def process_bigbio_dataset(
         row["SEM_CODE"]: row["GROUP"]
         for row in semantic_info.select(["SEM_CODE", "GROUP"]).to_dicts()
     }
-    # transition verb depend on language (french, english, spanish)
-    if language == "french":
+    # transition verb and sentence tokenizer depend on language (french, english, spanish)
+    if lang == "fr":
+        nlp = nltk.data.load("tokenizers/punkt/french.pickle")
         transition_verb = "est"
-    elif language == "spanish":
+    elif lang == "es":
+        nlp = nltk.data.load("tokenizers/punkt/spanish.pickle")
         transition_verb = "es"
-    else:
-        transition_verb = "is"
-    # Load sentence tokenizer for requested language (default english).
-    # Falls back to english if the specified model is unavailable.
-    try:
-        nlp = nltk.data.load(f"tokenizers/punkt/{language}.pickle")
-
-    except LookupError:
-        print(f"⚠️ Punkt model for '{language}' not found; falling back to English.")
+    elif lang == "en":
         nlp = nltk.data.load("tokenizers/punkt/english.pickle")
+        transition_verb = "is"
+    else:
+        raise ValueError(f"Unsupported language '{lang}' for transition verb.")
+
     target_data = []
     source_data = []
     tsv_data = []
