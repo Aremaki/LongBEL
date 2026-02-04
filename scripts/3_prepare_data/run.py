@@ -21,8 +21,6 @@ app = typer.Typer(
     help="Preprocess BigBio datasets into model-specific train/dev/test pickles."
 )
 
-# --- Embedding helpers -----------------------------------------------------
-
 
 def _load_json_if_exists(path: Path):
     if path and path.exists():
@@ -31,7 +29,7 @@ def _load_json_if_exists(path: Path):
     return None
 
 
-def _build_mappings(umls_parquet: Path):
+def _build_mappings(umls_parquet: Path, lang: str):
     df = pl.read_parquet(umls_parquet)
     if "CUI" in df.columns:
         code_col = "CUI"
@@ -41,12 +39,26 @@ def _build_mappings(umls_parquet: Path):
         raise ValueError(
             "Termino parquet must contain either 'CUI' or 'SNOMED_code' column."
         )
+
     code_to_title = dict(
         df.group_by(code_col).agg([pl.col("Title").first()]).iter_rows()
     )
-    code_to_syn = dict(
+    code_to_syn_all = dict(
         df.group_by(code_col).agg([pl.col("Entity").unique()]).iter_rows()
     )
+
+    df_lang = df.filter(pl.col("lang") == lang)
+    if df_lang.height > 0:
+        code_to_syn_lang = dict(
+            df_lang.group_by(code_col).agg([pl.col("Entity").unique()]).iter_rows()
+        )
+        code_to_syn = {
+            code: code_to_syn_lang.get(code, code_to_syn_all[code])
+            for code in code_to_syn_all
+        }
+    else:
+        code_to_syn = code_to_syn_all
+
     code_to_group = dict(
         df.group_by(code_col).agg([pl.col("GROUP").unique()]).iter_rows()
     )
@@ -384,7 +396,7 @@ def run(
     ):
         semantic_info_mm = pl.read_parquet(semantic_info_mm_parquet)
         code_to_syn_mm, code_to_title_mm, code_to_group_mm = _build_mappings(
-            umls_mm_parquet
+            umls_mm_parquet, "english"
         )
         _process_hf_dataset(
             "MedMentions",
@@ -425,7 +437,7 @@ def run(
     if "EMEA" in datasets or "MEDLINE" in datasets:
         if umls_quaero_parquet.exists() and semantic_info_quaero_parquet.exists():
             code_to_syn_quaero, code_to_title_quaero, code_to_group_quaero = (
-                _build_mappings(umls_quaero_parquet)
+                _build_mappings(umls_quaero_parquet, "french")
             )
             semantic_info_quaero = pl.read_parquet(semantic_info_quaero_parquet)
             if "EMEA" in datasets:
@@ -493,7 +505,7 @@ def run(
     ):
         semantic_info_spaccc = pl.read_parquet(semantic_info_spaccc_parquet)
         code_to_syn_spaccc, code_to_title_spaccc, code_to_group_spaccc = (
-            _build_mappings(umls_spaccc_parquet)
+            _build_mappings(umls_spaccc_parquet, "spanish")
         )
         _process_hf_dataset(
             "SPACCC",

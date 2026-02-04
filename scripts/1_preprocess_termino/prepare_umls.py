@@ -123,7 +123,7 @@ def _clean_syn_title(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def _disambiguate(df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
+def _disambiguate(df: pl.DataFrame) -> pl.DataFrame:
     # Add disambiguation columns
     df = df.with_columns(
         Entity_full=pl.concat_str(
@@ -131,22 +131,8 @@ def _disambiguate(df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
             separator=" ",
         ),
     )
-    # Language specific subset
-    df_fr = (
-        df.filter(pl.col("lang") == "fr")
-        .select([
-            "CUI",
-            "Title",
-            "SEM_NAME",
-            "GROUP",
-            "CATEGORY",
-            "Syn",
-            "Entity_full",
-            "is_main",
-        ])
-        .unique()
-    )
-    df_all = df.select([
+
+    final_df = df.select([
         "CUI",
         "Title",
         "SEM_NAME",
@@ -155,8 +141,9 @@ def _disambiguate(df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
         "Syn",
         "Entity_full",
         "is_main",
+        "lang",
     ]).unique()
-    return df_all, df_fr
+    return final_df
 
 
 def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
@@ -177,6 +164,7 @@ def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
             "CATEGORY",
             "GROUP",
             "is_main",
+            "lang",
             "ambiguous_level",
         ])
     )
@@ -204,6 +192,7 @@ def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
             "CATEGORY",
             "GROUP",
             "is_main",
+            "lang",
             "ambiguous_level",
         ])
     )
@@ -230,6 +219,7 @@ def _filter_non_ambiguous(df: pl.DataFrame) -> pl.DataFrame:
         "CATEGORY",
         "GROUP",
         "is_main",
+        "lang",
         "ambiguous_level",
     ])
 
@@ -353,7 +343,7 @@ def _explode_language_frames(base: pl.DataFrame) -> pl.DataFrame:
 
 def _prepare_mm(
     codes: pl.DataFrame, titles: pl.DataFrame, semantic: pl.DataFrame
-) -> tuple[pl.DataFrame, pl.DataFrame]:
+) -> pl.DataFrame:
     # Filter semantic rows by tree code prefixes
     semantic_filtered = semantic.filter(
         pl.any_horizontal(*[
@@ -363,19 +353,19 @@ def _prepare_mm(
     base = codes.join(semantic_filtered, on="CUI").join(titles, on="CUI", how="left")
     exploded = _explode_language_frames(base)
     exploded = _clean_syn_title(exploded).unique(subset=["CUI", "Syn", "CATEGORY"])
-    all_df, fr_df = _disambiguate(exploded)
-    return _filter_non_ambiguous(all_df), _filter_non_ambiguous(fr_df)
+    final_df = _disambiguate(exploded)
+    return _filter_non_ambiguous(final_df)
 
 
 def _prepare_quaero(
     codes: pl.DataFrame, titles: pl.DataFrame, semantic: pl.DataFrame
-) -> tuple[pl.DataFrame, pl.DataFrame]:
+) -> pl.DataFrame:
     semantic_filtered = semantic.filter(pl.col("CATEGORY").is_in(QUAERO_CATEGORIES))
     base = codes.join(semantic_filtered, on="CUI").join(titles, on="CUI", how="left")
     exploded = _explode_language_frames(base)
     exploded = _clean_syn_title(exploded).unique(subset=["CUI", "Syn", "CATEGORY"])
-    all_df, fr_df = _disambiguate(exploded)
-    return _filter_non_ambiguous(all_df), _filter_non_ambiguous(fr_df)
+    final_df = _disambiguate(exploded)
+    return _filter_non_ambiguous(final_df)
 
 
 @app.command()
@@ -399,19 +389,17 @@ def prepare(
     semantic = pl.read_parquet(semantic_path)
 
     if dataset == "MM":
-        all_df, fr_df = _prepare_mm(codes, titles, semantic)
+        final_df = _prepare_mm(codes, titles, semantic)
     elif dataset == "QUAERO":
-        all_df, fr_df = _prepare_quaero(codes, titles, semantic)
+        final_df = _prepare_quaero(codes, titles, semantic)
     else:
         raise typer.BadParameter(
             f"Unknown dataset: {dataset}. Must be 'MM' or 'QUAERO'."
         )
 
-    all_path = umls_dir / "all_disambiguated.parquet"
-    fr_path = umls_dir / "fr_disambiguated.parquet"
-    all_df.write_parquet(all_path)
-    fr_df.write_parquet(fr_path)
-    typer.echo(f"Wrote {all_path} and {fr_path}")
+    final_df_path = umls_dir / "all_disambiguated.parquet"
+    final_df.write_parquet(final_df_path)
+    typer.echo(f"Wrote {final_df_path}")
 
 
 if __name__ == "__main__":
