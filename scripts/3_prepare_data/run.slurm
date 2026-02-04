@@ -18,9 +18,7 @@ module load arch/h100
 module load pytorch-gpu/py3/2.3.1
 
 # Run script
-python scripts/3a_prepare_data_seq2seq/run.py --selection-method title
-python scripts/3a_prepare_data_seq2seq/run.py --selection-method embedding
-python scripts/3a_prepare_data_seq2seq/run.py --selection-method levenshtein
-python scripts/3a_prepare_data_seq2seq/run.py --selection-method tfidf
+python scripts/3_prepare_data/run.py --long-format # Use long format for data preparation
+python scripts/3_prepare_data/run.py # Use default format for data preparation
 
 echo SCRIPT FINISHED

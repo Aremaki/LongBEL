@@ -33,9 +33,23 @@ def _load_json_if_exists(path: Path):
 
 def _build_mappings(umls_parquet: Path):
     df = pl.read_parquet(umls_parquet)
-    cui_to_title = dict(df.group_by("CUI").agg([pl.col("Title").first()]).iter_rows())
-    cui_to_syn = dict(df.group_by("CUI").agg([pl.col("Entity").unique()]).iter_rows())
-    cui_to_groups = dict(df.group_by("CUI").agg([pl.col("GROUP").unique()]).iter_rows())
+    if "CUI" in df.columns:
+        code_col = "CUI"
+    elif "SNOMED_code" in df.columns:
+        code_col = "SNOMED_code"
+    else:
+        raise ValueError(
+            "Termino parquet must contain either 'CUI' or 'SNOMED_code' column."
+        )
+    cui_to_title = dict(
+        df.group_by(code_col).agg([pl.col("Title").first()]).iter_rows()
+    )
+    cui_to_syn = dict(
+        df.group_by(code_col).agg([pl.col("Entity").unique()]).iter_rows()
+    )
+    cui_to_groups = dict(
+        df.group_by(code_col).agg([pl.col("GROUP").unique()]).iter_rows()
+    )
     return cui_to_syn, cui_to_title, cui_to_groups
 
 
@@ -101,9 +115,10 @@ def _process_hf_dataset(
     selection_method: str,
     corrected_code_path: Optional[Path] = None,
     hf_config: Optional[str] = None,
+    long_format: bool = False,
 ):
     typer.echo(f"→ Loading dataset {hf_id}:{hf_config} ...")
-    ds = load_dataset(hf_id, name=hf_config)
+    ds = load_dataset(hf_id, name=hf_config, trust_remote_code=True)
     data_folder = out_root / name
     _ensure_dir(data_folder)
 
@@ -169,6 +184,7 @@ def _process_hf_dataset(
             language=language,
             selection_method=selection_method,
             best_syn_map=best_syn_map,
+            long_format=long_format,
         )
         processed[split_name] = (src, tgt, tsv_data)
 
@@ -176,14 +192,17 @@ def _process_hf_dataset(
     for split_name, (src, tgt, tsv_data) in processed.items():
         _dump(
             src,
-            data_folder / f"{split_name}_{selection_method}_source.pkl",
+            data_folder
+            / f"{split_name}_{selection_method}_source{'_long' if long_format else ''}.pkl",
         )
         _dump(
             tgt,
-            data_folder / f"{split_name}_{selection_method}_target.pkl",
+            data_folder
+            / f"{split_name}_{selection_method}_target{'_long' if long_format else ''}.pkl",
         )
         pl.DataFrame(tsv_data).write_csv(
-            file=data_folder / f"{split_name}_{selection_method}_annotations.tsv",
+            file=data_folder
+            / f"{split_name}_{selection_method}_annotations{'_long' if long_format else ''}.tsv",
             separator="\t",
             include_header=True,
         )
@@ -262,7 +281,7 @@ def run(
     start_group: str = typer.Option("{", help="Start group marker"),
     end_group: str = typer.Option("}", help="End group marker"),
     selection_method: str = typer.Option(
-        "embedding",
+        "tfidf",
         help="Annotation selection: 'levenshtein' or 'embedding' or 'tfidf' or 'title'",
     ),
     encoder_name: str = typer.Option(
@@ -327,6 +346,9 @@ def run(
         Path("data/corrected_code/SPACCC_adapted.csv"),
         help="Corrected SNOMED mapping file for SPACCC",
     ),
+    long_format: bool = typer.Option(
+        False, help="Use long format parsing (with context sentences)"
+    ),
 ) -> None:
     """Run preprocessing pipeline for selected datasets and models."""
     # Load UMLS mapping resources
@@ -381,6 +403,7 @@ def run(
             out_root,
             selection_method,
             hf_config="medmentions_st21pv_bigbio_kb",
+            long_format=long_format,
         )
         # Synthetic MM as its own dataset
         if synth_mm is not None and "SynthMM" not in processed_synth:
@@ -419,6 +442,7 @@ def run(
             selection_method,
             corrected_code_path=corrected_code_quaero_path,
             hf_config="quaero_emea_bigbio_kb",
+            long_format=long_format,
         )
         if synth_quaero is not None and "SynthQUAERO" not in processed_synth:
             _process_synth_dataset(
@@ -456,6 +480,7 @@ def run(
             selection_method,
             corrected_code_path=corrected_code_quaero_path,
             hf_config="quaero_medline_bigbio_kb",
+            long_format=long_format,
         )
         if synth_quaero is not None and "SynthQUAERO" not in processed_synth:
             _process_synth_dataset(
@@ -493,6 +518,7 @@ def run(
             selection_method,
             corrected_code_path=corrected_code_spaccc_path,
             hf_config=None,
+            long_format=long_format,
         )
 
         # Synthetic SPACCC
