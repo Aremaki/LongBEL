@@ -563,8 +563,8 @@ def parse_text_long(
                 rel_start_off = global_start_off - start_offset_passage
                 rel_end_off = global_end_off - start_offset_passage
                 entity_spans.append((rel_start_off, rel_end_off))
-            entity_spans.sort(key=lambda x: x[0], reverse=True)
-            all_spans.append((entity_spans, group_annotation))
+            entity_spans.sort(key=lambda x: x[-1], reverse=True)
+            all_spans.append(entity_spans)
 
             # Emit the pair
             doc_id = data.get("document_id", "")
@@ -581,31 +581,27 @@ def parse_text_long(
             }
             entity_id += 1
             tsv_lines.append(tsv_line)
-            target_text += f"[{entity_text}] {transition_verb} {annotation}\n"
+            target_entity_text = (
+                start_entity
+                + entity_text
+                + end_entity
+                + start_group
+                + group_annotation
+                + end_group
+            )
+            target_text += f"{target_entity_text} {transition_verb} {annotation}\n"
 
         # Sort spans in reverse to mark from the end, preventing offset shifts
-        all_spans.sort(key=lambda x: x[0][0], reverse=True)
-        for entity_span, group_annotation in all_spans:
-            for i, (start_in_sent, end_in_sent) in enumerate(entity_span):
-                if i == 0:
-                    passage_text = (
-                        passage_text[:start_in_sent]
-                        + start_entity
-                        + passage_text[start_in_sent:end_in_sent]
-                        + end_entity
-                        + start_group
-                        + group_annotation
-                        + end_group
-                        + passage_text[end_in_sent:]
-                    )
-                else:
-                    passage_text = (
-                        passage_text[:start_in_sent]
-                        + start_entity
-                        + passage_text[start_in_sent:end_in_sent]
-                        + end_entity
-                        + passage_text[end_in_sent:]
-                    )
+        all_spans.sort(key=lambda x: x[0][-1], reverse=True)
+        for entity_span in all_spans:
+            for start_in_sent, end_in_sent in entity_span:
+                passage_text = (
+                    passage_text[:start_in_sent]
+                    + start_entity
+                    + passage_text[start_in_sent:end_in_sent]
+                    + end_entity
+                    + passage_text[end_in_sent:]
+                )
         if source_text:
             source_text += "\n\n"
         source_text += passage_text
