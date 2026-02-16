@@ -500,12 +500,12 @@ def main(
     output_dir = (
         Path("models")
         / "NED"
-        / f"{dataset_name}_{augmented_data}_{selection_method}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}{'' if not long_format else '_long'}"
         / model_short_name
     )
     logging_dir = (
         Path("logs")
-        / f"{dataset_name}_{augmented_data}_{selection_method}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}{'' if not long_format else '_long'}"
         / model_short_name
     )
     model.gradient_checkpointing_enable()
