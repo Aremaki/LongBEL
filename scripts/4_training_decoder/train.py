@@ -446,7 +446,7 @@ def main(
         logging_steps = 0
         train_dataset = human_train_dataset
         if augmented_data == "human_only":
-            num_train_epochs = 200
+            num_train_epochs = 50
         else:  # human_only_ft
             lr = lr / 3.0
             if dataset_name in ["EMEA", "MEDLINE"]:
@@ -481,7 +481,7 @@ def main(
             longest_train = seq_len
 
     print(f"Longest training example has {longest_train} tokens.")
-    max_length = max(longest_train, 16_000)
+    max_length = max(longest_train, 8_000)
     print(f"Using training-set max_length: {max_length}")
     if max_length > model_context_length:
         print(
@@ -534,7 +534,7 @@ def main(
         report_to="tensorboard",
         save_total_limit=2,
         eval_packing=False,
-        packing=False,
+        packing=True,
         max_length=max_length,
     )
 
