@@ -139,19 +139,33 @@ def compute_metrics_generate(preds, labels, tokenizer):
     if isinstance(preds, tuple):
         preds = preds[0]
 
-    # Recover gold target strings from labels by removing -100 tokens
     gold_texts = []
     decoded_preds = []
     for pred, lbl in zip(preds, labels):
-        # keep non -100 tokens index values
-        indices = [i for i, tok in enumerate(lbl) if tok != -100]
-        if len(indices) == 0:
+        # Build contiguous spans of token indices where label != -100
+        spans = []
+        span_start = None
+        for idx, tok in enumerate(lbl):
+            if tok != -100 and span_start is None:
+                span_start = idx
+            elif tok == -100 and span_start is not None:
+                spans.append((span_start, idx))
+                span_start = None
+        if span_start is not None:
+            spans.append((span_start, len(lbl)))
+
+        if len(spans) == 0:
             print("Warning: all label tokens are -100, skipping example.")
             continue
-        else:
-            filtered_lbl = [lbl[i] for i in indices]
-            filtered_pred = [pred[i - 1] for i in indices]
-            # decode both
+
+        for start, end in spans:
+            filtered_lbl = [lbl[i] for i in range(start, end)]
+            # Keep causal shift alignment used previously: prediction at i-1
+            filtered_pred = [pred[i - 1] for i in range(start, end) if (i - 1) >= 0]
+
+            if len(filtered_lbl) == 0 or len(filtered_pred) == 0:
+                continue
+
             dec_lbl = tokenizer.decode(
                 filtered_lbl,
                 skip_special_tokens=True,
@@ -193,6 +207,7 @@ def main(
     dataset_name: str,
     augmented_data: str,
     selection_method: str = "tfidf",
+    long_format: bool = False,
 ):
     # init distributed (if needed)
     if idr_torch.rank == 0:
@@ -257,21 +272,21 @@ def main(
         model.resize_token_embeddings(len(tokenizer))
         print("Added <SEP> and resized embeddings.")
 
-    # Determine max_length if not provided
-    max_length = None
+    # Determine model context length (for info / warning)
+    model_context_length = None
     if hasattr(model.config, "max_position_embeddings"):
-        max_length = model.config.max_position_embeddings
+        model_context_length = model.config.max_position_embeddings
     elif hasattr(tokenizer, "model_max_length"):
-        max_length = tokenizer.model_max_length
+        model_context_length = tokenizer.model_max_length
 
     # Sanity check for very large values (common in some HF tokenizers)
-    if max_length is None:
-        max_length = 2048
+    if model_context_length is None:
+        model_context_length = 2048
         print(
-            f"⚠️ Could not determine valid model max length. Defaulting to {max_length}."
+            f"⚠️ Could not determine valid model max length. Defaulting to {model_context_length}."
         )
     else:
-        print(f"Using detected max_length: {max_length}")
+        print(f"Using detected model context length: {model_context_length}")
 
     # Make contiguous parameters (your original precaution)
     for _, param in model.named_parameters():
@@ -282,7 +297,9 @@ def main(
     data_folder = Path("data/final_data")
 
     validation_source_path = (
-        data_folder / dataset_name / f"validation_{selection_method}_source.pkl"
+        data_folder
+        / dataset_name
+        / f"validation_{selection_method}_source{'' if not long_format else '_long'}.pkl"
     )
     if validation_source_path.exists():
         split_name = "validation"
@@ -291,10 +308,14 @@ def main(
         print("Validation file not found, using test file instead.")
 
     validation_source_data = load_pickle(
-        data_folder / dataset_name / f"{split_name}_{selection_method}_source.pkl"
+        data_folder
+        / dataset_name
+        / f"{split_name}_{selection_method}_source{'' if not long_format else '_long'}.pkl"
     )
     validation_target_data = load_pickle(
-        data_folder / dataset_name / f"{split_name}_{selection_method}_target.pkl"
+        data_folder
+        / dataset_name
+        / f"{split_name}_{selection_method}_target{'' if not long_format else '_long'}.pkl"
     )
 
     validation_data = {
@@ -315,10 +336,14 @@ def main(
 
     if not augmented_data == "synth_only":
         human_train_source_data = load_pickle(
-            data_folder / dataset_name / f"train_{selection_method}_source.pkl"
+            data_folder
+            / dataset_name
+            / f"train_{selection_method}_source{'' if not long_format else '_long'}.pkl"
         )
         human_train_target_data = load_pickle(
-            data_folder / dataset_name / f"train_{selection_method}_target.pkl"
+            data_folder
+            / dataset_name
+            / f"train_{selection_method}_target{'' if not long_format else '_long'}.pkl"
         )
         human_train_dataset = Dataset.from_dict({
             "source": human_train_source_data,
@@ -448,6 +473,21 @@ def main(
         num_proc=8,
     )
 
+    # Compute longest training example
+    longest_train = 0
+    for example in train_dataset:
+        seq_len = len(example["input_ids"])  # type: ignore
+        if seq_len > longest_train:
+            longest_train = seq_len
+
+    print(f"Longest training example has {longest_train} tokens.")
+    max_length = max(longest_train, 16_000)
+    print(f"Using training-set max_length: {max_length}")
+    if max_length > model_context_length:
+        print(
+            f"⚠️ training-set max_length ({max_length}) is larger than model context length ({model_context_length})."
+        )
+
     # Sanity check for tokenization and formatting
     example = train_dataset[0]
     decoded = tokenizer.decode([
@@ -574,6 +614,11 @@ if __name__ == "__main__":
         choices=["embedding", "tfidf", "levenshtein", "title"],
         help="The method to select concept synonyms",
     )
+    parser.add_argument(
+        "--long-format",
+        action="store_true",
+        help="Whether to use long format for training examples",
+    )
     args = parser.parse_args()
 
     main(
@@ -582,4 +627,5 @@ if __name__ == "__main__":
         dataset_name=args.dataset_name,
         augmented_data=args.augmented_data,
         selection_method=args.selection_method,
+        long_format=args.long_format,
     )

@@ -2,19 +2,24 @@
 
 BASE_OUTPUT_DIR="models/NED"
 
-MODELS=("meta-llama/Meta-Llama-3-8B-Instruct")
-DATASETS=("SPACCC")
+MODELS=("Llama-3.1-8B-Instruct", "Llama-3.2-1B-Instruct")
+DATASETS=("MedMentions")
 SELECTION_METHODS=("tfidf")
-AUGMENTED_OPTIONS=("human_only" "full_upsampled")
-HUMAN_RATIOS=(0.2 0.4 0.6 0.8)
+AUGMENTED_OPTIONS=("human_only")
+LONG_FORMAT=("true" "false")
 
 for dataset in "${DATASETS[@]}"; do
     for selection in "${SELECTION_METHODS[@]}"; do
         for augmented in "${AUGMENTED_OPTIONS[@]}"; do
-            for human_ratio in "${HUMAN_RATIOS[@]}"; do
+            for long_format in "${LONG_FORMAT[@]}"; do
                 for model in "${MODELS[@]}"; do
+                    LONG_FORMAT_ARG=""
+                    if [[ "${long_format}" == "true" ]]; then
+                        LONG_FORMAT_ARG=" --long-format"
+                    fi
+
                     # Construct arguments for the training script (pass full model id)
-                    ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --augmented-data ${augmented} --human-ratio ${human_ratio}"
+                    ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --augmented-data ${augmented}${LONG_FORMAT_ARG}"
 
                     # Submit job
                     echo "Submitting training job (missing): ${MODEL_DIR}"

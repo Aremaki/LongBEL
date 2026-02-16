@@ -1,4 +1,4 @@
-# Step 4b: Train Decoder-Only Model (LLM)
+# Step 4: Train Decoder-Only Model (LLM)
 
 This directory contains the scripts for fine-tuning Decoder-only Large Language Models (LLMs) like Llama-3 or Mistral for Generative Entity Linking. Unlike the Seq2Seq approach, this methods fine-tunes a causal language model to generate the entity given the context.
 
@@ -15,7 +15,7 @@ This directory contains the scripts for fine-tuning Decoder-only Large Language 
 To fine-tune a model:
 
 ```bash
-uv run scripts/4b_training_decoder/train.py \
+uv run scripts/4_training_decoder/train.py \
     --model-name "meta-llama/Meta-Llama-3-8B" \
     --dataset-name "MedMentions" \
     --augmented-data
@@ -27,9 +27,10 @@ uv run scripts/4b_training_decoder/train.py \
 -   `--dataset-name`: Target dataset (e.g., `MedMentions`).
 -   `--augmented-data`: Include synthetic data.
 -   `--selection-method`: Method for candidate selection/negative sampling (e.g., `embedding`, `tfidf`).
+-   `--long-format`: Use long context format for training data.
 
 ### Batch Experiments
 
 ```bash
-uv run scripts/4b_training_decoder/run_all_trainings.sh
+uv run scripts/4_training_decoder/run_all_trainings.sh
 ```
