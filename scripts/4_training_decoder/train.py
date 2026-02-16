@@ -32,13 +32,7 @@ def load_pickle(file_path):
         return pickle.load(file)
 
 
-def tokenize_message(tokenizer, role, content):
-    return tokenizer.apply_chat_template(
-        [{"role": role, "content": content}], tokenize=True, add_generation_prompt=False
-    )
-
-
-def create_chat_lm_dataset(dataset, dataset_name):
+def get_split_marker(dataset_name: str) -> str:
     # Determine verb based on dataset
     if dataset_name == "MedMentions":
         verb = "is"
@@ -49,80 +43,88 @@ def create_chat_lm_dataset(dataset, dataset_name):
     else:
         raise ValueError(f"Unknown dataset_name: {dataset_name}")
 
-    split_marker = "} " + verb
+    return "} " + verb
 
+
+def create_prompt_completion_dataset(dataset):
     def format_example(example):
-        messages = []
-        for i, (source, target) in enumerate(zip(example["source"], example["target"])):
-            # Targets may contain multiple mentions separated by <SEP>.
-            # Create one prompt/completion per mention so loss applies only
-            # to the completion segment.
-            chat = []
-            target_entities = target.split("\n")
-            for target_entity in target_entities:
-                split_pos = target_entity.find(split_marker)
-                target_prefix = target_entity[: split_pos + len(split_marker)]
-                if i == 0:
-                    chat.append({
-                        "role": "user",
-                        "content": f"{source}<SEP>{target_prefix}",
-                    })
-                else:
-                    chat.append({
-                        "role": "user",
-                        "content": target_prefix,
-                    })
-                chat.append({
-                    "role": "assistant",
-                    "content": target_entity[split_pos + len(split_marker) :],
-                })
-            messages.append(chat)
-        return {"messages": messages}
+        prompts = []
+        completions = []
+        for source, target in zip(example["source"], example["target"]):
+            prompts.append(source)
+            completions.append(target)
+        return {"prompt": prompts, "completion": completions}
 
     return dataset.map(
         format_example,
         batched=True,
         remove_columns=dataset.column_names,
-        desc=f"Formatting {dataset_name} dataset",
+        desc="Formatting prompt/completion dataset",
     )
 
 
-def preprocess_chat_example(example, tokenizer):
-    """
-    example["messages"] = [
-        {"role": "user", "content": "..."},
-        {"role": "assistant", "content": "..."},
-        ...
-    ]
-    """
-    messages = example["messages"]
+def extract_entity_char_spans(completion: str, split_marker: str):
+    spans = []
+    offset = 0
 
-    # 1) Full sequence
-    full_input_ids = tokenizer.apply_chat_template(
-        messages, tokenize=True, add_generation_prompt=False
+    for raw_line in completion.splitlines(keepends=True):
+        line = raw_line[:-1] if raw_line.endswith("\n") else raw_line
+        line = line[:-1] if line.endswith("\r") else line
+
+        split_pos = line.find(split_marker)
+        if split_pos != -1:
+            entity_start = split_pos + len(split_marker)
+            while entity_start < len(line) and line[entity_start].isspace():
+                entity_start += 1
+
+            entity_end = len(line)
+            while entity_end > entity_start and line[entity_end - 1].isspace():
+                entity_end -= 1
+
+            if entity_end > entity_start:
+                spans.append((offset + entity_start, offset + entity_end))
+
+        offset += len(raw_line)
+
+    return spans
+
+
+def preprocess_prompt_completion_example(example, tokenizer, split_marker):
+    prompt = example["prompt"]
+    completion = example["completion"]
+
+    prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+    completion_encoding = tokenizer(
+        completion,
+        add_special_tokens=False,
+        return_offsets_mapping=True,
     )
+    completion_ids = completion_encoding["input_ids"]
+    completion_offsets = completion_encoding["offset_mapping"]
 
-    labels = [-100] * len(full_input_ids)
+    input_ids = prompt_ids + completion_ids
+    labels = [-100] * len(input_ids)
 
-    # 2) Walk message-by-message and track offsets
-    cursor = 0
-    for msg in messages:
-        msg_ids = tokenize_message(tokenizer, msg["role"], msg["content"])
-        msg_len = len(msg_ids)
+    entity_spans = extract_entity_char_spans(completion, split_marker)
+    prompt_len = len(prompt_ids)
 
-        if msg["role"] == "assistant":
-            labels[cursor : cursor + msg_len] = full_input_ids[
-                cursor : cursor + msg_len
-            ]
+    for token_idx, (start, end) in enumerate(completion_offsets):
+        if end <= start:
+            continue
 
-        cursor += msg_len
+        overlaps_entity = any(
+            not (end <= span_start or start >= span_end)
+            for span_start, span_end in entity_spans
+        )
+        if overlaps_entity:
+            labels[prompt_len + token_idx] = completion_ids[token_idx]
 
-    assert cursor == len(full_input_ids)
+    attention_mask = [1] * len(input_ids)
 
     return {
-        "input_ids": full_input_ids,
+        "input_ids": input_ids,
         "labels": labels,
-        "attention_mask": [1] * len(full_input_ids),
+        "attention_mask": attention_mask,
     }
 
 
@@ -428,18 +430,20 @@ def main(
                 num_train_epochs = 70
             else:
                 num_train_epochs = 20
-    # Format datasets into chat lm format
-    train_dataset = create_chat_lm_dataset(train_dataset, dataset_name)
-    validation_dataset = create_chat_lm_dataset(validation_dataset, dataset_name)
+    split_marker = get_split_marker(dataset_name)
+
+    # Format datasets into prompt/completion format
+    train_dataset = create_prompt_completion_dataset(train_dataset)
+    validation_dataset = create_prompt_completion_dataset(validation_dataset)
 
     train_dataset = train_dataset.map(
-        lambda x: preprocess_chat_example(x, tokenizer),
+        lambda x: preprocess_prompt_completion_example(x, tokenizer, split_marker),
         remove_columns=train_dataset.column_names,
         num_proc=8,
     )
 
     validation_dataset = validation_dataset.map(
-        lambda x: preprocess_chat_example(x, tokenizer),
+        lambda x: preprocess_prompt_completion_example(x, tokenizer, split_marker),
         remove_columns=validation_dataset.column_names,
         num_proc=8,
     )
@@ -447,7 +451,7 @@ def main(
     # Sanity check for tokenization and formatting
     example = train_dataset[0]
     decoded = tokenizer.decode([
-        t if lab != -100 else tokenizer.pad_token_id
+        t if lab != -100 else 0
         for t, lab in zip(example["input_ids"], example["labels"])
     ])
     print(decoded)

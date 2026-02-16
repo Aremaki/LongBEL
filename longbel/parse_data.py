@@ -471,6 +471,7 @@ def parse_text_long(
 
         # Iterate over entities and emit one pair per entity found in this passage
         all_spans = []
+        all_annotations = {}
         for entity in data.get("entities", []):
             global_start = entity["offsets"][0][0]
             # Keep only entities whose start falls inside this passage
@@ -504,55 +505,62 @@ def parse_text_long(
 
                 possible_syns = None
                 annotation = None
-                if selection_method == "title":
-                    if code_to_title is not None:
-                        annotation = code_to_title.get(normalized_id)
-                    else:
-                        logging.warning(
-                            f"Title selection requested but no title mapping available for code {normalized_id} (entity '{entity_text}');"
-                        )
-                        continue
-                # Prefer precomputed best synonyms if provided
-                elif selection_method == "embedding":
-                    if best_syn_map is not None:
-                        pre_key = (normalized_id, entity_text)
-                        if pre_key in best_syn_map:
-                            annotation = best_syn_map[pre_key]
-                    # Otherwise select from possible synonyms
-                    if annotation is None and code_to_syn is not None:
-                        possible_syns = code_to_syn.get(normalized_id)
-                        if possible_syns and encoder is not None:
+                # First try to get annotation from the mapping of all annotations
+                if normalized_id in all_annotations:
+                    annotation = all_annotations[normalized_id]
+                # fallback to selection methods if not already found for this code
+                else:
+                    if selection_method == "title":
+                        if code_to_title is not None:
+                            annotation = code_to_title.get(normalized_id)
+                        else:
                             logging.warning(
-                                f"No precomputed best synonym map provided; Selecting best synonym by embedding for code {normalized_id} (entity '{entity_text}')"
+                                f"Title selection requested but no title mapping available for code {normalized_id} (entity '{entity_text}');"
                             )
-                            best_syn, _ = best_by_cosine(
-                                encoder=encoder,
-                                mention=entity_text,
-                                candidates=list(possible_syns),
-                            )  # type: ignore
+                            continue
+                    # Prefer precomputed best synonyms if provided
+                    elif selection_method == "embedding":
+                        if best_syn_map is not None:
+                            pre_key = (normalized_id, entity_text)
+                            if pre_key in best_syn_map:
+                                annotation = best_syn_map[pre_key]
+                        # Otherwise select from possible synonyms
+                        if annotation is None and code_to_syn is not None:
+                            possible_syns = code_to_syn.get(normalized_id)
+                            if possible_syns and encoder is not None:
+                                logging.warning(
+                                    f"No precomputed best synonym map provided; Selecting best synonym by embedding for code {normalized_id} (entity '{entity_text}')"
+                                )
+                                best_syn, _ = best_by_cosine(
+                                    encoder=encoder,
+                                    mention=entity_text,
+                                    candidates=list(possible_syns),
+                                )  # type: ignore
+                                annotation = best_syn
+                    elif selection_method == "tfidf":
+                        if code_to_syn is not None:
+                            possible_syns = code_to_syn.get(normalized_id)
+                        if possible_syns and tfidf_vectorizer is not None:
+                            best_idx, best_score = cal_similarity_tfidf(
+                                possible_syns, entity_text, tfidf_vectorizer
+                            )
+                            annotation = possible_syns[best_idx]
+                        else:
+                            logging.warning(
+                                f"TF-IDF selection requested but no synonyms or vectorizer available for code {normalized_id} (entity '{entity_text}');"
+                            )
+                            continue
+                    elif selection_method == "levenshtein":
+                        if code_to_syn is not None:
+                            possible_syns = code_to_syn.get(normalized_id)
+                        if possible_syns:
+                            # Default to Levenshtein matching (previous behavior)
+                            text = entity_text
+                            dists = [
+                                nltk.edit_distance(text, syn) for syn in possible_syns
+                            ]
+                            best_syn = possible_syns[int(np.argmin(dists))]
                             annotation = best_syn
-                elif selection_method == "tfidf":
-                    if code_to_syn is not None:
-                        possible_syns = code_to_syn.get(normalized_id)
-                    if possible_syns and tfidf_vectorizer is not None:
-                        best_idx, best_score = cal_similarity_tfidf(
-                            possible_syns, entity_text, tfidf_vectorizer
-                        )
-                        annotation = possible_syns[best_idx]
-                    else:
-                        logging.warning(
-                            f"TF-IDF selection requested but no synonyms or vectorizer available for code {normalized_id} (entity '{entity_text}');"
-                        )
-                        continue
-                elif selection_method == "levenshtein":
-                    if code_to_syn is not None:
-                        possible_syns = code_to_syn.get(normalized_id)
-                    if possible_syns:
-                        # Default to Levenshtein matching (previous behavior)
-                        text = entity_text
-                        dists = [nltk.edit_distance(text, syn) for syn in possible_syns]
-                        best_syn = possible_syns[int(np.argmin(dists))]
-                        annotation = best_syn
                 if annotation is None:
                     # If no synonyms mapping, skip entity
                     logging.warning(
@@ -562,6 +570,8 @@ def parse_text_long(
 
                 if isinstance(annotation, str):
                     annotations.append(clean_natural(annotation))
+                    if normalized_id not in all_annotations:
+                        all_annotations[normalized_id] = clean_natural(annotation)
 
                 # Define entity group
                 entity_type = entity.get("type")
