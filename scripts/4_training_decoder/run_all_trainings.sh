@@ -6,7 +6,7 @@ MODELS=("Llama-3.1-8B-Instruct", "Llama-3.2-1B-Instruct")
 DATASETS=("MedMentions")
 SELECTION_METHODS=("tfidf")
 AUGMENTED_OPTIONS=("human_only")
-LONG_FORMAT=("true" "false")
+LONG_FORMAT=("true")
 
 for dataset in "${DATASETS[@]}"; do
     for selection in "${SELECTION_METHODS[@]}"; do
@@ -24,7 +24,7 @@ for dataset in "${DATASETS[@]}"; do
                     # Submit job
                     echo "Submitting training job (missing): ${MODEL_DIR}"
                     echo "  ARGS=${ARGS}"
-                    sbatch --export=ALL,SCRIPT_ARGS="${ARGS}" -A ssq@h100 scripts/4b_training_decoder/run.slurm
+                    sbatch --export=ALL,SCRIPT_ARGS="${ARGS}" -A ssq@h100 scripts/4_training_decoder/run.slurm
                     sleep 1
                 done
             done
