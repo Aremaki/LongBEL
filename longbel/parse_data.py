@@ -389,26 +389,14 @@ def parse_text(
             # Sort spans in reverse to mark from the end, preventing offset shifts
             all_spans_in_sent.sort(key=lambda x: x[0], reverse=True)
 
-            for i, (start_in_sent, end_in_sent) in enumerate(all_spans_in_sent):
-                if i == 0:
-                    marked_sent_text = (
-                        marked_sent_text[:start_in_sent]
-                        + start_entity
-                        + marked_sent_text[start_in_sent:end_in_sent]
-                        + end_entity
-                        + start_group
-                        + group_annotation
-                        + end_group
-                        + marked_sent_text[end_in_sent:]
-                    )
-                else:
-                    marked_sent_text = (
-                        marked_sent_text[:start_in_sent]
-                        + start_entity
-                        + marked_sent_text[start_in_sent:end_in_sent]
-                        + end_entity
-                        + marked_sent_text[end_in_sent:]
-                    )
+            for start_in_sent, end_in_sent in all_spans_in_sent:
+                marked_sent_text = (
+                    marked_sent_text[:start_in_sent]
+                    + start_entity
+                    + marked_sent_text[start_in_sent:end_in_sent]
+                    + end_entity
+                    + marked_sent_text[end_in_sent:]
+                )
 
             # Emit the pair
             doc_id = data.get("document_id", "")
@@ -427,7 +415,17 @@ def parse_text(
             entity_id += 1
             tsv_lines.append(tsv_line)
             source_sentences.append(marked_sent_text)
-            target_sentences.append(f"[{entity_text}] {transition_verb} {annotation}")
+            target_entity_text = (
+                start_entity
+                + entity_text
+                + end_entity
+                + start_group
+                + group_annotation
+                + end_group
+            )
+            target_sentences.append(
+                f"{target_entity_text} {transition_verb} {annotation}"
+            )
 
     return source_sentences, target_sentences, tsv_lines
 
@@ -462,6 +460,7 @@ def parse_text_long(
     tsv_lines_dict: dict[tuple[tuple[int, int], ...], dict[str, str]] = {}
     tsv_lines: list[dict[str, str]] = []
     source_text: str = ""
+    all_annotations = {}
     for passage in data.get("passages", []):
         passage_text = passage["text"][0]
         start_offset_passage = passage["offsets"][0][0]
@@ -471,7 +470,6 @@ def parse_text_long(
 
         # Iterate over entities and emit one pair per entity found in this passage
         all_spans = []
-        all_annotations = {}
         for entity in data.get("entities", []):
             global_start = entity["offsets"][0][0]
             # Keep only entities whose start falls inside this passage

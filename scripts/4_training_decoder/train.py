@@ -265,7 +265,7 @@ def main(
         max_length = tokenizer.model_max_length
 
     # Sanity check for very large values (common in some HF tokenizers)
-    if max_length is None or max_length > 100_000:
+    if max_length is None:
         max_length = 2048
         print(
             f"⚠️ Could not determine valid model max length. Defaulting to {max_length}."
