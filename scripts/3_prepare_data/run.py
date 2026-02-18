@@ -193,12 +193,14 @@ def _process_hf_dataset(
         )
         processed[split_name] = (src, tgt, tsv_data)
         if long_format:
+            processed_data_folder = data_folder / "processed_data"
+            _ensure_dir(processed_data_folder)
             # Convert HF dataset to Arrow Table
             pq.write_table(
                 pa.Table.from_pydict(
                     bigbio_split[:]  # type: ignore
                 ),  # Convert to list of dicts for Arrow
-                data_folder / f"processed_data/{split_name}-00000-of-00001.parquet",
+                processed_data_folder / f"{split_name}-00000-of-00001.parquet",
             )
 
     # Write outputs
