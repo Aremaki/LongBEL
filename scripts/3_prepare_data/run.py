@@ -12,8 +12,6 @@ from pathlib import Path
 from typing import Optional, cast
 
 import polars as pl
-import pyarrow as pa
-import pyarrow.parquet as pq
 import typer
 from datasets import load_dataset
 
@@ -129,11 +127,11 @@ def _process_hf_dataset(
     out_root: Path,
     selection_method: str,
     corrected_code_path: Optional[Path] = None,
-    hf_config: Optional[str] = None,
+    data_dir: Optional[str] = None,
     long_format: bool = False,
 ):
-    typer.echo(f"→ Loading dataset {hf_id}:{hf_config} ...")
-    ds = load_dataset(hf_id, name=hf_config, trust_remote_code=True)
+    typer.echo(f"→ Loading dataset {hf_id}:{data_dir} ...")
+    ds = load_dataset(hf_id, data_dir=data_dir)
     data_folder = out_root / name
     _ensure_dir(data_folder)
 
@@ -195,12 +193,9 @@ def _process_hf_dataset(
         if long_format:
             processed_data_folder = data_folder / "bigbio_dataset/processed_data"
             _ensure_dir(processed_data_folder)
-            # Convert HF dataset to Arrow Table
-            pq.write_table(
-                pa.Table.from_pydict(
-                    bigbio_split[:]  # type: ignore
-                ),  # Convert to list of dicts for Arrow
-                processed_data_folder / f"{split_name}-00000-of-00001.parquet",
+            # Convert HF dataset to Parquet
+            bigbio_split.to_parquet(  # type: ignore
+                processed_data_folder / f"{split_name}-00000-of-00001.parquet"
             )
 
     # Write outputs
@@ -412,7 +407,7 @@ def run(
             end_group,
             out_root,
             selection_method,
-            hf_config="original",
+            data_dir="original",
             long_format=long_format,
         )
         # Synthetic MM as its own dataset
@@ -459,7 +454,7 @@ def run(
                     out_root,
                     selection_method,
                     corrected_code_path=corrected_code_quaero_path,
-                    hf_config="original",
+                    data_dir="original",
                     long_format=long_format,
                 )
 
@@ -481,7 +476,7 @@ def run(
                     out_root,
                     selection_method,
                     corrected_code_path=corrected_code_quaero_path,
-                    hf_config="original",
+                    data_dir="original",
                     long_format=long_format,
                 )
             if synth_quaero is not None:
@@ -529,7 +524,7 @@ def run(
             out_root,
             selection_method,
             corrected_code_path=corrected_code_spaccc_path,
-            hf_config="original",
+            data_dir="original",
             long_format=long_format,
         )
 
