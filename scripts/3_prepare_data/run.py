@@ -195,7 +195,9 @@ def _process_hf_dataset(
         if long_format:
             # Convert HF dataset to Arrow Table
             pq.write_table(
-                pa.Table.from_pydict(bigbio_split),
+                pa.Table.from_pydict(
+                    bigbio_split[:]  # type: ignore
+                ),  # Convert to list of dicts for Arrow
                 data_folder / f"processed_data/{split_name}-00000-of-00001.parquet",
             )
 
