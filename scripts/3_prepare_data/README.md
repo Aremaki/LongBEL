@@ -20,14 +20,24 @@ For each entity mention, the script creates:
 Process the default datasets (MedMentions, EMEA, MEDLINE) using embedding-based synonym selection.
 
 ```bash
-python scripts/3a_prepare_data_seq2seq/run.py
+python scripts/3_prepare_data/run.py
 ```
+
+Then upload them to the HuggingFace Repository:
+```bash
+huggingface-cli login
+huggingface-cli upload Aremaki/MedMentions data/final_data/MedMentions/bigbio_dataset --repo-type dataset
+huggingface-cli upload Aremaki/SPACCC data/final_data/SPACCC/bigbio_dataset --repo-type dataset
+huggingface-cli upload Aremaki/EMEA data/final_data/EMEA/bigbio_dataset --repo-type dataset
+huggingface-cli upload Aremaki/MEDLINE data/final_data/MEDLINE/bigbio_dataset --repo-type dataset
+```
+
 
 ### 2. Custom Selection & Datasets
 Process specific datasets and use a different method for synonym selection (e.g., Levenshtein distance).
 
 ```bash
-python scripts/3a_prepare_data_seq2seq/run.py \
+python scripts/3_prepare_data/run.py \
   --datasets MedMentions EMEA \
   --selection-method levenshtein
 ```
@@ -36,11 +46,10 @@ python scripts/3a_prepare_data_seq2seq/run.py \
 If you have generated synthetic data in step 2, ensure the paths are correct. The script defaults to looking in `data/synthetic_data/`.
 
 ```bash
-python scripts/3a_prepare_data_seq2seq/run.py \
+python scripts/3_prepare_data/run.py \
   --datasets MedMentions \
   --synth-mm-path data/synthetic_data/SynthMM/SynthMM_bigbio_def.json
 ```
-
 ---
 
 ## Key Arguments

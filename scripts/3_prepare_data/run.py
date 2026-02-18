@@ -193,7 +193,7 @@ def _process_hf_dataset(
         )
         processed[split_name] = (src, tgt, tsv_data)
         if long_format:
-            processed_data_folder = data_folder / "processed_data"
+            processed_data_folder = data_folder / "bigbio_dataset/processed_data"
             _ensure_dir(processed_data_folder)
             # Convert HF dataset to Arrow Table
             pq.write_table(
