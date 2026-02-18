@@ -610,7 +610,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--selection-method",
         type=str,
-        default="embedding",
+        default="tfidf",
         choices=["embedding", "tfidf", "levenshtein", "title"],
         help="The method to select concept synonyms",
     )
