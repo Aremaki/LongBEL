@@ -13,7 +13,7 @@ from typing import Optional, cast
 
 import polars as pl
 import typer
-from datasets import DownloadConfig, load_dataset
+from datasets import load_dataset
 
 from longbel.parse_data import compute_best_synonym_df, process_bigbio_dataset
 
@@ -135,9 +135,7 @@ def _process_hf_dataset(
     data_folder = out_root / name
     _ensure_dir(data_folder)
     try:
-        ds = load_dataset(
-            hf_id, data_dir=data_dir, download_config=DownloadConfig(max_retries=1)
-        )
+        ds = load_dataset(hf_id, data_dir=data_dir)
     except Exception as e:
         typer.echo(
             f"No internet connection or error loading dataset {hf_id}:{data_dir}: {e}"
@@ -225,6 +223,13 @@ def _process_hf_dataset(
             / f"{split_name}_{selection_method}_annotations{'_long' if long_format else ''}.tsv",
             separator="\t",
             include_header=True,
+        )
+        # Save training data
+        training_data_folder = data_folder / "bigbio_dataset/training_data"
+        _ensure_dir(training_data_folder)
+        pl.DataFrame({"prompt": src, "completion": tgt}).write_parquet(
+            training_data_folder
+            / f"{split_name}_{selection_method}{'_long' if long_format else ''}.parquet"
         )
 
 
