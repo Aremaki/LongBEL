@@ -725,7 +725,6 @@ def process_bigbio_dataset(
     tsv_data = []
     raw_data = {}
     db_name = None
-    processed_bigbio_dataset = None
     if selection_method == "embedding" and encoder_name and best_syn_map is None:
         encoder = TextEncoder(model_name=encoder_name)
         print(f"Using embedding-based selection with encoder '{encoder_name}'.")
@@ -794,9 +793,13 @@ def process_bigbio_dataset(
             if not db_name:
                 db_name = page_db_name
             tsv_data.extend(tsv_lines)
-            processed_bigbio_dataset = convert_tsv_as_bigbio(
-                tsv_data=tsv_data, raw_data=raw_data, db_name=db_name
-            )
+
+    if long_format:
+        processed_bigbio_dataset = convert_tsv_as_bigbio(
+            tsv_data=tsv_data, raw_data=raw_data, db_name=db_name
+        )
+    else:
+        processed_bigbio_dataset = None
 
     return source_data, target_data, tsv_data, processed_bigbio_dataset
 
