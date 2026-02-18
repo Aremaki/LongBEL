@@ -131,9 +131,17 @@ def _process_hf_dataset(
     long_format: bool = False,
 ):
     typer.echo(f"→ Loading dataset {hf_id}:{data_dir} ...")
-    ds = load_dataset(hf_id, data_dir=data_dir)
+
     data_folder = out_root / name
     _ensure_dir(data_folder)
+    try:
+        ds = load_dataset(hf_id, data_dir=data_dir)
+    except Exception as e:
+        typer.echo(
+            f"No internet connection or error loading dataset {hf_id}:{data_dir}: {e}"
+        )
+        typer.echo("  • Attempting to load from local cache...")
+        ds = load_dataset(str(data_folder / "bigbio_dataset"), data_dir=data_dir)
 
     # Precompute best synonyms on this dataset's splits only, cache per dataset
     def _iter_pages_all():
