@@ -398,7 +398,7 @@ def run(
         )
         _process_hf_dataset(
             "MedMentions",
-            "bigbio/medmentions",
+            "Aremaki/MedMentions",
             lang,
             code_to_title_mm,
             code_to_syn_mm,
@@ -412,7 +412,7 @@ def run(
             end_group,
             out_root,
             selection_method,
-            hf_config="medmentions_st21pv_bigbio_kb",
+            hf_config="original",
             long_format=long_format,
         )
         # Synthetic MM as its own dataset
@@ -444,7 +444,7 @@ def run(
             if "EMEA" in datasets:
                 _process_hf_dataset(
                     "EMEA",
-                    "bigbio/quaero",
+                    "Aremaki/EMEA",
                     lang,
                     code_to_title_quaero,
                     code_to_syn_quaero,
@@ -459,14 +459,14 @@ def run(
                     out_root,
                     selection_method,
                     corrected_code_path=corrected_code_quaero_path,
-                    hf_config="quaero_emea_bigbio_kb",
+                    hf_config="original",
                     long_format=long_format,
                 )
 
             if "MEDLINE" in datasets:
                 _process_hf_dataset(
                     "MEDLINE",
-                    "bigbio/quaero",
+                    "Aremaki/MEDLINE",
                     lang,
                     code_to_title_quaero,
                     code_to_syn_quaero,
@@ -481,7 +481,7 @@ def run(
                     out_root,
                     selection_method,
                     corrected_code_path=corrected_code_quaero_path,
-                    hf_config="quaero_medline_bigbio_kb",
+                    hf_config="original",
                     long_format=long_format,
                 )
             if synth_quaero is not None:
@@ -529,7 +529,7 @@ def run(
             out_root,
             selection_method,
             corrected_code_path=corrected_code_spaccc_path,
-            hf_config=None,
+            hf_config="original",
             long_format=long_format,
         )
 
