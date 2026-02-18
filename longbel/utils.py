@@ -6,6 +6,7 @@
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 import polars as pl
 from datasets import Dataset
@@ -131,4 +132,82 @@ def load_tsv_as_bigbio(annotation_file: Path, raw_files_folder: Path) -> Dataset
 
     # Convert to Hugging Face Dataset
     logging.info(f"Loaded {len(pages)} pages from {annotation_file}")
+    return Dataset.from_list(pages)
+
+
+def convert_tsv_as_bigbio(
+    tsv_data: list[dict],
+    raw_data: dict[str, list[tuple[str, str]]],
+    db_name: Optional[str] = "SNOMED_CT",
+) -> Dataset:
+    """
+    Load a SPACCC TSV annotation file and corresponding raw text files, and format them as a Hugging Face Dataset in BigBio format.
+
+    The `annotation_file` should be a TSV file with columns: doc_id, entity_type, start_span, end_span, entity_text, snomed_code, label.
+    The `raw_files_folder` should be a directory containing raw text files named as <doc_id>.txt for each document referenced in the TSV.
+    Each passage will include the full raw text and annotated entities with their offsets.
+    """
+    annotations_df = pl.DataFrame(tsv_data)
+    expected_cols = [
+        "doc_id",
+        "entity_type",
+        "start_span",
+        "end_span",
+        "entity_text",
+        "code",
+        "semantic_type",
+    ]
+
+    # If fewer than expected columns exist, add missing ones as null columns
+    for col in expected_cols[len(annotations_df.columns) :]:
+        annotations_df = annotations_df.with_columns(pl.lit(None).alias(col))
+
+    # Rename all columns to expected names
+    annotations_df = annotations_df.rename(
+        dict(zip(annotations_df.columns, expected_cols))
+    )
+    pages = []
+    id = 0
+    for doc_id, group in annotations_df.group_by("doc_id", maintain_order=True):
+        page = {
+            "id": doc_id[0],
+            "document_id": doc_id[0],
+        }
+
+        entities = []
+        for i, record in enumerate(group.to_dicts()):
+            entity = {
+                "id": f"{doc_id[0]}_T{i}",
+                "text": [record["entity_text"]],
+                "offsets": [[int(record["start_span"]), int(record["end_span"])]],
+                "type": record["entity_type"],
+                "normalized": [{"db_name": db_name, "db_id": record["code"]}],
+            }
+            entities.append(entity)
+        page["entities"] = entities
+        page["passages"] = []
+        offset = 0
+        for i, (passage, passage_type) in enumerate(raw_data[doc_id[0]]):
+            page["passages"].append({
+                "id": f"{doc_id[0]}_passage_{i}",
+                "type": passage_type,
+                "text": [passage],
+                "offsets": [[offset, offset + len(passage)]],
+            })
+            offset += len(passage)
+        pages.append(page)
+        id += 1
+
+    if not pages:
+        return Dataset.from_list([
+            {
+                "id": None,
+                "document_id": None,
+                "passages": [],
+                "entities": [],
+            }
+        ])
+
+    # Convert to Hugging Face Dataset
+    logging.info(f"Loaded {len(pages)} pages")
     return Dataset.from_list(pages)

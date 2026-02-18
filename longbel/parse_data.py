@@ -12,6 +12,7 @@ import polars as pl
 from tqdm import tqdm
 
 from longbel.embeddings import TextEncoder, best_by_cosine
+from longbel.utils import convert_tsv_as_bigbio
 
 
 def _process_chunk(chunk, offset, text, sent_spans, nlp, entity_spans=None):
@@ -447,7 +448,7 @@ def parse_text_long(
     encoder: Optional[TextEncoder] = None,
     tfidf_vectorizer=None,
     best_syn_map: Optional[dict[tuple[str, str], str]] = None,
-) -> tuple[str, str, list[dict[str, str]]]:
+) -> tuple[str, str, list[dict[str, str]], list[str], Optional[str]]:
     """Create simple (source, target) pairs per entity.
 
     For each entity in the BigBio page, returns one pair where:
@@ -460,13 +461,16 @@ def parse_text_long(
     tsv_lines_dict: dict[tuple[tuple[int, int], ...], dict[str, str]] = {}
     tsv_lines: list[dict[str, str]] = []
     source_text: str = ""
+    passages = []
     all_annotations = {}
+    db_name = None
     for passage in data.get("passages", []):
         passage_text = passage["text"][0]
         start_offset_passage = passage["offsets"][0][0]
         end_offset_passage = passage["offsets"][0][1]
 
         passage_text = clean_natural(passage_text)
+        passages.append((passage_text, passage.get("type")))
 
         # Iterate over entities and emit one pair per entity found in this passage
         all_spans = []
@@ -485,6 +489,8 @@ def parse_text_long(
                 continue
 
             normalized_ids = entity["normalized"][0]["db_id"]
+            if not db_name:
+                db_name = entity["normalized"][0].get("db_name")
             if not normalized_ids:
                 logging.warning(
                     f"Entity '{entity_text}' has empty code; skipping entity."
@@ -620,16 +626,17 @@ def parse_text_long(
                 rel_end_off = global_end_off - start_offset_passage
                 entity_spans.append((rel_start_off, rel_end_off))
             entity_spans.sort(key=lambda x: x[0])
-            entity_span_key = tuple(entity_spans)
-            all_spans.append(entity_spans)
+            final_spans = [entity_spans[0][0], entity_spans[-1][1]]
+            entity_span_key = tuple(final_spans)
+            all_spans.append(final_spans)
 
             # Emit the pair
             doc_id = data.get("document_id", "")
             tsv_line = {
                 "filename": doc_id,
                 "label": group_annotation,
-                "start_span": entity["offsets"][0][0],
-                "end_span": entity["offsets"][-1][1],
+                "start_span": final_spans[0],
+                "end_span": final_spans[1],
                 "span": entity_text,
                 "code": "+".join(normalized_ids),
                 "semantic_rel": "EXACT" if len(normalized_ids) == 1 else "COMPOSITE",
@@ -666,7 +673,7 @@ def parse_text_long(
             source_text += "\n\n"
         source_text += passage_text
 
-    return source_text, target_text, tsv_lines
+    return source_text, target_text, tsv_lines, passages, db_name
 
 
 def process_bigbio_dataset(
@@ -719,6 +726,9 @@ def process_bigbio_dataset(
     target_data = []
     source_data = []
     tsv_data = []
+    raw_data = {}
+    db_name = None
+    processed_bigbio_dataset = None
     if selection_method == "embedding" and encoder_name and best_syn_map is None:
         encoder = TextEncoder(model_name=encoder_name)
         print(f"Using embedding-based selection with encoder '{encoder_name}'.")
@@ -759,32 +769,39 @@ def process_bigbio_dataset(
             )
             target_data.extend(target_texts)
             source_data.extend(source_texts)
+            tsv_data.extend(tsv_lines)
         else:
-            source_text, target_text, tsv_lines = parse_text_long(
-                page,
-                start_entity,
-                end_entity,
-                start_group,
-                end_group,
-                code_to_title,
-                code_to_syn,
-                code_to_group,
-                cat_to_group,
-                sem_to_group,
-                transition_verb,
-                corrected_code,
-                selection_method,
-                encoder,
-                tfidf_vectorizer,
-                best_syn_map,
+            source_text, target_text, tsv_lines, passages, page_db_name = (
+                parse_text_long(
+                    page,
+                    start_entity,
+                    end_entity,
+                    start_group,
+                    end_group,
+                    code_to_title,
+                    code_to_syn,
+                    code_to_group,
+                    cat_to_group,
+                    sem_to_group,
+                    transition_verb,
+                    corrected_code,
+                    selection_method,
+                    encoder,
+                    tfidf_vectorizer,
+                    best_syn_map,
+                )
             )
             target_data.append(target_text)
             source_data.append(source_text)
+            raw_data[page["document_id"]] = passages
+            if not db_name:
+                db_name = page_db_name
+            tsv_data.extend(tsv_lines)
+            processed_bigbio_dataset = convert_tsv_as_bigbio(
+                tsv_data=tsv_data, raw_data=raw_data, db_name=db_name
+            )
 
-        # Each entity yields one pair; extend the global lists accordingly.
-        tsv_data.extend(tsv_lines)
-
-    return source_data, target_data, tsv_data
+    return source_data, target_data, tsv_data, processed_bigbio_dataset
 
 
 def compute_best_synonym_df(

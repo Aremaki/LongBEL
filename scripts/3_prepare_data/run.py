@@ -13,7 +13,7 @@ from typing import Optional, cast
 
 import polars as pl
 import typer
-from datasets import load_dataset
+from datasets import DatasetDict, load_dataset
 
 from longbel.parse_data import compute_best_synonym_df, process_bigbio_dataset
 
@@ -168,10 +168,11 @@ def _process_hf_dataset(
     if "test" in ds:
         splits["test"] = ds["test"]  # type: ignore
     processed = {}
+    bigbio_datasets = DatasetDict()
     for split_name, split_data in splits.items():
         if not split_data:
             continue
-        src, tgt, tsv_data = process_bigbio_dataset(
+        src, tgt, tsv_data, bigbio_split = process_bigbio_dataset(
             split_data,
             start_entity,
             end_entity,
@@ -190,6 +191,7 @@ def _process_hf_dataset(
             long_format=long_format,
         )
         processed[split_name] = (src, tgt, tsv_data)
+        bigbio_datasets[split_name] = bigbio_split
 
     # Write outputs
     for split_name, (src, tgt, tsv_data) in processed.items():
@@ -209,6 +211,8 @@ def _process_hf_dataset(
             separator="\t",
             include_header=True,
         )
+    if long_format:
+        bigbio_datasets.save_to_disk(data_folder / "bigbio_full_dataset")
 
 
 def _process_synth_dataset(
@@ -246,7 +250,7 @@ def _process_synth_dataset(
         )
 
     typer.echo(f"  • Processing synthetic dataset {name} ...")
-    src, tgt, _ = process_bigbio_dataset(
+    src, tgt, _, _ = process_bigbio_dataset(
         synth_pages,
         start_entity,
         end_entity,
