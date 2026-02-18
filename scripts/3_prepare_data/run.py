@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import Optional, cast
 
 import polars as pl
+import pyarrow as pa
+import pyarrow.parquet as pq
 import typer
-from datasets import DatasetDict, load_dataset
+from datasets import load_dataset
 
 from longbel.parse_data import compute_best_synonym_df, process_bigbio_dataset
 
@@ -168,7 +170,6 @@ def _process_hf_dataset(
     if "test" in ds:
         splits["test"] = ds["test"]  # type: ignore
     processed = {}
-    bigbio_datasets = DatasetDict()
     for split_name, split_data in splits.items():
         if not split_data:
             continue
@@ -191,7 +192,12 @@ def _process_hf_dataset(
             long_format=long_format,
         )
         processed[split_name] = (src, tgt, tsv_data)
-        bigbio_datasets[split_name] = bigbio_split
+        if long_format:
+            # Convert HF dataset to Arrow Table
+            pq.write_table(
+                pa.Table.from_pydict(bigbio_split),
+                data_folder / f"processed_data/{split_name}-00000-of-00001.parquet",
+            )
 
     # Write outputs
     for split_name, (src, tgt, tsv_data) in processed.items():
@@ -211,8 +217,6 @@ def _process_hf_dataset(
             separator="\t",
             include_header=True,
         )
-    if long_format:
-        bigbio_datasets.save_to_disk(data_folder / "bigbio_full_dataset")
 
 
 def _process_synth_dataset(
