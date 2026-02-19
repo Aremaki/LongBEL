@@ -620,6 +620,10 @@ def parse_text_long(
             entity_spans = []
             for off in entity["offsets"]:
                 global_start_off, global_end_off = off
+                if global_start_off < global_start:
+                    global_start = global_start_off
+                if global_end_off > global_end:
+                    global_end = global_end_off
                 if not (start_offset_passage <= global_start_off < end_offset_passage):
                     continue
 
