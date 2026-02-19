@@ -655,13 +655,6 @@ def parse_text_long(
                 f"{target_entity_text} {transition_verb} {annotation}\n"
             )
 
-        # Sort keys to have a deterministic order
-        sorted_keys = sorted(target_texts_dict.keys(), key=lambda x: (x[0], x[1]))
-        for entity_id, entity_span in enumerate(sorted_keys):
-            target_text += target_texts_dict[entity_span]
-            tsv_line = tsv_lines_dict[entity_span]
-            tsv_line["mention_id"] = f"{data.get('document_id', '')}.{entity_id + 1}"
-            tsv_lines.append(tsv_line)
         # Insert all entity markers in a single pass to avoid offset shifts
         passage_text = _insert_entity_markers(
             passage_text, all_spans, start_entity=start_entity, end_entity=end_entity
@@ -669,6 +662,13 @@ def parse_text_long(
         if source_text:
             source_text += "\n\n"
         source_text += passage_text
+    # Sort keys to have a deterministic order
+    sorted_keys = sorted(target_texts_dict.keys(), key=lambda x: (x[0], x[1]))
+    for entity_id, entity_span in enumerate(sorted_keys):
+        target_text += target_texts_dict[entity_span]
+        tsv_line = tsv_lines_dict[entity_span]
+        tsv_line["mention_id"] = f"{data.get('document_id', '')}.{entity_id + 1}"
+        tsv_lines.append(tsv_line)
 
     return source_text, target_text, tsv_lines, passages, db_name
 
