@@ -476,6 +476,7 @@ def parse_text_long(
         all_spans = []
         for entity in data.get("entities", []):
             global_start = entity["offsets"][0][0]
+            global_end = entity["offsets"][-1][1]
             # Keep only entities whose start falls inside this passage
             if not (start_offset_passage <= global_start < end_offset_passage):
                 continue
@@ -635,8 +636,8 @@ def parse_text_long(
             tsv_line = {
                 "filename": doc_id,
                 "label": group_annotation,
-                "start_span": final_spans[0],
-                "end_span": final_spans[1],
+                "start_span": global_start,
+                "end_span": global_end,
                 "span": entity_text,
                 "code": "+".join(normalized_ids),
                 "semantic_rel": "EXACT" if len(normalized_ids) == 1 else "COMPOSITE",
