@@ -194,7 +194,7 @@ def convert_tsv_as_bigbio(
                 "text": [passage],
                 "offsets": [[offset, offset + len(passage)]],
             })
-            offset += len(passage)
+            offset += len(passage) + 1
         pages.append(page)
         id += 1
 

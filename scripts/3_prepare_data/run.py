@@ -203,7 +203,7 @@ def _process_hf_dataset(
             _ensure_dir(processed_data_folder)
             # Convert HF dataset to Parquet
             bigbio_split.to_parquet(  # type: ignore
-                processed_data_folder / f"{split_name}-00000-of-00001.parquet"
+                processed_data_folder / f"{split_name}.parquet"
             )
 
     # Write outputs
