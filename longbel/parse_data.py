@@ -228,7 +228,9 @@ def parse_text(
 
         # Iterate over entities and emit one pair per entity found in this passage
         for entity in data.get("entities", []):
-            global_start = entity["offsets"][0][0]
+            # min and max of all entity offsets to get the global span of the entity for filtering sentences
+            global_start = min(off[0] for off in entity["offsets"])
+            global_end = max(off[1] for off in entity["offsets"])
             # Keep only entities whose start falls inside this passage
             if not (start_offset_passage <= global_start < end_offset_passage):
                 continue
@@ -405,8 +407,8 @@ def parse_text(
                 "filename": doc_id,
                 "mention_id": f"{doc_id}.{entity_id}",
                 "label": group_annotation,
-                "start_span": entity["offsets"][0][0],
-                "end_span": entity["offsets"][-1][1],
+                "start_span": global_start,
+                "end_span": global_end,
                 "span": entity_text,
                 "code": "+".join(normalized_ids),
                 "semantic_rel": "EXACT" if len(normalized_ids) == 1 else "COMPOSITE",
@@ -475,8 +477,9 @@ def parse_text_long(
         # Iterate over entities and emit one pair per entity found in this passage
         all_spans = []
         for entity in data.get("entities", []):
-            global_start = entity["offsets"][0][0]
-            global_end = entity["offsets"][-1][1]
+            # min and max of all entity offsets to get the global span of the entity for filtering sentences
+            global_start = min(off[0] for off in entity["offsets"])
+            global_end = max(off[1] for off in entity["offsets"])
             # Keep only entities whose start falls inside this passage
             if not (start_offset_passage <= global_start < end_offset_passage):
                 continue
@@ -620,10 +623,6 @@ def parse_text_long(
             entity_spans = []
             for off in entity["offsets"]:
                 global_start_off, global_end_off = off
-                if global_start_off < global_start:
-                    global_start = global_start_off
-                if global_end_off > global_end:
-                    global_end = global_end_off
                 if not (start_offset_passage <= global_start_off < end_offset_passage):
                     continue
 
