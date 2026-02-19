@@ -663,9 +663,10 @@ def parse_text_long(
         passage_text = _insert_entity_markers(
             passage_text, all_spans, start_entity=start_entity, end_entity=end_entity
         )
-        if source_text:
-            source_text += "\n\n"
+        if passage_text.endswith("\n"):
+            passage_text = passage_text.rstrip("\n") + "\n"
         source_text += passage_text
+    source_text += "\n"
     # Sort keys to have a deterministic order
     sorted_keys = sorted(target_texts_dict.keys(), key=lambda x: (x[0], x[1]))
     for entity_id, entity_span in enumerate(sorted_keys):
