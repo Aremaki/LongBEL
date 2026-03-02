@@ -196,9 +196,9 @@ def parse_text(
     source_sentences: list[str] = []
     target_sentences: list[str] = []
     tsv_lines: list[dict[str, str]] = []
-
-    # Build a fast lookup of sentence spans per passage
-    entity_id = 1
+    target_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
+    source_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
+    tsv_lines_dict: dict[tuple[tuple[int, int], ...], dict[str, str]] = {}
     for passage in data.get("passages", []):
         passage_text = passage["text"][0]
         start_offset_passage = passage["offsets"][0][0]
@@ -399,13 +399,13 @@ def parse_text(
                     + marked_sent_text[start_in_sent:end_in_sent]
                     + end_entity
                     + marked_sent_text[end_in_sent:]
+                    + "\n\n"
                 )
 
             # Emit the pair
             doc_id = data.get("document_id", "")
             tsv_line = {
                 "filename": doc_id,
-                "mention_id": f"{doc_id}.{entity_id}",
                 "label": group_annotation,
                 "start_span": global_start,
                 "end_span": global_end,
@@ -415,9 +415,8 @@ def parse_text(
                 "annotation": annotation,
                 "sentence": marked_sent_text,
             }
-            entity_id += 1
-            tsv_lines.append(tsv_line)
-            source_sentences.append(marked_sent_text)
+            tsv_lines_dict[(global_start, global_end)] = tsv_line
+            source_texts_dict[(global_start, global_end)] = marked_sent_text
             target_entity_text = (
                 start_entity
                 + entity_text
@@ -426,10 +425,17 @@ def parse_text(
                 + group_annotation
                 + end_group
             )
-            target_sentences.append(
-                f"{target_entity_text} {transition_verb} {annotation}"
+            target_texts_dict[(global_start, global_end)] = (
+                f"{target_entity_text} {transition_verb} {annotation}\n"
             )
-
+    # Sort keys to have a deterministic order
+    sorted_keys = sorted(tsv_lines_dict.keys(), key=lambda x: (x[0], x[1]))
+    for entity_id, entity_span in enumerate(sorted_keys):
+        tsv_line = tsv_lines_dict[entity_span]
+        source_sentences.append(source_texts_dict[entity_span])
+        target_sentences.append(target_texts_dict[entity_span])
+        tsv_line["mention_id"] = f"{data.get('document_id', '')}.{entity_id + 1}"
+        tsv_lines.append(tsv_line)
     return source_sentences, target_sentences, tsv_lines
 
 

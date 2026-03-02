@@ -208,6 +208,10 @@ def main(
     augmented_data: str,
     selection_method: str = "tfidf",
     long_format: bool = False,
+    start_entity_token: str = "[",
+    end_entity_token: str = "]",
+    start_group_token: str = "{",
+    end_group_token: str = "}",
 ):
     # init distributed (if needed)
     if idr_torch.rank == 0:
@@ -267,7 +271,15 @@ def main(
         model.resize_token_embeddings(len(tokenizer))
     # Add SEP special token and resize embeddings if needed
     sep_token_str = "<SEP>"
-    num_added = tokenizer.add_special_tokens({"sep_token": sep_token_str})
+    num_added = tokenizer.add_special_tokens({
+        "sep_token": sep_token_str,
+        "additional_special_tokens": [
+            start_entity_token,
+            end_entity_token,
+            start_group_token,
+            end_group_token,
+        ],
+    })
     if num_added > 0:
         model.resize_token_embeddings(len(tokenizer))
         print("Added <SEP> and resized embeddings.")
@@ -619,6 +631,30 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to use long format for training examples",
     )
+    parser.add_argument(
+        "--start-entity-token",
+        type=str,
+        default="[",
+        help="The token marking the start of the entity",
+    )
+    parser.add_argument(
+        "--end-entity-token",
+        type=str,
+        default="]",
+        help="The token marking the end of the entity",
+    )
+    parser.add_argument(
+        "--start-group-token",
+        type=str,
+        default="{",
+        help="The token marking the start of the entity group",
+    )
+    parser.add_argument(
+        "--end-group-token",
+        type=str,
+        default="}",
+        help="The token marking the end of the entity group",
+    )
     args = parser.parse_args()
 
     main(
@@ -628,4 +664,8 @@ if __name__ == "__main__":
         augmented_data=args.augmented_data,
         selection_method=args.selection_method,
         long_format=args.long_format,
+        start_entity_token=args.start_entity_token,
+        end_entity_token=args.end_entity_token,
+        start_group_token=args.start_group_token,
+        end_group_token=args.end_group_token,
     )
