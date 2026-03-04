@@ -5,10 +5,10 @@ BASE_OUTPUT_DIR="results/inference_outputs"
 DATASETS=("SPACCC" "MedMentions" "EMEA" "MEDLINE")
 SELECTION_METHODS=("tfidf")
 SPLIT_NAMES=("test")
-AUGMENTED_OPTIONS=("human_only" "full" "full_upsampled")
-LONG_FORMAT=(true)
-NUM_BEAMS=(5 10)
-MODELS=("Meta-Llama-3-8B-Instruct")
+AUGMENTED_OPTIONS=("human_only")
+LONG_FORMAT=(true false)
+NUM_BEAMS=(5)
+MODELS=("Llama-3.2-1B-Instruct" "Llama-3.2-3B-Instruct" "Llama-3.1-8B-Instruct")
 BEST_OPTIONS=(true false)
 BATCH_SIZE=16
 
