@@ -50,9 +50,11 @@ def get_prefix_allowed_tokens_fn(
 
     def prefix_allowed_tokens_fn(batch_id, sent):
         sent = sent.tolist()
+        if len(sent) > 1 and sent[-1] in [eos_token_id, pad_token_id, sep_token_id]:
+            return [sep_token_id, pad_token_id, eos_token_id]
         prefix = prefix_templates[batch_id]
         # Remove the prefix from the sent
-        index_sep = sent.index(sep_token_id)
+        index_sep = len(sent) - 1 - sent[::-1].index(sep_token_id)
         sent = sent[index_sep + 1 :]
         # Check if the prefix is present
         prefix_len = len(prefix)
@@ -60,17 +62,16 @@ def get_prefix_allowed_tokens_fn(
             sent = sent[prefix_len - 1 :]
         else:
             raise ValueError("Prefix not found in the generated sentence.")
-        if len(sent) > 1 and sent[-1] in [eos_token_id, pad_token_id, sep_token_id]:
-            return [sep_token_id, pad_token_id, eos_token_id]
         sem_group = sem_groups[batch_id]
         # Remove everything up to last sep_token_id and add prefix and tgt_lang_id
         if multiple_answers and plus_token_id in sent:
-            sep_index = len(sent) - 1 - sent[::-1].index(plus_token_id)
+            index_plus = len(sent) - 1 - sent[::-1].index(plus_token_id)
             # Start fresh with decoder start
-            sent = prefix[:-1]
+            if index_plus == len(sent) - 1:
+                sent = prefix[-1:]
             # If there are tokens after the last plus_token_id, keep them
-            if sep_index > len(sent) - 1:
-                sent += sent[sep_index + 1 :]
+            else:
+                sent = prefix[-1:] + sent[index_plus + 1 :]
         trie_out = candidates_trie[
             sem_group  # type: ignore
         ].get(sent)
@@ -222,9 +223,7 @@ def parse_text_long(
         passage_text = _insert_entity_markers(
             passage_text, all_spans, start_entity=start_entity, end_entity=end_entity
         )
-        if passage_text.endswith("\n"):
-            passage_text = passage_text.rstrip("\n")
-        source_text += passage_text + "\n"
+        source_text += passage_text.rstrip("\n") + "\n"
     source_text += "<SEP>"
     # Sort keys to have a deterministic order
     sorted_keys = sorted(target_texts_dict.keys(), key=lambda x: (x[0], x[1]))
@@ -428,6 +427,7 @@ def parse_text(
                     + marked_sent_text[start_in_sent:end_in_sent]
                     + end_entity
                     + marked_sent_text[end_in_sent:]
+                    + "<SEP>"
                 )
 
             # Emit the pair
@@ -481,7 +481,7 @@ def parse_prediction(
     for output, group in zip(outputs, sem_groups):
         splits = output.split("} " + verb)  # type: ignore
         if len(splits) > 1 and splits[-1].strip():
-            prediction = splits[-1].strip()
+            prediction = splits[-1].strip().replace("<SEP>", "")
             if text_to_code:
                 if multiple_answers:
                     prediction_list = prediction.split("<+>")  # type: ignore
@@ -673,6 +673,7 @@ class _LongBELHubInterface:
 
                 # Encode input batch
                 input_sentences = list(sentences.values())
+                batch_ids = list(sentences.keys())
                 input_args = {
                     k: v.to(self.device)  # type: ignore
                     for k, v in self.tokenizer.batch_encode_plus(  # type: ignore
@@ -716,10 +717,10 @@ class _LongBELHubInterface:
                 )
                 # Update sentences with the cleaned outputs
                 if long_format:
-                    for batch_id in range(len(sentences)):
-                        sentences[batch_id] = (
-                            cleaned_output_sequences[num_beams * batch_id] + "<SEP>"
-                        )
+                    for i, batch_id in enumerate(batch_ids):
+                        clean_sentence = cleaned_output_sequences[num_beams * i]
+                        clean_sentence = clean_sentence.rstrip("<SEP>") + "<SEP>"
+                        sentences[batch_id] = clean_sentence
 
                 prefix_len = input_args["input_ids"].size(1)
 
