@@ -231,8 +231,9 @@ def main(
         )
 
     model_short_name = model_name.split("/")[-1]
+    long_format_str = "_long" if long_format else ""
     print(
-        f"The model {model_short_name} will start SFT with lr={lr} on dataset {augmented_data} {dataset_name} using selection {selection_method}."
+        f"The model {model_short_name} will start SFT with lr={lr} on dataset {augmented_data} {dataset_name} using selection {selection_method} and long_format_str is {long_format_str}."
     )
     # Load tokenizer and model
     try:
@@ -245,8 +246,9 @@ def main(
     except Exception as hub_err:  # pragma: no cover - network / availability branch
         if augmented_data == "human_only_ft":
             local_dir = (
-                Path("/lustre/fsn1/projects/rech/ssq/usk98ia/expe_data_ratio")
-                / f"{dataset_name}_synth_only_{selection_method}"
+                Path("models")
+                / "NED"
+                / f"{dataset_name}_synth_only_{selection_method}{long_format_str}"
                 / model_short_name
                 / "model_last"
             )
@@ -313,7 +315,7 @@ def main(
     validation_source_path = (
         data_folder
         / dataset_name
-        / f"validation_{selection_method}_source{'' if not long_format else '_long'}.pkl"
+        / f"validation_{selection_method}_source{long_format_str}.pkl"
     )
     if validation_source_path.exists():
         split_name = "validation"
@@ -324,12 +326,12 @@ def main(
     validation_source_data = load_pickle(
         data_folder
         / dataset_name
-        / f"{split_name}_{selection_method}_source{'' if not long_format else '_long'}.pkl"
+        / f"{split_name}_{selection_method}_source{long_format_str}.pkl"
     )
     validation_target_data = load_pickle(
         data_folder
         / dataset_name
-        / f"{split_name}_{selection_method}_target{'' if not long_format else '_long'}.pkl"
+        / f"{split_name}_{selection_method}_target{long_format_str}.pkl"
     )
 
     validation_data = {
@@ -352,12 +354,12 @@ def main(
         human_train_source_data = load_pickle(
             data_folder
             / dataset_name
-            / f"train_{selection_method}_source{'' if not long_format else '_long'}.pkl"
+            / f"train_{selection_method}_source{long_format_str}.pkl"
         )
         human_train_target_data = load_pickle(
             data_folder
             / dataset_name
-            / f"train_{selection_method}_target{'' if not long_format else '_long'}.pkl"
+            / f"train_{selection_method}_target{long_format_str}.pkl"
         )
         human_train_dataset = Dataset.from_dict({
             "source": human_train_source_data,
@@ -374,10 +376,14 @@ def main(
     if augmented_data not in ["human_only", "human_only_ft"]:
         if dataset_name == "MedMentions":
             synth_train_source_data = load_pickle(
-                data_folder / "SynthMM" / f"train_{selection_method}_source.pkl"
+                data_folder
+                / "SynthMM"
+                / f"train_{selection_method}_source{long_format_str}.pkl"
             )
             synth_train_target_data = load_pickle(
-                data_folder / "SynthMM" / f"train_{selection_method}_target.pkl"
+                data_folder
+                / "SynthMM"
+                / f"train_{selection_method}_target{long_format_str}.pkl"
             )
             synth_train_dataset = Dataset.from_dict({
                 "source": synth_train_source_data,
@@ -385,10 +391,14 @@ def main(
             })
         elif dataset_name in ["EMEA", "MEDLINE"]:
             synth_train_source_data = load_pickle(
-                data_folder / "SynthQUAERO" / f"train_{selection_method}_source.pkl"
+                data_folder
+                / "SynthQUAERO"
+                / f"train_{selection_method}_source{long_format_str}.pkl"
             )
             synth_train_target_data = load_pickle(
-                data_folder / "SynthQUAERO" / f"train_{selection_method}_target.pkl"
+                data_folder
+                / "SynthQUAERO"
+                / f"train_{selection_method}_target{long_format_str}.pkl"
             )
             synth_train_dataset = Dataset.from_dict({
                 "source": synth_train_source_data,
@@ -514,12 +524,12 @@ def main(
     output_dir = (
         Path("models")
         / "NED"
-        / f"{dataset_name}_{augmented_data}_{selection_method}{'' if not long_format else '_long'}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}{long_format_str}"
         / model_short_name
     )
     logging_dir = (
         Path("logs")
-        / f"{dataset_name}_{augmented_data}_{selection_method}{'' if not long_format else '_long'}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}{long_format_str}"
         / model_short_name
     )
     model.gradient_checkpointing_enable()
