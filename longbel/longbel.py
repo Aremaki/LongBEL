@@ -31,31 +31,8 @@ logging.basicConfig(
 )
 
 
-def _get_tgt_lang_token_id(tokenizer):
-    """Best-effort retrieval of target language token id from a HF tokenizer.
-
-    Returns None when not available.
-    """
-    # Some tokenizers (MBart, M2M, NLLB) expose `tgt_lang` and different ways to map to ids
-    tgt = getattr(tokenizer, "tgt_lang", None)
-    if not tgt:
-        return None
-
-    # Common mapping dict
-    try:
-        lang_code_to_id = getattr(tokenizer, "lang_code_to_id", None)
-        if isinstance(lang_code_to_id, dict) and tgt in lang_code_to_id:
-            return lang_code_to_id[tgt]
-    except Exception:
-        pass
-
-    return None
-
-
 def get_prefix_allowed_tokens_fn(
     model,
-    newline_token_id: int,
-    start_entity_token_id: int,
     sources: list[str],
     prefix_templates: list[str],
     sem_groups: list[str],
@@ -65,8 +42,7 @@ def get_prefix_allowed_tokens_fn(
     sep_token_id = model.tokenizer.sep_token_id
     eos_token_id = model.tokenizer.eos_token_id
     pad_token_id = model.tokenizer.pad_token_id
-    newline_token_id = model.tokenizer.encode("\n", add_special_tokens=False)[0]
-    tgt_lang_id = _get_tgt_lang_token_id(model.tokenizer)
+    plus_token_id = model.tokenizer.convert_tokens_to_ids("<+>")  # type: ignore
     prefix_templates = [
         model.tokenizer.encode(prefix, add_special_tokens=False)
         for prefix in prefix_templates
@@ -76,38 +52,34 @@ def get_prefix_allowed_tokens_fn(
         sent = sent.tolist()
         prefix = prefix_templates[batch_id]
         # Remove the prefix from the sent
-        index_sep = len(sent) - 1 - sent[::-1].index(start_entity_token_id)
-        sent = sent[index_sep:]
+        index_sep = sent.index(sep_token_id)
+        sent = sent[index_sep + 1 :]
         # Check if the prefix is present
         prefix_len = len(prefix)
         if sent[:prefix_len] == prefix:
             sent = sent[prefix_len - 1 :]
         else:
             raise ValueError("Prefix not found in the generated sentence.")
-        if len(sent) > 1 and sent[-1] in [eos_token_id, pad_token_id, newline_token_id]:
-            return [newline_token_id, pad_token_id, eos_token_id]
+        if len(sent) > 1 and sent[-1] in [eos_token_id, pad_token_id, sep_token_id]:
+            return [sep_token_id, pad_token_id, eos_token_id]
         sem_group = sem_groups[batch_id]
         # Remove everything up to last sep_token_id and add prefix and tgt_lang_id
-        if multiple_answers and sep_token_id in sent:
-            sep_index = len(sent) - 1 - sent[::-1].index(sep_token_id)
-            if sep_index == len(sent) - 1:
-                # Start fresh with decoder start (and optional tgt language token)
-                sent = [prefix[-1]] + ([tgt_lang_id] if tgt_lang_id is not None else [])
-            else:
-                sent = (
-                    [prefix[-1]]
-                    + ([tgt_lang_id] if tgt_lang_id is not None else [])
-                    + sent[sep_index + 1 :]
-                )
+        if multiple_answers and plus_token_id in sent:
+            sep_index = len(sent) - 1 - sent[::-1].index(plus_token_id)
+            # Start fresh with decoder start
+            sent = prefix[:-1]
+            # If there are tokens after the last plus_token_id, keep them
+            if sep_index > len(sent) - 1:
+                sent += sent[sep_index + 1 :]
         trie_out = candidates_trie[
             sem_group  # type: ignore
         ].get(sent)
-        if not trie_out:
-            return [newline_token_id, pad_token_id, eos_token_id]
-        if multiple_answers and eos_token_id in trie_out:
-            trie_out = [sep_token_id] + trie_out
         if eos_token_id in trie_out:
-            trie_out = [newline_token_id] + trie_out
+            trie_out += [sep_token_id]
+            if multiple_answers:
+                trie_out += [plus_token_id]
+        elif not trie_out:
+            return [sep_token_id, pad_token_id, eos_token_id]
         return trie_out
 
     return prefix_allowed_tokens_fn
@@ -253,7 +225,7 @@ def parse_text_long(
         if passage_text.endswith("\n"):
             passage_text = passage_text.rstrip("\n")
         source_text += passage_text + "\n"
-    source_text += "\n"
+    source_text += "<SEP>"
     # Sort keys to have a deterministic order
     sorted_keys = sorted(target_texts_dict.keys(), key=lambda x: (x[0], x[1]))
     for entity_id, entity_span in enumerate(sorted_keys):
@@ -512,7 +484,7 @@ def parse_prediction(
             prediction = splits[-1].strip()
             if text_to_code:
                 if multiple_answers:
-                    prediction_list = prediction.split("<SEP>")  # type: ignore
+                    prediction_list = prediction.split("<+>")  # type: ignore
                     code_list = []
                     for pred in prediction_list:
                         code_list.append(
@@ -574,20 +546,10 @@ def compute_score(outputs, tokenizer, prefix_len=0):
 
 
 def skip_undesired_tokens(outputs, tokenizer):
-    # Identify the separator token (if it exists)
-    sep_token = tokenizer.sep_token if tokenizer.sep_token is not None else None
-
+    sep_token = "<SEP>"
+    plus_token = "<+>"
     # Build the list of special tokens to remove
-    if any("tag" in token for token in tokenizer.all_special_tokens):
-        tokens_to_remove = tokenizer.all_special_tokens[:-3]
-    elif any("{" in token for token in tokenizer.all_special_tokens):
-        tokens_to_remove = tokenizer.all_special_tokens[:-4]
-    else:
-        tokens_to_remove = tokenizer.all_special_tokens
-
-    # Keep the sep_token if defined
-    if sep_token in tokens_to_remove:
-        tokens_to_remove = [tok for tok in tokens_to_remove if tok != sep_token]
+    tokens_to_remove = tokenizer.all_special_tokens[:2]
 
     cleaned_outputs = []
     for sequence in outputs:
@@ -598,6 +560,8 @@ def skip_undesired_tokens(outputs, tokenizer):
         # Remove spaces *immediately* after the sep_token (e.g. "<sep>  text" → "<sep>text")
         if sep_token:
             sequence = re.sub(rf"({re.escape(sep_token)})\s+", r"\1", sequence)
+        if plus_token:
+            sequence = re.sub(rf"({re.escape(plus_token)})\s+", r"\1", sequence)
 
         cleaned_outputs.append(sequence.strip())
 
@@ -643,8 +607,6 @@ class _LongBELHubInterface:
             return iterable
 
         all_outputs = []
-        start_entity_token_id = self.tokenizer.encode("[", add_special_tokens=False)[0]  # type: ignore
-        newline_token_id = self.tokenizer.encode("\n", add_special_tokens=False)[0]  # type: ignore
         all_examples = []
         all_entities_info = []
         for data in bigbio_pages:
@@ -727,8 +689,6 @@ class _LongBELHubInterface:
                         )
                     prefix_allowed_tokens_fn = get_prefix_allowed_tokens_fn(
                         model=self,
-                        newline_token_id=newline_token_id,
-                        start_entity_token_id=start_entity_token_id,
                         sources=input_sentences,
                         prefix_templates=prefix_templates,
                         sem_groups=sem_groups,
@@ -742,7 +702,7 @@ class _LongBELHubInterface:
                     output_scores=True,
                     return_dict_in_generate=True,
                     prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
-                    eos_token_id=newline_token_id,  # 👈 stop on newline
+                    eos_token_id=self.tokenizer.sep_token_id,  # type: ignore
                     **kwargs,
                 )
                 decoded_sequences = self.tokenizer.batch_decode(  # type: ignore
@@ -758,7 +718,7 @@ class _LongBELHubInterface:
                 if long_format:
                     for batch_id in range(len(sentences)):
                         sentences[batch_id] = (
-                            cleaned_output_sequences[num_beams * batch_id] + "\n"
+                            cleaned_output_sequences[num_beams * batch_id] + "<SEP>"
                         )
 
                 prefix_len = input_args["input_ids"].size(1)

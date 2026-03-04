@@ -357,8 +357,8 @@ def parse_text(
             # Merge annotations in a string with | separator
             if not annotations:
                 continue
-            group_annotation = "<SEP>".join(group_annotations)
-            annotation = "<SEP>".join(annotations)
+            group_annotation = "<+>".join(group_annotations)
+            annotation = "<+>".join(annotations)
 
             # Find the sentence that contains the entity start
             sent_text = passage_text
@@ -399,7 +399,7 @@ def parse_text(
                     + marked_sent_text[start_in_sent:end_in_sent]
                     + end_entity
                     + marked_sent_text[end_in_sent:]
-                    + "\n\n"
+                    + "<SEP>"
                 )
 
             # Emit the pair
@@ -426,7 +426,7 @@ def parse_text(
                 + end_group
             )
             target_texts_dict[(global_start, global_end)] = (
-                f"{target_entity_text} {transition_verb} {annotation}\n"
+                f"{target_entity_text} {transition_verb} {annotation}<SEP>"
             )
     # Sort keys to have a deterministic order
     sorted_keys = sorted(tsv_lines_dict.keys(), key=lambda x: (x[0], x[1]))
@@ -622,8 +622,8 @@ def parse_text_long(
             # Merge annotations in a string with | separator
             if not annotations:
                 continue
-            group_annotation = "<SEP>".join(group_annotations)
-            annotation = "<SEP>".join(annotations)
+            group_annotation = "<+>".join(group_annotations)
+            annotation = "<+>".join(annotations)
 
             # Get all offsets, convert to relative, and filter for this sentence
             entity_spans = []
@@ -662,7 +662,7 @@ def parse_text_long(
                 + end_group
             )
             target_texts_dict[entity_span_key] = (
-                f"{target_entity_text} {transition_verb} {annotation}\n"
+                f"{target_entity_text} {transition_verb} {annotation}<SEP>"
             )
 
         # Insert all entity markers in a single pass to avoid offset shifts
@@ -672,7 +672,7 @@ def parse_text_long(
         if passage_text.endswith("\n"):
             passage_text = passage_text.rstrip("\n")
         source_text += passage_text + "\n"
-    source_text += "\n"
+    source_text += "<SEP>"
     # Sort keys to have a deterministic order
     sorted_keys = sorted(target_texts_dict.keys(), key=lambda x: (x[0], x[1]))
     for entity_id, entity_span in enumerate(sorted_keys):

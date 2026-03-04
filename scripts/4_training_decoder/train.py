@@ -271,6 +271,7 @@ def main(
         model.resize_token_embeddings(len(tokenizer))
     # Add SEP special token and resize embeddings if needed
     sep_token_str = "<SEP>"
+    plus_token_str = "<+>"
     num_added = tokenizer.add_special_tokens({
         "sep_token": sep_token_str,
         "additional_special_tokens": [
@@ -278,6 +279,7 @@ def main(
             end_entity_token,
             start_group_token,
             end_group_token,
+            plus_token_str,
         ],
     })
     if num_added > 0:
