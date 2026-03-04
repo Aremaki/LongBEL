@@ -66,10 +66,10 @@ def create_prompt_completion_dataset(dataset):
 def extract_entity_char_spans(completion: str, split_marker: str):
     spans = []
     offset = 0
+    sep_marker = "<SEP>"
 
-    for raw_line in completion.splitlines(keepends=True):
-        line = raw_line[:-1] if raw_line.endswith("\n") else raw_line
-        line = line[:-1] if line.endswith("\r") else line
+    for line in completion.split(sep_marker):
+        line += sep_marker
 
         split_pos = line.find(split_marker)
         if split_pos != -1:
@@ -84,7 +84,7 @@ def extract_entity_char_spans(completion: str, split_marker: str):
             if entity_end > entity_start:
                 spans.append((offset + entity_start, offset + entity_end))
 
-        offset += len(raw_line)
+        offset += len(line)
 
     return spans
 
@@ -286,7 +286,7 @@ def main(
     })
     if num_added > 0:
         model.resize_token_embeddings(len(tokenizer))
-        print("Added <SEP> and resized embeddings.")
+        print("Added special tokens to tokenizer and resized model embeddings.")
 
     # Determine model context length (for info / warning)
     model_context_length = None
