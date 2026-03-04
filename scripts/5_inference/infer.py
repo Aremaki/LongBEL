@@ -22,6 +22,33 @@ def load_pickle(file_path):
         return pickle.load(file)
 
 
+def hf_model_gpu_size_mb(model):
+    return (
+        sum(p.numel() * p.element_size() for p in model.parameters())
+        + sum(b.numel() * b.element_size() for b in model.buffers())
+    ) / 1024**2
+
+
+def deep_getsizeof(obj, seen=None):
+    if seen is None:
+        seen = set()
+    obj_id = id(obj)
+    if obj_id in seen:
+        return 0
+    seen.add(obj_id)
+
+    size = sys.getsizeof(obj)
+    if hasattr(obj, "__dict__"):
+        size += deep_getsizeof(obj.__dict__, seen)
+    elif isinstance(obj, dict):
+        size += sum(
+            deep_getsizeof(k, seen) + deep_getsizeof(v, seen) for k, v in obj.items()
+        )
+    elif isinstance(obj, (list, tuple, set)):
+        size += sum(deep_getsizeof(i, seen) for i in obj)
+    return size
+
+
 def main(
     model_name,
     num_beams,
@@ -172,13 +199,13 @@ def main(
             model.candidate_trie = candidate_trie  # type: ignore
 
     # Init output folder
-    output_folder = (
+    result_folder = (
         Path(output_folder)
         / dataset_name
         / f"{augmented_data}_{selection_method}{long_format_str}"
         / f"{model_name}_{'best' if best else 'last'}"
     )
-    output_folder.mkdir(parents=True, exist_ok=True)
+    result_folder.mkdir(parents=True, exist_ok=True)
 
     # Multiple answers setting for guided decoding
     if not split_name == "test_simple" and dataset_name == "SPACCC":
@@ -186,10 +213,37 @@ def main(
     else:
         multiple_answers = False
 
+    metadata = {
+        "model_name": model_name,
+        "dataset_name": dataset_name,
+        "selection_method": selection_method,
+        "split_name": split_name,
+        "augmented_data": augmented_data,
+        "long_format": long_format,
+        "num_beams": num_beams,
+        "batch_size": batch_size,
+        "multiple_answers": multiple_answers,
+    }
+    # Log model size
+    model_size_mb = hf_model_gpu_size_mb(model)
+    metadata["model_size_mb"] = model_size_mb
+    print(f"Model size on GPU: {model_size_mb:.2f} MB")
+
+    # Log candidate Trie size
+    trie_size = deep_getsizeof(model.candidate_trie) / 1024**2
+    metadata["trie_size_mb"] = trie_size
+    print(f"Trie candidate object size (deep): {trie_size:.2f} MB")
+
+    # Log text to code size
+    text_to_code_size = deep_getsizeof(model.text_to_code) / 1024**2
+    metadata["text_to_code_size_mb"] = text_to_code_size
+    print(f"Text_to_code object size (deep): {text_to_code_size:.2f} MB")
+
     # Perform inference without constraint
+    metadata["timing_results"] = {}
     tic = time.time()
     no_constraint_pred = model.sample(
-        bigbio_examples=test_data,
+        bigbio_pages=test_data,  # type: ignore
         batch_size=batch_size,
         num_beams=num_beams,
         constrained=False,
@@ -201,13 +255,22 @@ def main(
 
     # Compute speed metrics
     num_batches = (len(test_data) + batch_size - 1) // batch_size  # type: ignore
-    batches_per_second = num_batches / elapsed_time
-    examples_per_second = len(test_data) / elapsed_time  # type: ignore
+    num_entities = sum(len(entities) for entities in test_data["entities"])  # type: ignore
+    mean_time_per_batch = elapsed_time / num_batches
+    mean_time_of_page = elapsed_time / len(test_data)  # type: ignore
+    num_entities_per_second = num_entities / elapsed_time
 
     print("\n=== Speed Metrics ===")
     print(f"Total time elapsed: {elapsed_time:.2f} seconds")
-    print(f"Batches per second: {batches_per_second:.2f}")
-    print(f"Examples per second: {examples_per_second:.2f}\n")
+    print(f"Mean time per batch: {mean_time_per_batch:.2f} seconds")
+    print(f"Mean time of page: {mean_time_of_page:.2f} seconds")
+    print(f"Number of entities per second: {num_entities_per_second:.2f}\n")
+    metadata["timing_results"]["no_constraint"] = {
+        "total_time_seconds": elapsed_time,
+        "mean_time_per_batch": mean_time_per_batch,
+        "mean_time_of_page": mean_time_of_page,
+        "num_entities_per_second": num_entities_per_second,
+    }
 
     # Compute recall per label
     no_constraint_df = pl.DataFrame(no_constraint_pred)
@@ -235,7 +298,7 @@ def main(
 
     # Save results
     no_constraint_df.write_csv(
-        file=output_folder / f"pred_{split_name}_no_constraint_{num_beams}_beams.tsv",
+        file=result_folder / f"pred_{split_name}_no_constraint_{num_beams}_beams.tsv",
         separator="\t",
         include_header=True,
     )
@@ -243,7 +306,7 @@ def main(
     # Perform inference with constraint
     tic = time.time()
     constraint_preds = model.sample(
-        bigbio_examples=test_data,
+        bigbio_pages=test_data,  # type: ignore
         batch_size=batch_size,
         num_beams=num_beams,
         constrained=True,
@@ -255,13 +318,22 @@ def main(
 
     # Compute speed metrics
     num_batches = (len(test_data) + batch_size - 1) // batch_size  # type: ignore
-    batches_per_second = num_batches / elapsed_time
-    examples_per_second = len(test_data) / elapsed_time  # type: ignore
+    num_entities = sum(len(entities) for entities in test_data["entities"])  # type: ignore
+    mean_time_per_batch = elapsed_time / num_batches
+    mean_time_of_page = elapsed_time / len(test_data)  # type: ignore
+    num_entities_per_second = num_entities / elapsed_time
 
     print("\n=== Speed Metrics ===")
     print(f"Total time elapsed: {elapsed_time:.2f} seconds")
-    print(f"Batches per second: {batches_per_second:.2f}")
-    print(f"Examples per second: {examples_per_second:.2f}\n")
+    print(f"Mean time per batch: {mean_time_per_batch:.2f} seconds")
+    print(f"Mean time of page: {mean_time_of_page:.2f} seconds")
+    print(f"Number of entities per second: {num_entities_per_second:.2f}\n")
+    metadata["timing_results"]["constraint"] = {
+        "total_time_seconds": elapsed_time,
+        "mean_time_per_batch": mean_time_per_batch,
+        "mean_time_of_page": mean_time_of_page,
+        "num_entities_per_second": num_entities_per_second,
+    }
 
     # Compute recall per label
     constraint_df = pl.DataFrame(constraint_preds)
@@ -289,11 +361,15 @@ def main(
 
     # Save results
     constraint_df.write_csv(
-        file=output_folder / f"pred_{split_name}_constraint_{num_beams}_beams.tsv",
+        file=result_folder / f"pred_{split_name}_constraint_{num_beams}_beams.tsv",
         separator="\t",
         include_header=True,
     )
-
+    # Save timing results
+    with open(
+        result_folder / f"metadata_{split_name}_{num_beams}_beams.json", "w"
+    ) as f:
+        json.dump(metadata, f, indent=2)
     print("Inference completed and results saved.")
 
 

@@ -2,11 +2,11 @@
 
 BASE_OUTPUT_DIR="models/NED"
 
-MODELS=("Llama-3.1-8B-Instruct", "Llama-3.2-1B-Instruct")
-DATASETS=("MedMentions")
+MODELS=("Llama-3.2-1B-Instruct" "Llama-3.2-3B-Instruct" "Llama-3.1-8B-Instruct")
+DATASETS=("MedMentions" "SPACCC" "EMEA" "MEDLINE")
 SELECTION_METHODS=("tfidf")
 AUGMENTED_OPTIONS=("human_only")
-LONG_FORMAT=("true")
+LONG_FORMAT=(true false)
 
 for dataset in "${DATASETS[@]}"; do
     for selection in "${SELECTION_METHODS[@]}"; do
@@ -14,7 +14,7 @@ for dataset in "${DATASETS[@]}"; do
             for long_format in "${LONG_FORMAT[@]}"; do
                 for model in "${MODELS[@]}"; do
                     LONG_FORMAT_ARG=""
-                    if [[ "${long_format}" == "true" ]]; then
+                    if [[ "${long_format}" == true ]]; then
                         LONG_FORMAT_ARG=" --long-format"
                     fi
 
