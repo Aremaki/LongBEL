@@ -376,14 +376,10 @@ def main(
     if augmented_data not in ["human_only", "human_only_ft"]:
         if dataset_name == "MedMentions":
             synth_train_source_data = load_pickle(
-                data_folder
-                / "SynthMM"
-                / f"train_{selection_method}_source{long_format_str}.pkl"
+                data_folder / "SynthMM" / f"train_{selection_method}_source.pkl"
             )
             synth_train_target_data = load_pickle(
-                data_folder
-                / "SynthMM"
-                / f"train_{selection_method}_target{long_format_str}.pkl"
+                data_folder / "SynthMM" / f"train_{selection_method}_target.pkl"
             )
             synth_train_dataset = Dataset.from_dict({
                 "source": synth_train_source_data,
@@ -391,50 +387,26 @@ def main(
             })
         elif dataset_name in ["EMEA", "MEDLINE"]:
             synth_train_source_data = load_pickle(
-                data_folder
-                / "SynthQUAERO"
-                / f"train_{selection_method}_source{long_format_str}.pkl"
+                data_folder / "SynthQUAERO" / f"train_{selection_method}_source.pkl"
             )
             synth_train_target_data = load_pickle(
-                data_folder
-                / "SynthQUAERO"
-                / f"train_{selection_method}_target{long_format_str}.pkl"
+                data_folder / "SynthQUAERO" / f"train_{selection_method}_target.pkl"
             )
             synth_train_dataset = Dataset.from_dict({
                 "source": synth_train_source_data,
                 "target": synth_train_target_data,
             })
         else:  # SPACCC logic
-            if "filtered" not in augmented_data:
-                synth_train_source_data = load_pickle(
-                    data_folder
-                    / "SynthSPACCC_No_Def"
-                    / f"train_{selection_method}_source.pkl"
-                )
-                synth_train_target_data = load_pickle(
-                    data_folder
-                    / "SynthSPACCC_No_Def"
-                    / f"train_{selection_method}_target.pkl"
-                )
-                synth_train_dataset = Dataset.from_dict({
-                    "source": synth_train_source_data,
-                    "target": synth_train_target_data,
-                })
-            else:
-                synth_train_source_data = load_pickle(
-                    data_folder
-                    / "SynthSPACCC_Filtered"
-                    / f"train_{selection_method}_source.pkl"
-                )
-                synth_train_target_data = load_pickle(
-                    data_folder
-                    / "SynthSPACCC_Filtered"
-                    / f"train_{selection_method}_target.pkl"
-                )
-                synth_train_dataset = Dataset.from_dict({
-                    "source": synth_train_source_data,
-                    "target": synth_train_target_data,
-                })
+            synth_train_source_data = load_pickle(
+                data_folder / "SynthSPACCC" / f"train_{selection_method}_source.pkl"
+            )
+            synth_train_target_data = load_pickle(
+                data_folder / "SynthSPACCC" / f"train_{selection_method}_target.pkl"
+            )
+            synth_train_dataset = Dataset.from_dict({
+                "source": synth_train_source_data,
+                "target": synth_train_target_data,
+            })
 
         # ---------- Prepare final train_dataset based on augmented_data ----------
         # augmented data training
@@ -448,7 +420,7 @@ def main(
         if augmented_data == "synth_only":
             num_train_epochs = 5
             train_dataset = synth_train_dataset
-        elif augmented_data in ["full", "full_filtered"]:
+        elif augmented_data == "full":
             num_train_epochs = 5
             train_dataset = concatenate_datasets([
                 human_train_dataset,  # type: ignore
@@ -626,8 +598,6 @@ if __name__ == "__main__":
             "synth_only",
             "full",
             "full_upsampled",
-            "full_filtered",
-            "full_filtered_upsampled",
         ],
         help="Whether to use augmented data for training",
     )
