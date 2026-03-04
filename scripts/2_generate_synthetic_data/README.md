@@ -94,9 +94,17 @@ If the dataset is already on the Hub, you can pull and convert it directly.
 
 ```bash
 python scripts/2_generate_synthetic_data/convert_to_bigbio.py from-hub \
-  --repo-id <your-repo-id> \
+  --repo-id Aremaki/SynCABEL \
   --split SynthMedMentions \
-  --json-out data/synthetic_data/SynthMM/SynthMM_bigbio_def.json
+  --json-out data/synthetic_data/SynthMM/SynthMM_bigbio.json
+python scripts/2_generate_synthetic_data/convert_to_bigbio.py from-hub \
+  --repo-id Aremaki/SynCABEL \
+  --split SynthQUAERO \
+  --json-out data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio.json
+python scripts/2_generate_synthetic_data/convert_to_bigbio.py from-hub \
+  --repo-id Aremaki/SynCABEL \
+  --split SynthSPACCC \
+  --json-out data/synthetic_data/SynthSPACCC/SynthSPACCC_bigbio.json
 ```
   --repo-id XXXX/LongBEL \
   --split train \

@@ -283,6 +283,7 @@ def _process_synth_dataset(
         lang=lang,
         selection_method=selection_method,
         best_syn_map=best_syn_map,
+        long_format=False,  # synthetic data is always in short format (no context sentences)
     )
     # Treat as train split for the synthetic dataset
     _dump(src, data_folder / f"train_{selection_method}_source.pkl")
@@ -311,24 +312,16 @@ def run(
         help="TF-IDF vectorizer model path",
     ),
     synth_mm_path: Path = typer.Option(
-        Path("data/synthetic_data/SynthMM/SynthMM_bigbio_def.json"),
+        Path("data/synthetic_data/SynthMM/SynthMM_bigbio.json"),
         help="Synthetic MM JSON",
     ),
     synth_quaero_path: Path = typer.Option(
-        Path("data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio_def.json"),
+        Path("data/synthetic_data/SynthQUAERO/SynthQUAERO_bigbio.json"),
         help="Synthetic QUAERO JSON",
     ),
-    synth_spaccc_def_path: Path = typer.Option(
-        Path("data/synthetic_data/SynthSPACCC/SynthSPACCC_bigbio_def.json"),
+    synth_spaccc_path: Path = typer.Option(
+        Path("data/synthetic_data/SynthSPACCC/SynthSPACCC_bigbio.json"),
         help="SynthSPACCC definitions JSON",
-    ),
-    synth_spaccc_no_def_path: Path = typer.Option(
-        Path("data/synthetic_data/SynthSPACCC/SynthSPACCC_bigbio_no_def.json"),
-        help="SynthSPACCC no definitions JSON",
-    ),
-    synth_spaccc_filtered_path: Path = typer.Option(
-        Path("data/synthetic_data/SynthSPACCC/SynthSPACCC_bigbio_filtered.json"),
-        help="SynthSPACCC filtered JSON",
     ),
     umls_mm_parquet: Path = typer.Option(
         Path("data/termino_processed/MM/all_disambiguated.parquet"),
@@ -374,9 +367,7 @@ def run(
     # Synthetic data (optional)
     synth_mm = _load_json_if_exists(synth_mm_path)
     synth_quaero = _load_json_if_exists(synth_quaero_path)
-    synth_spaccc_def = _load_json_if_exists(synth_spaccc_def_path)
-    synth_spaccc_no_def = _load_json_if_exists(synth_spaccc_no_def_path)
-    synth_spaccc_filtered = _load_json_if_exists(synth_spaccc_filtered_path)
+    synth_spaccc = _load_json_if_exists(synth_spaccc_path)
 
     if synth_mm is None:
         typer.echo(
@@ -386,11 +377,7 @@ def run(
         typer.echo(
             "⚠️ SynthQUAERO not found; skipping synthetic augmentation for EMEA and MEDLINE."
         )
-    if (
-        synth_spaccc_def is None
-        and synth_spaccc_no_def is None
-        and synth_spaccc_filtered is None
-    ):
+    if synth_spaccc is None:
         typer.echo(
             "⚠️ SynthSPACCC not found; skipping synthetic augmentation for SPACCC."
         )
@@ -544,46 +531,10 @@ def run(
         )
 
         # Synthetic SPACCC
-        if synth_spaccc_filtered is not None:
+        if synth_spaccc is not None:
             _process_synth_dataset(
-                "SynthSPACCC_Filtered",
-                synth_spaccc_filtered,
-                lang,
-                code_to_title_spaccc,
-                code_to_syn_spaccc,
-                code_to_group_spaccc,
-                semantic_info_spaccc,
-                encoder_name,
-                tfidf_vectorizer_path,
-                start_entity,
-                end_entity,
-                start_group,
-                end_group,
-                out_root,
-                selection_method,
-            )
-        if synth_spaccc_def is not None:
-            _process_synth_dataset(
-                "SynthSPACCC_Def",
-                synth_spaccc_def,
-                lang,
-                code_to_title_spaccc,
-                code_to_syn_spaccc,
-                code_to_group_spaccc,
-                semantic_info_spaccc,
-                encoder_name,
-                tfidf_vectorizer_path,
-                start_entity,
-                end_entity,
-                start_group,
-                end_group,
-                out_root,
-                selection_method,
-            )
-        if synth_spaccc_no_def is not None:
-            _process_synth_dataset(
-                "SynthSPACCC_No_Def",
-                synth_spaccc_no_def,
+                "SynthSPACCC",
+                synth_spaccc,
                 lang,
                 code_to_title_spaccc,
                 code_to_syn_spaccc,
