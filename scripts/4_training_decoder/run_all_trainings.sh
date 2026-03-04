@@ -17,6 +17,16 @@ for dataset in "${DATASETS[@]}"; do
                     if [[ "${long_format}" == true ]]; then
                         LONG_FORMAT_ARG=" --long-format"
                     fi
+                    # Check if model already exists
+                    MODEL_DIR="${BASE_OUTPUT_DIR}/${dataset}_${augmented}_${selection}"
+                    if [[ "${long_format}" == true ]]; then
+                        MODEL_DIR="${MODEL_DIR}_long"
+                    fi
+                    MODEL_DIR="${MODEL_DIR}/${model}"
+                    if [ -d "$MODEL_DIR" ]; then
+                        echo "Skipping: Model already exists → ${MODEL_DIR}"
+                        continue
+                    fi
 
                     # Construct arguments for the training script (pass full model id)
                     ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --augmented-data ${augmented}${LONG_FORMAT_ARG}"
