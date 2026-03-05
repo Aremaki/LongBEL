@@ -38,12 +38,6 @@ for dataset in "${DATASETS[@]}"; do
                                 else
                                     MODEL_FOLDER="${MODEL_FOLDER}last"
                                 fi
-                                
-                                # Check if model folder exists
-                                if [ ! -d "$MODEL_FOLDER" ]; then
-                                    echo "Skipping: Model folder does not exist → ${MODEL_FOLDER}"
-                                    continue
-                                fi
 
                                 OUTPUT_FILE="${MODEL_FOLDER}/pred_${split}_constraint_${num_beams}_beams.tsv"
 
