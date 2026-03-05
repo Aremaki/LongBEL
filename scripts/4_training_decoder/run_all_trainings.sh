@@ -22,7 +22,7 @@ for dataset in "${DATASETS[@]}"; do
                     if [[ "${long_format}" == true ]]; then
                         MODEL_DIR="${MODEL_DIR}_long"
                     fi
-                    MODEL_DIR="${MODEL_DIR}/${model}"
+                    MODEL_DIR="${MODEL_DIR}/${model}/model_best"
                     if [ -d "$MODEL_DIR" ]; then
                         echo "Skipping: Model already exists → ${MODEL_DIR}"
                         continue
