@@ -499,8 +499,15 @@ def main(
         if seq_len > longest_train:
             longest_train = seq_len
 
+    max_length = 16_000
     print(f"Longest training example has {longest_train} tokens.")
-    max_length = max(longest_train, 8_000)
+    if longest_train > max_length:
+        if "8B" in model_name:
+            print(
+                f"⚠️ Longest training example ({longest_train} tokens) exceeds hard max_length ({max_length}). They will be truncated..."
+            )
+        else:
+            max_length = longest_train + 512
     print(f"Using training-set max_length: {max_length}")
     if max_length > model_context_length:
         print(
