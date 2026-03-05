@@ -2,7 +2,6 @@ import os
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import argparse
-import glob
 import pickle
 import shutil
 from pathlib import Path
@@ -198,6 +197,30 @@ def preprocess_logits_for_metrics(logits, labels):
     if isinstance(logits, tuple):
         logits = logits[0]
     return logits.argmax(dim=-1)
+
+
+def find_latest_resumable_checkpoint(output_dir: Path):
+    checkpoint_dirs = []
+    for checkpoint_dir in output_dir.glob("checkpoint-*"):
+        if not checkpoint_dir.is_dir():
+            continue
+        try:
+            step = int(checkpoint_dir.name.split("-")[-1])
+        except ValueError:
+            continue
+        checkpoint_dirs.append((step, checkpoint_dir))
+
+    checkpoint_dirs.sort(key=lambda item: item[0], reverse=True)
+
+    for step, checkpoint_dir in checkpoint_dirs:
+        trainer_state_path = checkpoint_dir / "trainer_state.json"
+        if trainer_state_path.exists():
+            return str(checkpoint_dir)
+        print(
+            f"Skipping checkpoint-{step}: missing trainer_state.json, cannot resume safely."
+        )
+
+    return None
 
 
 # ---------- Main function (converted to TRL SFT) ----------
@@ -549,8 +572,12 @@ def main(
         preprocess_logits_for_metrics=preprocess_logits_for_metrics,
     )
 
-    # Resume option (identical logic)
-    resume_from_checkpoint = len(glob.glob(rf"{output_dir}/checkpoint-*")) > 0
+    # Resume only from a valid checkpoint containing trainer_state.json
+    resume_from_checkpoint = find_latest_resumable_checkpoint(output_dir)
+    if resume_from_checkpoint:
+        print(f"Resuming training from checkpoint: {resume_from_checkpoint}")
+    else:
+        print("No valid checkpoint found. Starting training from scratch.")
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
     # Save the best model checkpoint and last model (similar to original script)
