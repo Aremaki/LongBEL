@@ -37,9 +37,9 @@ def main(datasets: list[str]):
                     separator="\t",
                     has_header=True,
                     schema_overrides={
-                        "code": str,
+                        "gold_concept_code": str,
                         "mention_id": str,
-                        "filename": str,  # force as string
+                        "doc_id": str,  # force as string
                     },  # type: ignore
                 )
                 validation_path = (
@@ -54,16 +54,16 @@ def main(datasets: list[str]):
                         separator="\t",
                         has_header=True,
                         schema_overrides={
-                            "code": str,
+                            "gold_concept_code": str,
                             "mention_id": str,
-                            "filename": str,  # force as string
+                            "doc_id": str,  # force as string
                         },  # type: ignore
                     )
                     # Reduce validation dataset to 10% as before
                     split = int(len(val_df) * 0.9)
                     val_df = val_df[:split]
                     train_df = pl.concat([train_df, val_df])
-                train_cuis = set(train_df["code"].drop_nulls())
+                train_cuis = set(train_df["gold_concept_code"].drop_nulls())
                 for aug_data in [
                     "human_only",
                     "full_upsampled",
@@ -106,7 +106,7 @@ def main(datasets: list[str]):
                             preditction_path,
                         )
                         pred_df = pred_df.filter(
-                            ~pl.col("code").is_in(list(train_cuis))
+                            ~pl.col("gold_concept_code").is_in(list(train_cuis))
                         )
                         score = compute_metrics_simple(
                             pred_df, pred_df, bootstrap=True, n_bootstrap=1000

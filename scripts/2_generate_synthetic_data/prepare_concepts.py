@@ -36,9 +36,9 @@ def _load_train(train_path: Path) -> pl.DataFrame:
         separator="\t",
         has_header=True,
         schema_overrides={
-            "code": str,  # force as string
+            "gold_concept_code": str,  # force as string
             "mention_id": str,
-            "filename": str,
+            "doc_id": str,
         },  # type: ignore
     )
     return train_df

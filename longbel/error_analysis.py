@@ -29,12 +29,12 @@ def _run_vectorized_bootstrap(
     alpha = (1 - ci) / 2
 
     # --- Overall ---
-    doc_overall = doc_agg.group_by("filename").agg([
+    doc_overall = doc_agg.group_by("doc_id").agg([
         pl.col(num_col).sum().alias("num"),
         pl.col(denom_col).sum().alias("denom"),
     ])
-    docs_df = pl.DataFrame({"filename": unique_docs})
-    doc_overall = docs_df.join(doc_overall, on="filename", how="left").fill_null(0)
+    docs_df = pl.DataFrame({"doc_id": unique_docs})
+    doc_overall = docs_df.join(doc_overall, on="doc_id", how="left").fill_null(0)
 
     num_vec = doc_overall["num"].to_numpy()
     denom_vec = doc_overall["denom"].to_numpy()
@@ -66,10 +66,10 @@ def _run_vectorized_bootstrap(
 
     # Add doc indices
     doc_map_df = pl.DataFrame({
-        "filename": unique_docs,
+        "doc_id": unique_docs,
         "doc_idx": np.arange(len(unique_docs), dtype=np.int32),
     })
-    doc_agg_idx = doc_agg_idx.join(doc_map_df, on="filename", how="inner")
+    doc_agg_idx = doc_agg_idx.join(doc_map_df, on="doc_id", how="inner")
 
     # Extract arrays
     rows = doc_agg_idx["doc_idx"].to_numpy()
@@ -146,34 +146,39 @@ def load_predictions(
     """
     Add semantic relation column to the dataframe using KeyCare's RelationExtractor.
     """
-    df = pl.read_csv(
-        prediction_path,
-        separator="\t",
-        has_header=True,
-        schema_overrides={
-            "code": str,  # force as string
-            "Predicted_code": str,
-            "mention_id": str,
-            "filename": str,  # force as string
-        },  # type: ignore
-    ).unique(
-        subset=[
-            "filename",
-            "label",
-            "start_span",
-            "end_span",
-        ]
+    df = (
+        pl.read_csv(
+            prediction_path,
+            separator="\t",
+            has_header=True,
+            schema_overrides={
+                "gold_concept_code": str,  # force as string
+                "pred_concept_code": str,
+                "mention_id": str,
+                "doc_id": str,  # force as string
+            },  # type: ignore
+        )
+        .unique(
+            subset=[
+                "doc_id",
+                "semantic_group",
+                "start_span",
+                "end_span",
+            ],
+        )
+        .sort(["mention_id", "rank"])  # ensure deterministic order after deduplication
     )
     # Filter NO_CODE annotations
-    df = df.filter(~(pl.col("code").str.contains("NO_CODE")))
+    df = df.filter(~(pl.col("gold_concept_code").str.contains("NO_CODE")))
     df = df.with_columns(
-        normalize_codes(pl.col("code")), normalize_codes(pl.col("Predicted_code"))
+        normalize_codes(pl.col("gold_concept_code")),
+        normalize_codes(pl.col("pred_concept_code")),
     )
     df = df.with_columns(
-        pl.when(pl.col("Predicted_code").is_null())
+        pl.when(pl.col("pred_concept_code").is_null())
         .then(pl.lit(""))  # replace Prediction with empty string
-        .otherwise(pl.col("Prediction"))
-        .alias("Prediction")
+        .otherwise(pl.col("pred_concept_name"))
+        .alias("pred_concept_name")
     )
     return df  # already processed
 
@@ -186,7 +191,7 @@ def compute_metrics_simple(
     ci: float = 0.95,
     seed: int = 42,
     threshold: Optional[float] = None,
-    score_column: str = "Prediction_score",
+    score_column: str = "score",
     include_ratios: bool = True,
     index_key: str = "Overall",
 ) -> dict[str, dict[str, Any]]:  # type: ignore
@@ -201,30 +206,33 @@ def compute_metrics_simple(
     rng = np.random.default_rng(seed)
 
     # Encode dataframe as numpy arrays; guard empty frames to keep shapes consistent
-    filenames = df["filename"].to_numpy() if df.height else np.array([], dtype=object)
+    doc_ids = df["doc_id"].to_numpy() if df.height else np.array([], dtype=object)
 
     # Use labels from the full set to keep deterministic ordering and include missing labels
-    unique_labels = np.array(sorted(df_full["label"].unique()))
-    unique_docs = np.unique(filenames)
+    unique_labels = np.array(sorted(df_full["semantic_group"].unique()))
+    unique_docs = np.unique(doc_ids)
 
     # Precompute counts for ratios
     total_full_overall = df_full.height
     total_pred_overall = df.height
 
     full_counts = (
-        df_full.group_by("label")
-        .count()
-        .select(["label", "count"])
+        df_full.group_by("semantic_group")
+        .len()
+        .select(["semantic_group", "len"])
         .to_dict(as_series=False)
     )
-    full_counts_map = dict(zip(full_counts["label"], full_counts["count"]))
+    full_counts_map = dict(zip(full_counts["semantic_group"], full_counts["len"]))
 
     pred_counts = (
-        df.group_by("label").count().select(["label", "count"]).to_dict(as_series=False)
+        df.group_by("semantic_group")
+        .len()
+        .select(["semantic_group", "len"])
+        .to_dict(as_series=False)
         if df.height
-        else {"label": [], "count": []}
+        else {"semantic_group": [], "len": []}
     )
-    pred_counts_map = dict(zip(pred_counts["label"], pred_counts["count"]))
+    pred_counts_map = dict(zip(pred_counts["semantic_group"], pred_counts["len"]))
 
     def _format_ratio(label: str, pred_count: int) -> str:
         if not include_ratios:
@@ -252,30 +260,38 @@ def compute_metrics_simple(
         # -------- Strict Recall --------
 
         # 1. Point Estimate (Polars)
-        label_stats = df.group_by("label").agg([
-            pl.count().alias("total"),
-            (pl.col("code") == pl.col("Predicted_code")).sum().alias("correct"),
+        label_stats = df.group_by("semantic_group").agg([
+            pl.len().alias("total"),
+            (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
+            .sum()
+            .alias("correct"),
         ])
 
-        all_labels_df = pl.DataFrame({"label": unique_labels})
-        stats = all_labels_df.join(label_stats, on="label", how="left").fill_null(0)
+        all_labels_df = pl.DataFrame({"semantic_group": unique_labels})
+        stats = all_labels_df.join(
+            label_stats, on="semantic_group", how="left"
+        ).fill_null(0)
 
         stats = stats.with_columns(
             (pl.col("correct") / pl.col("total")).fill_nan(0.0).alias("recall")
         )
 
-        point = dict(zip(stats["label"], stats["recall"]))
+        point = dict(zip(stats["semantic_group"], stats["recall"]))
 
-        overall_correct = df.filter(pl.col("code") == pl.col("Predicted_code")).height
+        overall_correct = df.filter(
+            pl.col("gold_concept_code") == pl.col("pred_concept_code")
+        ).height
         overall_total = df.height
         point["overall"] = overall_correct / overall_total if overall_total > 0 else 0.0
 
         # 2. Bootstrap (Vectorized)
         ci_data = {}
         if bootstrap and len(unique_docs) > 0:
-            doc_agg = df.group_by(["filename", "label"]).agg([
+            doc_agg = df.group_by(["doc_id", "semantic_group"]).agg([
                 pl.len().alias("denom"),
-                (pl.col("code") == pl.col("Predicted_code")).sum().alias("num"),
+                (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
+                .sum()
+                .alias("num"),
             ])
             ci_data = _run_vectorized_bootstrap(
                 doc_agg,
@@ -307,20 +323,22 @@ def compute_metrics_simple(
 
     # 1. Point Estimate (Polars)
     agg_exprs = [
-        pl.count().alias("total"),
+        pl.len().alias("total"),
         (pl.col(score_column) >= threshold).sum().alias("selected"),
         (
             (pl.col(score_column) >= threshold)
-            & (pl.col("code") == pl.col("Predicted_code"))
+            & (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
         )
         .sum()
         .alias("tp"),
     ]
 
-    label_stats = df.group_by("label").agg(agg_exprs)
+    label_stats = df.group_by("semantic_group").agg(agg_exprs)
 
-    all_labels_df = pl.DataFrame({"label": unique_labels})
-    stats = all_labels_df.join(label_stats, on="label", how="left").fill_null(0)
+    all_labels_df = pl.DataFrame({"semantic_group": unique_labels})
+    stats = all_labels_df.join(label_stats, on="semantic_group", how="left").fill_null(
+        0
+    )
 
     stats = stats.with_columns([
         (pl.col("tp") / pl.col("total")).fill_nan(0.0).alias("recall"),
@@ -344,7 +362,7 @@ def compute_metrics_simple(
             "recall": row["recall"],
             "f1": row["f1"],
         }
-        for lbl, row in zip(stats["label"], stats.to_dicts())
+        for lbl, row in zip(stats["semantic_group"], stats.to_dicts())
     }
 
     # Overall
@@ -352,7 +370,7 @@ def compute_metrics_simple(
     selected_all = df.filter(pl.col(score_column) >= threshold).height
     tp_all = df.filter(
         (pl.col(score_column) >= threshold)
-        & (pl.col("code") == pl.col("Predicted_code"))
+        & (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
     ).height
 
     recall_all = tp_all / total_all if total_all > 0 else 0.0
@@ -375,12 +393,12 @@ def compute_metrics_simple(
     ci_f1 = {}
 
     if bootstrap and len(unique_docs) > 0:
-        doc_agg = df.group_by(["filename", "label"]).agg([
-            pl.count().alias("total"),
+        doc_agg = df.group_by(["doc_id", "semantic_group"]).agg([
+            pl.len().alias("total"),
             (pl.col(score_column) >= threshold).sum().alias("selected"),
             (
                 (pl.col(score_column) >= threshold)
-                & (pl.col("code") == pl.col("Predicted_code"))
+                & (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
             )
             .sum()
             .alias("tp"),
@@ -453,7 +471,7 @@ def compute_partition_metrics(
     compute_all: bool = True,
     include_ratios: bool = True,
     threshold: Optional[float] = None,
-    score_column: str = "Prediction_score",
+    score_column: str = "score",
     bootstrap: bool = False,
     n_bootstrap: int = 1000,
     ci: float = 0.95,
@@ -473,13 +491,15 @@ def compute_partition_metrics(
         # 1. Define Aggregations
         aggs = [
             pl.len().alias("count"),
-            (pl.col("code") == pl.col("Predicted_code")).sum().alias("strict_correct"),
+            (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
+            .sum()
+            .alias("strict_correct"),
         ]
 
         if compute_all:
             aggs.extend([
                 (
-                    (pl.col("code") == pl.col("Predicted_code"))
+                    (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
                     | (pl.col("LLM_Evaluation_v2") == "EXACT")
                 )
                 .sum()
@@ -503,22 +523,24 @@ def compute_partition_metrics(
         if threshold is not None:
             # Thresholded metrics
             is_selected = pl.col(score_column) >= threshold
-            is_correct = pl.col("code") == pl.col("Predicted_code")
+            is_correct = pl.col("gold_concept_code") == pl.col("pred_concept_code")
             aggs.extend([
                 is_selected.sum().alias("thresh_selected"),
                 (is_selected & is_correct).sum().alias("thresh_tp"),
             ])
 
         # 2. Perform GroupBy Aggregation
-        # We use a left join on unique_labels to ensure all labels are present
-        grouped = df.group_by("label").agg(aggs)
+        # We use a left join on unique_labels to ensure all semantic groups are present
+        grouped = df.group_by("semantic_group").agg(aggs)
 
-        # Create base dataframe with all labels
+        # Create base dataframe with all semantic groups
         # Note: unique_labels is a list of strings
-        base_df = pl.DataFrame({"label": unique_labels}, schema={"label": pl.String})
+        base_df = pl.DataFrame(
+            {"semantic_group": unique_labels}, schema={"semantic_group": pl.String}
+        )
 
         # Join and fill nulls with 0
-        stats = base_df.join(grouped, on="label", how="left").fill_null(0)
+        stats = base_df.join(grouped, on="semantic_group", how="left").fill_null(0)
 
         # 3. Calculate Metrics (Vectorized)
         # Strict Recall
@@ -601,10 +623,10 @@ def compute_partition_metrics(
                 return "0% (0/0)"
             return f"{round(pred_cnt / denom * 100, 1)}% ({pred_cnt}/{denom})"
 
-        # Iterate rows to populate dict (fast enough for ~thousands of labels)
+        # Iterate rows to populate dict (fast enough for ~thousands of semantic groups)
         # Using iter_rows(named=True)
         for row in stats.iter_rows(named=True):
-            lbl = row["label"]
+            lbl = row["semantic_group"]
             cnt = row["count"]
 
             results["recall_strict"][lbl] = {
@@ -651,7 +673,7 @@ def compute_partition_metrics(
             # We can sum the counts from the grouped dataframe or the original df
             # Using original df is safer/easier for overall
             strict_correct_all = df.filter(
-                pl.col("code") == pl.col("Predicted_code")
+                pl.col("gold_concept_code") == pl.col("pred_concept_code")
             ).height
 
             results["recall_strict"]["overall"] = {
@@ -672,7 +694,7 @@ def compute_partition_metrics(
 
             if compute_all:
                 correct_all = df.filter(
-                    (pl.col("code") == pl.col("Predicted_code"))
+                    (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
                     | (pl.col("LLM_Evaluation_v2") == "EXACT")
                 ).height
                 exact_all = df.filter(pl.col("LLM_Evaluation_v2") == "EXACT").height
@@ -711,7 +733,7 @@ def compute_partition_metrics(
                 sel_all = df.filter(pl.col(score_column) >= threshold).height
                 tp_all = df.filter(
                     (pl.col(score_column) >= threshold)
-                    & (pl.col("code") == pl.col("Predicted_code"))
+                    & (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
                 ).height
 
                 rec_all = tp_all / total_pred_overall if total_pred_overall else 0.0
@@ -773,14 +795,14 @@ def compute_partition_metrics(
 
     if bootstrap and compute_all and df.height > 0:
         rng = np.random.default_rng(seed)
-        filenames = df["filename"].to_numpy()
-        unique_docs_arr = np.unique(filenames)
+        doc_ids = df["doc_id"].to_numpy()
+        unique_docs_arr = np.unique(doc_ids)
         unique_labels_arr = np.array(unique_labels)
 
-        doc_agg_sem = df.group_by(["filename", "label"]).agg([
+        doc_agg_sem = df.group_by(["doc_id", "semantic_group"]).agg([
             pl.len().alias("denom"),
             (
-                (pl.col("code") == pl.col("Predicted_code"))
+                (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
                 | (pl.col("LLM_Evaluation_v2") == "EXACT")
             )
             .sum()
@@ -944,7 +966,7 @@ def compute_partition_metrics(
     if compute_all:
         total_pred_overall = df.height
         true_correct_overall = df.filter(
-            (pl.col("code") == pl.col("Predicted_code"))
+            (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
             | (pl.col("LLM_Evaluation_v2") == "EXACT")
         ).height
         true_exact_overall = df.filter(pl.col("LLM_Evaluation_v2") == "EXACT").height
@@ -1033,12 +1055,12 @@ def compute_partition_metrics(
         if not compute_all:
             continue
 
-        df_label_pred = df.filter(pl.col("label") == label)
+        df_label_pred = df.filter(pl.col("semantic_group") == label)
         total_pred = df_label_pred.height
         denom = total_pred if total_pred else 1
 
         true_correct = df_label_pred.filter(
-            (pl.col("code") == pl.col("Predicted_code"))
+            (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
             | (pl.col("LLM_Evaluation_v2") == "EXACT")
         ).height
         true_exact = df_label_pred.filter(pl.col("LLM_Evaluation_v2") == "EXACT").height
@@ -1125,7 +1147,7 @@ def compute_metrics(
 ) -> dict[str, dict[str, Any]]:
     """
     Compute full suite of metrics across many partitions.
-    - pred_df: predicted dataframe (contains columns: label, code, Predicted_code, semantic_rel_pred, span, annotation, filename, start_span, etc.)
+    - pred_df: predicted dataframe (contains columns: semantic_group, gold_concept_code, pred_concept_code, semantic_rel_pred, mention, gold_concept_name, doc_id, start_span, etc.)
     - train_mentions / train_cuis / top_100_cuis / top_100_mentions / unique_pairs: sets used to build partitions
     - compute_all_recalls: if False, only strict recall + ratios are computed (faster)
     - include_ratios / threshold / score_column / bootstrap / n_bootstrap / ci / seed: forwarded to compute_partition_metrics
@@ -1137,13 +1159,13 @@ def compute_metrics(
     # Pre-calculate full counts and unique labels once
     # This avoids re-calculating them for every partition
     full_counts = (
-        pred_df.group_by("label")
+        pred_df.group_by("semantic_group")
         .len()
-        .select(["label", "len"])
+        .select(["semantic_group", "len"])
         .to_dict(as_series=False)
     )
-    full_counts_map = dict(zip(full_counts["label"], full_counts["len"]))
-    unique_labels = sorted(pred_df["label"].unique().to_list())
+    full_counts_map = dict(zip(full_counts["semantic_group"], full_counts["len"]))
+    unique_labels = sorted(pred_df["semantic_group"].unique().to_list())
     total_full_count = pred_df.height
 
     # We'll call compute_partition_metrics for each partition and then aggregate
@@ -1173,70 +1195,93 @@ def compute_metrics(
     # We define them as (name, dataframe) tuples
 
     # Pre-calculate some filters to avoid repetition
-    unique_df = pl.DataFrame(list(unique_pairs), schema=["span", "code"], orient="row")
+    unique_df = pl.DataFrame(
+        list(unique_pairs), schema=["mention", "gold_concept_code"], orient="row"
+    )
 
     repeated = (
-        pred_df.group_by(["filename", "code"])
-        .agg(pl.count().alias("count"))
+        pred_df.group_by(["doc_id", "gold_concept_code"])
+        .agg(pl.len().alias("count"))
         .filter(pl.col("count") >= 2)
-        .select(["filename", "code"])
+        .select(["doc_id", "gold_concept_code"])
     )
 
     partition_specs = [
         ("All", pred_df),
-        ("seen_cuis", pred_df.filter(pl.col("code").is_in(list(train_cuis)))),
-        ("unseen_cuis", pred_df.filter(~pl.col("code").is_in(list(train_cuis)))),
-        ("seen_mentions", pred_df.filter(pl.col("span").is_in(list(train_mentions)))),
+        (
+            "seen_cuis",
+            pred_df.filter(pl.col("gold_concept_code").is_in(list(train_cuis))),
+        ),
+        (
+            "unseen_cuis",
+            pred_df.filter(~pl.col("gold_concept_code").is_in(list(train_cuis))),
+        ),
+        (
+            "seen_mentions",
+            pred_df.filter(pl.col("mention").is_in(list(train_mentions))),
+        ),
         (
             "unseen_mentions",
-            pred_df.filter(~pl.col("span").is_in(list(train_mentions))),
+            pred_df.filter(~pl.col("mention").is_in(list(train_mentions))),
         ),
-        ("in_top_100_cuis", pred_df.filter(pl.col("code").is_in(list(top_100_cuis)))),
+        (
+            "in_top_100_cuis",
+            pred_df.filter(pl.col("gold_concept_code").is_in(list(top_100_cuis))),
+        ),
         (
             "not_in_top_100_cuis",
-            pred_df.filter(~pl.col("code").is_in(list(top_100_cuis))),
+            pred_df.filter(~pl.col("gold_concept_code").is_in(list(top_100_cuis))),
         ),
         (
             "in_top_100_mentions",
-            pred_df.filter(pl.col("span").is_in(list(top_100_mentions))),
+            pred_df.filter(pl.col("mention").is_in(list(top_100_mentions))),
         ),
         (
             "not_in_top_100_mentions",
-            pred_df.filter(~pl.col("span").is_in(list(top_100_mentions))),
+            pred_df.filter(~pl.col("mention").is_in(list(top_100_mentions))),
         ),
         (
             "seen_unique_pairs",
-            pred_df.join(unique_df, on=["span", "code"], how="inner"),
+            pred_df.join(unique_df, on=["mention", "gold_concept_code"], how="inner"),
         ),
         (
             "unseen_unique_pairs",
-            pred_df.join(unique_df, on=["span", "code"], how="anti"),
+            pred_df.join(unique_df, on=["mention", "gold_concept_code"], how="anti"),
         ),
-        ("identical", pred_df.filter(pl.col("span") == pl.col("annotation"))),
-        ("not_identical", pred_df.filter(pl.col("span") != pl.col("annotation"))),
-        ("one_word", pred_df.filter(pl.col("span").str.count_matches(" ") == 0)),
-        ("two_words", pred_df.filter(pl.col("span").str.count_matches(" ") == 1)),
-        ("three_words", pred_df.filter(pl.col("span").str.count_matches(" ") == 2)),
+        ("identical", pred_df.filter(pl.col("mention") == pl.col("gold_concept_name"))),
+        (
+            "not_identical",
+            pred_df.filter(pl.col("mention") != pl.col("gold_concept_name")),
+        ),
+        ("one_word", pred_df.filter(pl.col("mention").str.count_matches(" ") == 0)),
+        ("two_words", pred_df.filter(pl.col("mention").str.count_matches(" ") == 1)),
+        ("three_words", pred_df.filter(pl.col("mention").str.count_matches(" ") == 2)),
         (
             "more_than_three_words",
-            pred_df.filter(pl.col("span").str.count_matches(" ") >= 3),
+            pred_df.filter(pl.col("mention").str.count_matches(" ") >= 3),
         ),
         (
             "abbrev_only",
             pred_df.filter(
-                pl.col("span").str.strip_chars().str.contains(r"^[A-Z0-9\-]{2,}$")
+                pl.col("mention").str.strip_chars().str.contains(r"^[A-Z0-9\-]{2,}$")
             ),
         ),
         (
             "abbrev_or_contains",
-            pred_df.filter(pl.col("span").str.contains(r"\b[A-Z0-9\-]{2,}\b")),
+            pred_df.filter(pl.col("mention").str.contains(r"\b[A-Z0-9\-]{2,}\b")),
         ),
         (
             "not_abbrev",
-            pred_df.filter(~pl.col("span").str.contains(r"\b[A-Z0-9\-]{2,}\b")),
+            pred_df.filter(~pl.col("mention").str.contains(r"\b[A-Z0-9\-]{2,}\b")),
         ),
-        ("repeated", pred_df.join(repeated, on=["filename", "code"], how="inner")),
-        ("not_repeated", pred_df.join(repeated, on=["filename", "code"], how="anti")),
+        (
+            "repeated",
+            pred_df.join(repeated, on=["doc_id", "gold_concept_code"], how="inner"),
+        ),
+        (
+            "not_repeated",
+            pred_df.join(repeated, on=["doc_id", "gold_concept_code"], how="anti"),
+        ),
     ]
 
     # -------------------------
@@ -1294,9 +1339,9 @@ def compute_metrics(
 
         return entry
 
-    def _aggregate(label: str, part: dict[str, Any]):
-        if label not in final_results:
-            final_results[label] = _init_label_entry(label)
+    def _aggregate(semantic_group: str, part: dict[str, Any]):
+        if semantic_group not in final_results:
+            final_results[semantic_group] = _init_label_entry(semantic_group)
 
         rs_map = part.get("recall_strict", {})
         ratio_map = part.get("ratios", {})
@@ -1310,45 +1355,53 @@ def compute_metrics(
         precision_map = part.get("precision", {})
         f1_map = part.get("f1", {})
 
-        strict_val = list(rs_map.get(label, {"": 0.0}).values())[0]
-        ratio_val = list(ratio_map.get(label, {"": "N/A"}).values())[0]
-        final_results[label]["index"].append(list(ratio_map.get(label, {}).keys())[0])
-        final_results[label]["recall_strict"].append(strict_val)
-        final_results[label]["ratios"].append(ratio_val)
+        strict_val = list(rs_map.get(semantic_group, {"": 0.0}).values())[0]
+        ratio_val = list(ratio_map.get(semantic_group, {"": "N/A"}).values())[0]
+        final_results[semantic_group]["index"].append(
+            list(ratio_map.get(semantic_group, {}).keys())[0]
+        )
+        final_results[semantic_group]["recall_strict"].append(strict_val)
+        final_results[semantic_group]["ratios"].append(ratio_val)
 
         if bootstrap:
             rs_ci_low_map = part.get("recall_strict_ci_low", {})
             rs_ci_high_map = part.get("recall_strict_ci_high", {})
-            final_results[label]["recall_strict_ci_low"].append(
-                list(rs_ci_low_map.get(label, {"": None}).values())[0]
+            final_results[semantic_group]["recall_strict_ci_low"].append(
+                list(rs_ci_low_map.get(semantic_group, {"": None}).values())[0]
             )
-            final_results[label]["recall_strict_ci_high"].append(
-                list(rs_ci_high_map.get(label, {"": None}).values())[0]
+            final_results[semantic_group]["recall_strict_ci_high"].append(
+                list(rs_ci_high_map.get(semantic_group, {"": None}).values())[0]
             )
 
         if compute_all_recalls:
-            correct_val = list(correct_map.get(label, {"": 0.0}).values())[0]
-            exact_val = list(exact_map.get(label, {"": 0.0}).values())[0]
-            partial_val = list(partial_map.get(label, {"": 0.0}).values())[0]
-            narrow_val = list(narrow_map.get(label, {"": 0.0}).values())[0]
-            broad_val = list(broad_map.get(label, {"": 0.0}).values())[0]
-            no_relation_val = list(no_relation_map.get(label, {"": 0.0}).values())[0]
+            correct_val = list(correct_map.get(semantic_group, {"": 0.0}).values())[0]
+            exact_val = list(exact_map.get(semantic_group, {"": 0.0}).values())[0]
+            partial_val = list(partial_map.get(semantic_group, {"": 0.0}).values())[0]
+            narrow_val = list(narrow_map.get(semantic_group, {"": 0.0}).values())[0]
+            broad_val = list(broad_map.get(semantic_group, {"": 0.0}).values())[0]
+            no_relation_val = list(
+                no_relation_map.get(semantic_group, {"": 0.0}).values()
+            )[0]
 
-            final_results[label]["recall_correct"].append(correct_val)
-            final_results[label]["recall_exact"].append(exact_val)
-            final_results[label]["recall_partial"].append(partial_val)
-            final_results[label]["recall_narrow"].append(narrow_val)
-            final_results[label]["recall_broad"].append(broad_val)
-            final_results[label]["recall_no_relation"].append(no_relation_val)
+            final_results[semantic_group]["recall_correct"].append(correct_val)
+            final_results[semantic_group]["recall_exact"].append(exact_val)
+            final_results[semantic_group]["recall_partial"].append(partial_val)
+            final_results[semantic_group]["recall_narrow"].append(narrow_val)
+            final_results[semantic_group]["recall_broad"].append(broad_val)
+            final_results[semantic_group]["recall_no_relation"].append(no_relation_val)
 
         if bootstrap and compute_all_recalls:
 
             def _append_boot(key_low, key_high, part_low, part_high):
-                final_results[label][key_low].append(
-                    list(part.get(part_low, {}).get(label, {"": None}).values())[0]
+                final_results[semantic_group][key_low].append(
+                    list(
+                        part.get(part_low, {}).get(semantic_group, {"": None}).values()
+                    )[0]
                 )
-                final_results[label][key_high].append(
-                    list(part.get(part_high, {}).get(label, {"": None}).values())[0]
+                final_results[semantic_group][key_high].append(
+                    list(
+                        part.get(part_high, {}).get(semantic_group, {"": None}).values()
+                    )[0]
                 )
 
             _append_boot(
@@ -1389,14 +1442,16 @@ def compute_metrics(
             )
 
         if has_threshold:
-            recall_thresh_val = list(recall_thresh_map.get(label, {"": 0.0}).values())[
+            recall_thresh_val = list(
+                recall_thresh_map.get(semantic_group, {"": 0.0}).values()
+            )[0]
+            precision_val = list(precision_map.get(semantic_group, {"": 0.0}).values())[
                 0
             ]
-            precision_val = list(precision_map.get(label, {"": 0.0}).values())[0]
-            f1_val = list(f1_map.get(label, {"": 0.0}).values())[0]
-            final_results[label]["recall"].append(recall_thresh_val)
-            final_results[label]["precision"].append(precision_val)
-            final_results[label]["f1"].append(f1_val)
+            f1_val = list(f1_map.get(semantic_group, {"": 0.0}).values())[0]
+            final_results[semantic_group]["recall"].append(recall_thresh_val)
+            final_results[semantic_group]["precision"].append(precision_val)
+            final_results[semantic_group]["f1"].append(f1_val)
 
             if bootstrap:
                 r_ci_low_map = part.get("recall_ci_low", {})
@@ -1406,23 +1461,23 @@ def compute_metrics(
                 f1_ci_low_map = part.get("f1_ci_low", {})
                 f1_ci_high_map = part.get("f1_ci_high", {})
 
-                final_results[label]["recall_ci_low"].append(
-                    list(r_ci_low_map.get(label, {"": None}).values())[0]
+                final_results[semantic_group]["recall_ci_low"].append(
+                    list(r_ci_low_map.get(semantic_group, {"": None}).values())[0]
                 )
-                final_results[label]["recall_ci_high"].append(
-                    list(r_ci_high_map.get(label, {"": None}).values())[0]
+                final_results[semantic_group]["recall_ci_high"].append(
+                    list(r_ci_high_map.get(semantic_group, {"": None}).values())[0]
                 )
-                final_results[label]["precision_ci_low"].append(
-                    list(p_ci_low_map.get(label, {"": None}).values())[0]
+                final_results[semantic_group]["precision_ci_low"].append(
+                    list(p_ci_low_map.get(semantic_group, {"": None}).values())[0]
                 )
-                final_results[label]["precision_ci_high"].append(
-                    list(p_ci_high_map.get(label, {"": None}).values())[0]
+                final_results[semantic_group]["precision_ci_high"].append(
+                    list(p_ci_high_map.get(semantic_group, {"": None}).values())[0]
                 )
-                final_results[label]["f1_ci_low"].append(
-                    list(f1_ci_low_map.get(label, {"": None}).values())[0]
+                final_results[semantic_group]["f1_ci_low"].append(
+                    list(f1_ci_low_map.get(semantic_group, {"": None}).values())[0]
                 )
-                final_results[label]["f1_ci_high"].append(
-                    list(f1_ci_high_map.get(label, {"": None}).values())[0]
+                final_results[semantic_group]["f1_ci_high"].append(
+                    list(f1_ci_high_map.get(semantic_group, {"": None}).values())[0]
                 )
 
     # Iterate with tqdm
@@ -1431,7 +1486,7 @@ def compute_metrics(
 
         # Aggregate immediately
         rs_map = part_res.get("recall_strict", {})
-        for label in sorted(rs_map.keys()):
-            _aggregate(label, part_res)
+        for semantic_group in sorted(rs_map.keys()):
+            _aggregate(semantic_group, part_res)
 
     return final_results

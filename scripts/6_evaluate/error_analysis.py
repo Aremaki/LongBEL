@@ -34,9 +34,9 @@ def main(datasets: list[str]):
             separator="\t",
             has_header=True,
             schema_overrides={
-                "code": str,
+                "gold_concept_code": str,
                 "mention_id": str,
-                "filename": str,  # force as string
+                "doc_id": str,  # force as string
             },  # type: ignore
         )
         validation_path = (
@@ -51,23 +51,28 @@ def main(datasets: list[str]):
                 separator="\t",
                 has_header=True,
                 schema_overrides={
-                    "code": str,
+                    "gold_concept_code": str,
                     "mention_id": str,
-                    "filename": str,  # force as string
+                    "doc_id": str,  # force as string
                 },  # type: ignore
             )
             # Reduce validation dataset to 10% as before
             split = int(len(val_df) * 0.9)
             val_df = val_df[:split]
             train_df = pl.concat([train_df, val_df])
-        train_cuis = set(train_df["code"].drop_nulls())
-        train_mentions = set(train_df["span"].drop_nulls())
+        train_cuis = set(train_df["gold_concept_code"].drop_nulls())
+        train_mentions = set(train_df["mention"].drop_nulls())
         unique_pairs = (
-            train_df.select(["span", "code"]).drop_nulls().unique().iter_rows()
+            train_df.select(["mention", "gold_concept_code"])
+            .drop_nulls()
+            .unique()
+            .iter_rows()
         )
         unique_pairs = set(unique_pairs)
-        top_100_cuis = set(train_df["code"].value_counts().head(100)["code"])
-        top_100_mentions = set(train_df["span"].value_counts().head(100)["span"])
+        top_100_cuis = set(
+            train_df["gold_concept_code"].value_counts().head(100)["gold_concept_code"]
+        )
+        top_100_mentions = set(train_df["mention"].value_counts().head(100)["mention"])
         for aug_data in ["human_only", "full_upsampled"]:
             for constraint in [True, False]:
                 for ckpt in ["last", "best"]:
@@ -87,8 +92,6 @@ def main(datasets: list[str]):
                             continue
                         pred_df = load_predictions(
                             preditction_path,
-                            dataset=dataset,
-                            # relextractor=relextractor,
                         )
                         scores = compute_metrics(
                             pred_df=pred_df,

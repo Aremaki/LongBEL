@@ -200,11 +200,11 @@ def parse_text_long(
             # Emit the pair
             doc_id = data.get("document_id", "")
             tsv_line = {
-                "filename": doc_id,
-                "label": entity_group,
+                "doc_id": doc_id,
+                "semantic_group": entity_group,
                 "start_span": final_spans[0],
                 "end_span": final_spans[1],
-                "span": entity_text,
+                "mention": entity_text,
             }
             if entity.get("normalized"):
                 tsv_line["gold_code"] = entity["normalized"][0]["db_id"]
@@ -433,11 +433,11 @@ def parse_text(
             # Emit the pair
             doc_id = data.get("document_id", "")
             tsv_line = {
-                "filename": doc_id,
-                "label": entity_group,
+                "doc_id": doc_id,
+                "semantic_group": entity_group,
                 "start_span": global_start,
                 "end_span": global_end,
-                "span": entity_text,
+                "mention": entity_text,
             }
             if entity.get("normalized"):
                 tsv_line["gold_code"] = entity["normalized"][0]["db_id"]
@@ -648,7 +648,7 @@ class _LongBELHubInterface:
             ):
                 sem_groups = []
                 mentions = []
-                filenames = []
+                doc_ids = []
                 mentions_id = []
                 prefix_templates = []
                 gold_codes = []
@@ -662,16 +662,15 @@ class _LongBELHubInterface:
                             sentences[batch_id] += example[sent_id]
                         else:
                             sentences[batch_id] = example[sent_id]
-                        sem_groups.append(entity[sent_id]["label"])
-                        mentions.append(entity[sent_id]["span"])
+                        sem_groups.append(entity[sent_id]["semantic_group"])
                         mentions_id.append(entity[sent_id]["mention_id"])
-                        mentions.append(entity[sent_id]["span"])
-                        filenames.append(entity[sent_id]["filename"])
+                        mentions.append(entity[sent_id]["mention"])
+                        doc_ids.append(entity[sent_id]["doc_id"])
                         start_spans.append(entity[sent_id]["start_span"])
                         end_spans.append(entity[sent_id]["end_span"])
                         gold_codes.append(entity[sent_id].get("gold_code", None))  # type: ignore
                         prefix_templates.append(
-                            f"[{entity[sent_id]['span']}]{{{entity[sent_id]['label']}}} {verb}"
+                            f"[{entity[sent_id]['mention']}]{{{entity[sent_id]['semantic_group']}}} {verb}"
                         )
                     # Remove the sentence
                     else:
@@ -737,7 +736,7 @@ class _LongBELHubInterface:
                 gold_codes = [x for x in gold_codes for _ in range(num_beams)]  # type: ignore
                 start_spans = [x for x in start_spans for _ in range(num_beams)]
                 end_spans = [x for x in end_spans for _ in range(num_beams)]
-                filenames = [x for x in filenames for _ in range(num_beams)]
+                doc_ids = [x for x in doc_ids for _ in range(num_beams)]
                 # Parse predictions
                 codes, predictions = parse_prediction(
                     cleaned_output_sequences,
@@ -762,7 +761,7 @@ class _LongBELHubInterface:
                 all_outputs.extend([
                     {
                         "mention": mention,
-                        "filename": filename,
+                        "doc_id": doc_id,
                         "mention_id": mention_id,
                         "start_span": start_span,
                         "end_span": end_span,
@@ -774,13 +773,13 @@ class _LongBELHubInterface:
                         "beam_score": beam_score,
                         "rank": rank + 1,
                     }
-                    for score, beam_score, code, prediction, mention, filename, mention_id, start_span, end_span, group, gold_code, rank in zip(
+                    for score, beam_score, code, prediction, mention, doc_id, mention_id, start_span, end_span, group, gold_code, rank in zip(
                         scores,
                         beam_scores,
                         codes,
                         predictions,
                         mentions,
-                        filenames,
+                        doc_ids,
                         mentions_id,
                         start_spans,
                         end_spans,

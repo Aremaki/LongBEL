@@ -405,14 +405,14 @@ def parse_text(
             # Emit the pair
             doc_id = data.get("document_id", "")
             tsv_line = {
-                "filename": doc_id,
-                "label": group_annotation,
+                "doc_id": doc_id,
+                "semantic_group": group_annotation,
                 "start_span": global_start,
                 "end_span": global_end,
-                "span": entity_text,
-                "code": "+".join(normalized_ids),
+                "mention": entity_text,
+                "gold_concept_code": "+".join(normalized_ids),
                 "semantic_rel": "EXACT" if len(normalized_ids) == 1 else "COMPOSITE",
-                "annotation": annotation,
+                "gold_concept_name": annotation,
                 "sentence": marked_sent_text,
             }
             tsv_lines_dict[(global_start, global_end)] = tsv_line
@@ -644,14 +644,14 @@ def parse_text_long(
             # Emit the pair
             doc_id = data.get("document_id", "")
             tsv_line = {
-                "filename": doc_id,
-                "label": group_annotation,
+                "doc_id": doc_id,
+                "semantic_group": group_annotation,
                 "start_span": global_start,
                 "end_span": global_end,
-                "span": entity_text,
-                "code": "+".join(normalized_ids),
+                "mention": entity_text,
+                "gold_concept_code": "+".join(normalized_ids),
                 "semantic_rel": "EXACT" if len(normalized_ids) == 1 else "COMPOSITE",
-                "annotation": annotation,
+                "gold_concept_name": annotation,
             }
             tsv_lines_dict[(global_start, global_end)] = tsv_line
             target_entity_text = (
