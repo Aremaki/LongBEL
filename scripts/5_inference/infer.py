@@ -208,7 +208,7 @@ def main(
     result_folder.mkdir(parents=True, exist_ok=True)
 
     # Multiple answers setting for guided decoding
-    if not split_name == "test_simple" and dataset_name == "SPACCC":
+    if dataset_name == "SPACCC":
         multiple_answers = True
     else:
         multiple_answers = False
@@ -272,8 +272,9 @@ def main(
         "num_entities_per_second": num_entities_per_second,
     }
 
-    # Compute recall per label
     no_constraint_df = pl.DataFrame(no_constraint_pred)
+    no_constraint_df = no_constraint_df.sort(["mention_id", "rank"])
+    # Compute recall per label
     top_no_constraint_df = no_constraint_df.filter(pl.col("rank") == 1)
     for label in top_no_constraint_df["semantic_group"].unique().to_list():
         label_df = top_no_constraint_df.filter(pl.col("semantic_group") == label)

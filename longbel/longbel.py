@@ -170,9 +170,10 @@ def parse_text_long(
         passage_text = clean_natural(passage_text)
 
         # Iterate over entities and emit one pair per entity found in this passage
-        all_spans = []
+        all_relative_spans = []
         for entity in data.get("entities", []):
-            global_start = entity["offsets"][0][0]
+            global_start = min(off[0] for off in entity["offsets"])
+            global_end = max(off[1] for off in entity["offsets"])
             # Keep only entities whose start falls inside this passage
             if not (start_offset_passage <= global_start < end_offset_passage):
                 continue
@@ -183,7 +184,7 @@ def parse_text_long(
             entity_group = entity.get("type")
 
             # Get all offsets, convert to relative, and filter for this sentence
-            entity_spans = []
+            relative_entity_spans = []
             for off in entity["offsets"]:
                 global_start_off, global_end_off = off
                 if not (start_offset_passage <= global_start_off < end_offset_passage):
@@ -191,25 +192,26 @@ def parse_text_long(
 
                 rel_start_off = global_start_off - start_offset_passage
                 rel_end_off = global_end_off - start_offset_passage
-                entity_spans.append((rel_start_off, rel_end_off))
-            entity_spans.sort(key=lambda x: x[0])
-            final_spans = [entity_spans[0][0], entity_spans[-1][1]]
-            entity_span_key = tuple(final_spans)
-            all_spans.append(final_spans)
+                relative_entity_spans.append((rel_start_off, rel_end_off))
+            relative_entity_spans.sort(key=lambda x: x[0])
+            all_relative_spans.append([
+                relative_entity_spans[0][0],
+                relative_entity_spans[-1][1],
+            ])
 
             # Emit the pair
             doc_id = data.get("document_id", "")
             tsv_line = {
                 "doc_id": doc_id,
                 "semantic_group": entity_group,
-                "start_span": final_spans[0],
-                "end_span": final_spans[1],
+                "start_span": global_start,
+                "end_span": global_end,
                 "mention": entity_text,
             }
             if entity.get("normalized"):
                 tsv_line["gold_concept_code"] = entity["normalized"][0]["db_id"]
                 tsv_line["gold_concept_name"] = entity["normalized"][0]["db_match"]
-            tsv_lines_dict[entity_span_key] = tsv_line
+            tsv_lines_dict[(global_start, global_end)] = tsv_line
             target_entity_text = (
                 start_entity
                 + entity_text
@@ -218,11 +220,16 @@ def parse_text_long(
                 + entity_group
                 + end_group
             )
-            target_texts_dict[entity_span_key] = f"{target_entity_text} {verb}"
+            target_texts_dict[(global_start, global_end)] = (
+                f"{target_entity_text} {verb}"
+            )
 
         # Insert all entity markers in a single pass to avoid offset shifts
         passage_text = _insert_entity_markers(
-            passage_text, all_spans, start_entity=start_entity, end_entity=end_entity
+            passage_text,
+            all_relative_spans,
+            start_entity=start_entity,
+            end_entity=end_entity,
         )
         source_text += passage_text.rstrip("\n") + "\n"
     source_text += "<SEP>"
