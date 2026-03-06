@@ -648,9 +648,12 @@ class _LongBELHubInterface:
             ):
                 sem_groups = []
                 mentions = []
+                filenames = []
                 mentions_id = []
                 prefix_templates = []
                 gold_codes = []
+                start_spans = []
+                end_spans = []
                 for batch_id, (example, entity) in enumerate(
                     zip(batch_examples, batch_entities)
                 ):
@@ -663,6 +666,9 @@ class _LongBELHubInterface:
                         mentions.append(entity[sent_id]["span"])
                         mentions_id.append(entity[sent_id]["mention_id"])
                         mentions.append(entity[sent_id]["span"])
+                        filenames.append(entity[sent_id]["filename"])
+                        start_spans.append(entity[sent_id]["start_span"])
+                        end_spans.append(entity[sent_id]["end_span"])
                         gold_codes.append(entity[sent_id].get("gold_code", None))  # type: ignore
                         prefix_templates.append(
                             f"[{entity[sent_id]['span']}]{{{entity[sent_id]['label']}}} {verb}"
@@ -729,6 +735,9 @@ class _LongBELHubInterface:
                 mentions = [x for x in mentions for _ in range(num_beams)]
                 mentions_id = [x for x in mentions_id for _ in range(num_beams)]
                 gold_codes = [x for x in gold_codes for _ in range(num_beams)]  # type: ignore
+                start_spans = [x for x in start_spans for _ in range(num_beams)]
+                end_spans = [x for x in end_spans for _ in range(num_beams)]
+                filenames = [x for x in filenames for _ in range(num_beams)]
                 # Parse predictions
                 codes, predictions = parse_prediction(
                     cleaned_output_sequences,
@@ -753,7 +762,10 @@ class _LongBELHubInterface:
                 all_outputs.extend([
                     {
                         "mention": mention,
+                        "filename": filename,
                         "mention_id": mention_id,
+                        "start_span": start_span,
+                        "end_span": end_span,
                         "semantic_group": group,
                         "gold_concept_code": gold_code,
                         "pred_concept_name": prediction,
@@ -762,13 +774,16 @@ class _LongBELHubInterface:
                         "beam_score": beam_score,
                         "rank": rank + 1,
                     }
-                    for score, beam_score, code, prediction, mention, mention_id, group, gold_code, rank in zip(
+                    for score, beam_score, code, prediction, mention, filename, mention_id, start_span, end_span, group, gold_code, rank in zip(
                         scores,
                         beam_scores,
                         codes,
                         predictions,
                         mentions,
+                        filenames,
                         mentions_id,
+                        start_spans,
+                        end_spans,
                         sem_groups,
                         gold_codes,
                         list(range(num_beams)) * batch_size,

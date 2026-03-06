@@ -337,6 +337,8 @@ def main(
 
     # Compute recall per label
     constraint_df = pl.DataFrame(constraint_preds)
+    # sort by mention_id and drop duplicates (filename, start_span, end_span)
+    constraint_df = constraint_df.sort(["mention_id", "rank"])
     top_constraint_df = constraint_df.filter(pl.col("rank") == 1)
     for semantic_group in top_constraint_df["semantic_group"].unique().to_list():
         label_df = top_constraint_df.filter(pl.col("semantic_group") == semantic_group)
