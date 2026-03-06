@@ -508,7 +508,6 @@ def parse_prediction(
             print(
                 "IndexError: splitting failed or empty prediction, adding empty string as prediction."
             )
-            print(f"Full text: {output}")  # type: ignore
             prediction = "NO_PREDICTION"
             code = "NO_CODE"
         codes.append(code)
