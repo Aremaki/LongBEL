@@ -207,7 +207,8 @@ def parse_text_long(
                 "mention": entity_text,
             }
             if entity.get("normalized"):
-                tsv_line["gold_code"] = entity["normalized"][0]["db_id"]
+                tsv_line["gold_concept_code"] = entity["normalized"][0]["db_id"]
+                tsv_line["gold_concept_name"] = entity["normalized"][0]["db_match"]
             tsv_lines_dict[entity_span_key] = tsv_line
             target_entity_text = (
                 start_entity
@@ -440,7 +441,8 @@ def parse_text(
                 "mention": entity_text,
             }
             if entity.get("normalized"):
-                tsv_line["gold_code"] = entity["normalized"][0]["db_id"]
+                tsv_line["gold_concept_code"] = entity["normalized"][0]["db_id"]
+                tsv_line["gold_concept_name"] = entity["normalized"][0]["db_match"]
             tsv_lines_dict[(global_start, global_end)] = tsv_line
             source_sentences[(global_start, global_end)] = marked_sent_text
             target_entity_text = (
@@ -651,7 +653,8 @@ class _LongBELHubInterface:
                 doc_ids = []
                 mentions_id = []
                 prefix_templates = []
-                gold_codes = []
+                gold_concept_codes = []
+                gold_concept_names = []
                 start_spans = []
                 end_spans = []
                 for batch_id, (example, entity) in enumerate(
@@ -668,7 +671,12 @@ class _LongBELHubInterface:
                         doc_ids.append(entity[sent_id]["doc_id"])
                         start_spans.append(entity[sent_id]["start_span"])
                         end_spans.append(entity[sent_id]["end_span"])
-                        gold_codes.append(entity[sent_id].get("gold_code", None))  # type: ignore
+                        gold_concept_codes.append(
+                            entity[sent_id].get("gold_concept_code", None)
+                        )  # type: ignore
+                        gold_concept_names.append(
+                            entity[sent_id].get("gold_concept_name", None)
+                        )  # type: ignore
                         prefix_templates.append(
                             f"[{entity[sent_id]['mention']}]{{{entity[sent_id]['semantic_group']}}} {verb}"
                         )
@@ -733,12 +741,17 @@ class _LongBELHubInterface:
                 sem_groups = [x for x in sem_groups for _ in range(num_beams)]
                 mentions = [x for x in mentions for _ in range(num_beams)]
                 mentions_id = [x for x in mentions_id for _ in range(num_beams)]
-                gold_codes = [x for x in gold_codes for _ in range(num_beams)]  # type: ignore
+                gold_concept_codes = [
+                    x for x in gold_concept_codes for _ in range(num_beams)
+                ]  # type: ignore
+                gold_concept_names = [
+                    x for x in gold_concept_names for _ in range(num_beams)
+                ]  # type: ignore
                 start_spans = [x for x in start_spans for _ in range(num_beams)]
                 end_spans = [x for x in end_spans for _ in range(num_beams)]
                 doc_ids = [x for x in doc_ids for _ in range(num_beams)]
                 # Parse predictions
-                codes, predictions = parse_prediction(
+                pred_concept_codes, pred_concept_names = parse_prediction(
                     cleaned_output_sequences,
                     sem_groups,
                     verb,
@@ -766,25 +779,27 @@ class _LongBELHubInterface:
                         "start_span": start_span,
                         "end_span": end_span,
                         "semantic_group": group,
-                        "gold_concept_code": gold_code,
-                        "pred_concept_name": prediction,
-                        "pred_concept_code": code,
+                        "gold_concept_code": gold_concept_code,
+                        "gold_concept_name": gold_concept_name,
+                        "pred_concept_name": pred_concept_name,
+                        "pred_concept_code": pred_concept_code,
                         "score": score,
                         "beam_score": beam_score,
                         "rank": rank + 1,
                     }
-                    for score, beam_score, code, prediction, mention, doc_id, mention_id, start_span, end_span, group, gold_code, rank in zip(
+                    for score, beam_score, pred_concept_code, pred_concept_name, mention, doc_id, mention_id, start_span, end_span, group, gold_concept_code, gold_concept_name, rank in zip(
                         scores,
                         beam_scores,
-                        codes,
-                        predictions,
+                        pred_concept_codes,
+                        pred_concept_names,
                         mentions,
                         doc_ids,
                         mentions_id,
                         start_spans,
                         end_spans,
                         sem_groups,
-                        gold_codes,
+                        gold_concept_codes,
+                        gold_concept_names,
                         list(range(num_beams)) * batch_size,
                     )
                 ])
