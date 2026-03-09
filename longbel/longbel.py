@@ -494,11 +494,11 @@ def parse_prediction(
             if text_to_code:
                 if multiple_answers:
                     prediction_list = prediction.split("<+>")  # type: ignore
-                    code_list = []
+                    code_list = set()
                     for pred in prediction_list:
-                        code_list.append(
-                            text_to_code[group].get(pred.strip(), "NO_CODE")
-                        )
+                        code_list.add(text_to_code[group].get(pred.strip(), "NO_CODE"))
+                    if len(code_list) > 1 and "NO_CODE" in code_list:
+                        code_list.remove("NO_CODE")
                     code = "+".join(code_list)
                 else:
                     code = text_to_code[group].get(prediction, "NO_CODE")
