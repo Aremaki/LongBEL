@@ -577,6 +577,135 @@ def skip_undesired_tokens(outputs, tokenizer):
 
 
 class _LongBELHubInterface:
+    def predict_batch(
+        self,
+        all_outputs,
+        batch_size,
+        input_sentences,
+        sem_groups,
+        mentions,
+        mentions_id,
+        doc_ids,
+        start_spans,
+        end_spans,
+        gold_concept_codes,
+        gold_concept_names,
+        prefix_templates,
+        constrained,
+        multiple_answers,
+        num_beams,
+        verb,
+        **kwargs,
+    ):
+        input_args = {
+            k: v.to(self.device)  # type: ignore
+            for k, v in self.tokenizer.batch_encode_plus(  # type: ignore
+                input_sentences, padding="longest", return_tensors="pt"
+            ).items()
+        }
+
+        # Constrained decoding
+        prefix_allowed_tokens_fn = None
+        if constrained:
+            if self.candidate_trie is None:  # type: ignore
+                raise ValueError(
+                    "candidate_trie is not loaded in the model. Use constrained=False."
+                )
+            prefix_allowed_tokens_fn = get_prefix_allowed_tokens_fn(
+                model=self,
+                sources=input_sentences,
+                prefix_templates=prefix_templates,
+                sem_groups=sem_groups,
+                multiple_answers=multiple_answers,
+            )
+        outputs = self.generate(  # type: ignore
+            **input_args,
+            max_new_tokens=128,
+            num_beams=num_beams,
+            num_return_sequences=num_beams,
+            output_scores=True,
+            return_dict_in_generate=True,
+            prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
+            eos_token_id=self.tokenizer.sep_token_id,  # type: ignore
+            **kwargs,
+        )
+        decoded_sequences = self.tokenizer.batch_decode(  # type: ignore
+            outputs.sequences,
+            skip_special_tokens=False,
+            clean_up_tokenization_spaces=True,
+        )
+        cleaned_output_sequences = skip_undesired_tokens(
+            decoded_sequences,
+            self.tokenizer,  # type: ignore
+        )
+
+        prefix_len = input_args["input_ids"].size(1)
+
+        # Duplicate sem_groups and mentions for each beam
+        sem_groups = [x for x in sem_groups for _ in range(num_beams)]
+        mentions = [x for x in mentions for _ in range(num_beams)]
+        mentions_id = [x for x in mentions_id for _ in range(num_beams)]
+        gold_concept_codes = [x for x in gold_concept_codes for _ in range(num_beams)]  # type: ignore
+        gold_concept_names = [x for x in gold_concept_names for _ in range(num_beams)]  # type: ignore
+        start_spans = [x for x in start_spans for _ in range(num_beams)]
+        end_spans = [x for x in end_spans for _ in range(num_beams)]
+        doc_ids = [x for x in doc_ids for _ in range(num_beams)]
+        # Parse predictions
+        pred_concept_codes, pred_concept_names = parse_prediction(
+            cleaned_output_sequences,
+            sem_groups,
+            verb,
+            self.text_to_code,  # type: ignore
+            multiple_answers=multiple_answers,
+        )
+        scores = compute_score(
+            outputs,
+            self.tokenizer,  # type: ignore
+            prefix_len=prefix_len,
+        )
+        beam_scores = [
+            float(torch.exp(s)) if num_beams > 1 else float("nan")
+            for s in (
+                outputs.sequences_scores
+                if num_beams > 1
+                else [torch.tensor(float("nan"))] * len(scores)
+            )
+        ]
+        all_outputs.extend([
+            {
+                "mention": mention,
+                "doc_id": doc_id,
+                "mention_id": mention_id,
+                "start_span": start_span,
+                "end_span": end_span,
+                "semantic_group": group,
+                "gold_concept_code": gold_concept_code,
+                "gold_concept_name": gold_concept_name,
+                "pred_concept_name": pred_concept_name,
+                "pred_concept_code": pred_concept_code,
+                "score": score,
+                "beam_score": beam_score,
+                "rank": rank + 1,
+            }
+            for score, beam_score, pred_concept_code, pred_concept_name, mention, doc_id, mention_id, start_span, end_span, group, gold_concept_code, gold_concept_name, rank in zip(
+                scores,
+                beam_scores,
+                pred_concept_codes,
+                pred_concept_names,
+                mentions,
+                doc_ids,
+                mentions_id,
+                start_spans,
+                end_spans,
+                sem_groups,
+                gold_concept_codes,
+                gold_concept_names,
+                list(range(num_beams)) * batch_size,
+            )
+        ])
+        print(f"Sampling completed. Generated {len(all_outputs)} predictions.")
+        return all_outputs, cleaned_output_sequences
+
     def sample(
         self,
         bigbio_pages: list[dict],  # type: ignore
@@ -609,8 +738,10 @@ class _LongBELHubInterface:
             f"Starting sampling on {len(bigbio_pages)} pages (lang={getattr(self, 'lang', 'unknown')}, constrained={constrained}, beams={num_beams}, batch_size={batch_size})"
         )
 
-        def _progress(iterable, desc: str, total: Optional[int] = None):
-            if show_progress:
+        def _progress(
+            iterable, desc: str, total: Optional[int] = None, show: bool = True
+        ):
+            if show:
                 return tqdm(iterable, desc=desc, total=total)
             return iterable
 
@@ -640,177 +771,131 @@ class _LongBELHubInterface:
             all_examples.append(examples)
             all_entities_info.append(entities_info)
 
+        if not long_format:
+            # Flatten examples and entities_info for batch processing
+            all_examples = [ex for page in all_examples for ex in page]
+            all_entities_info = [info for page in all_entities_info for info in page]
         total_batches = (len(all_examples) + batch_size - 1) // batch_size
         print(
             f"Input preparation completed. Running generation on {total_batches} batches."
         )
-        for i in range(0, len(all_examples), batch_size):
+        for i in _progress(
+            range(0, len(all_examples), batch_size),
+            desc="Processing batches",
+            total=total_batches,
+            show=show_progress and not long_format,
+        ):
             batch_examples = all_examples[i : i + batch_size]
             batch_entities = all_entities_info[i : i + batch_size]
-            sentences = dict.fromkeys(range(len(batch_examples)), "")
-            max_sentences = max(len(batch) for batch in batch_examples)
-            for sent_id in _progress(
-                range(max_sentences),
-                desc=f"Batch {i // batch_size + 1}/{total_batches}",
-                total=max_sentences,
-            ):
-                sem_groups = []
-                mentions = []
-                doc_ids = []
-                mentions_id = []
-                prefix_templates = []
-                gold_concept_codes = []
-                gold_concept_names = []
-                start_spans = []
-                end_spans = []
-                for batch_id, (example, entity) in enumerate(
-                    zip(batch_examples, batch_entities)
-                ):
-                    if sent_id < len(example):
-                        if long_format:
-                            sentences[batch_id] += example[sent_id]
-                        else:
-                            sentences[batch_id] = example[sent_id]
-                        sem_groups.append(entity[sent_id]["semantic_group"])
-                        mentions_id.append(entity[sent_id]["mention_id"])
-                        mentions.append(entity[sent_id]["mention"])
-                        doc_ids.append(entity[sent_id]["doc_id"])
-                        start_spans.append(entity[sent_id]["start_span"])
-                        end_spans.append(entity[sent_id]["end_span"])
-                        gold_concept_codes.append(
-                            entity[sent_id].get("gold_concept_code", None)
-                        )  # type: ignore
-                        gold_concept_names.append(
-                            entity[sent_id].get("gold_concept_name", None)
-                        )  # type: ignore
-                        prefix_templates.append(
-                            f"[{entity[sent_id]['mention']}]{{{entity[sent_id]['semantic_group']}}} {verb}"
-                        )
-                    # Remove the sentence
-                    else:
-                        sentences.pop(batch_id, None)
-
-                # Encode input batch
-                input_sentences = list(sentences.values())
-                batch_ids = list(sentences.keys())
-                input_args = {
-                    k: v.to(self.device)  # type: ignore
-                    for k, v in self.tokenizer.batch_encode_plus(  # type: ignore
-                        input_sentences, padding="longest", return_tensors="pt"
-                    ).items()
-                }
-
-                # Constrained decoding
-                prefix_allowed_tokens_fn = None
-                if constrained:
-                    if self.candidate_trie is None:  # type: ignore
-                        raise ValueError(
-                            "candidate_trie is not loaded in the model. Use constrained=False."
-                        )
-                    prefix_allowed_tokens_fn = get_prefix_allowed_tokens_fn(
-                        model=self,
-                        sources=input_sentences,
-                        prefix_templates=prefix_templates,
-                        sem_groups=sem_groups,
-                        multiple_answers=multiple_answers,
-                    )
-                outputs = self.generate(  # type: ignore
-                    **input_args,
-                    max_new_tokens=128,
+            if not long_format:
+                sem_groups = [entity["semantic_group"] for entity in batch_entities]
+                mentions = [entity["mention"] for entity in batch_entities]
+                doc_ids = [entity["doc_id"] for entity in batch_entities]
+                mentions_id = [entity["mention_id"] for entity in batch_entities]
+                start_spans = [entity["start_span"] for entity in batch_entities]
+                end_spans = [entity["end_span"] for entity in batch_entities]
+                gold_concept_codes = [
+                    entity.get("gold_concept_code", None) for entity in batch_entities
+                ]  # type: ignore
+                gold_concept_names = [
+                    entity.get("gold_concept_name", None) for entity in batch_entities
+                ]  # type: ignore
+                prefix_templates = [
+                    f"[{entity['mention']}]{{{entity['semantic_group']}}} {verb}"
+                    for entity in batch_entities
+                ]
+                input_sentences = batch_examples
+                all_outputs, _ = self.predict_batch(
+                    all_outputs=all_outputs,
+                    batch_size=batch_size,
+                    input_sentences=input_sentences,
+                    sem_groups=sem_groups,
+                    mentions=mentions,
+                    mentions_id=mentions_id,
+                    doc_ids=doc_ids,
+                    start_spans=start_spans,
+                    end_spans=end_spans,
+                    gold_concept_codes=gold_concept_codes,
+                    gold_concept_names=gold_concept_names,
+                    prefix_templates=prefix_templates,
+                    constrained=constrained,
+                    multiple_answers=multiple_answers,
                     num_beams=num_beams,
-                    num_return_sequences=num_beams,
-                    output_scores=True,
-                    return_dict_in_generate=True,
-                    prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
-                    eos_token_id=self.tokenizer.sep_token_id,  # type: ignore
+                    verb=verb,
                     **kwargs,
                 )
-                decoded_sequences = self.tokenizer.batch_decode(  # type: ignore
-                    outputs.sequences,
-                    skip_special_tokens=False,
-                    clean_up_tokenization_spaces=True,
-                )
-                cleaned_output_sequences = skip_undesired_tokens(
-                    decoded_sequences,
-                    self.tokenizer,  # type: ignore
-                )
-                # Update sentences with the cleaned outputs
-                if long_format:
+            else:
+                sentences = dict.fromkeys(range(len(batch_examples)), "")
+                max_sentences = max(len(batch) for batch in batch_examples)
+                for sent_id in _progress(
+                    range(max_sentences),
+                    desc=f"Batch {i // batch_size + 1}/{total_batches}",
+                    total=max_sentences,
+                    show=show_progress,
+                ):
+                    sem_groups = []
+                    mentions = []
+                    doc_ids = []
+                    mentions_id = []
+                    prefix_templates = []
+                    gold_concept_codes = []
+                    gold_concept_names = []
+                    start_spans = []
+                    end_spans = []
+                    for batch_id, (example, entity) in enumerate(
+                        zip(batch_examples, batch_entities)
+                    ):
+                        if sent_id < len(example):
+                            if long_format:
+                                sentences[batch_id] += example[sent_id]
+                            else:
+                                sentences[batch_id] = example[sent_id]
+                            sem_groups.append(entity[sent_id]["semantic_group"])
+                            mentions_id.append(entity[sent_id]["mention_id"])
+                            mentions.append(entity[sent_id]["mention"])
+                            doc_ids.append(entity[sent_id]["doc_id"])
+                            start_spans.append(entity[sent_id]["start_span"])
+                            end_spans.append(entity[sent_id]["end_span"])
+                            gold_concept_codes.append(
+                                entity[sent_id].get("gold_concept_code", None)
+                            )  # type: ignore
+                            gold_concept_names.append(
+                                entity[sent_id].get("gold_concept_name", None)
+                            )  # type: ignore
+                            prefix_templates.append(
+                                f"[{entity[sent_id]['mention']}]{{{entity[sent_id]['semantic_group']}}} {verb}"
+                            )
+                        # Remove the sentence
+                        else:
+                            sentences.pop(batch_id, None)
+
+                    # Encode input batch
+                    input_sentences = list(sentences.values())
+                    all_outputs, cleaned_output_sequences = self.predict_batch(
+                        all_outputs=all_outputs,
+                        batch_size=batch_size,
+                        input_sentences=input_sentences,
+                        sem_groups=sem_groups,
+                        mentions=mentions,
+                        mentions_id=mentions_id,
+                        doc_ids=doc_ids,
+                        start_spans=start_spans,
+                        end_spans=end_spans,
+                        gold_concept_codes=gold_concept_codes,
+                        gold_concept_names=gold_concept_names,
+                        prefix_templates=prefix_templates,
+                        constrained=constrained,
+                        multiple_answers=multiple_answers,
+                        num_beams=num_beams,
+                        verb=verb,
+                        **kwargs,
+                    )
+                    batch_ids = list(sentences.keys())
                     for i, batch_id in enumerate(batch_ids):
                         clean_sentence = cleaned_output_sequences[num_beams * i]
                         clean_sentence = clean_sentence.rstrip("<SEP>") + "<SEP>"
                         sentences[batch_id] = clean_sentence
 
-                prefix_len = input_args["input_ids"].size(1)
-
-                # Duplicate sem_groups and mentions for each beam
-                sem_groups = [x for x in sem_groups for _ in range(num_beams)]
-                mentions = [x for x in mentions for _ in range(num_beams)]
-                mentions_id = [x for x in mentions_id for _ in range(num_beams)]
-                gold_concept_codes = [
-                    x for x in gold_concept_codes for _ in range(num_beams)
-                ]  # type: ignore
-                gold_concept_names = [
-                    x for x in gold_concept_names for _ in range(num_beams)
-                ]  # type: ignore
-                start_spans = [x for x in start_spans for _ in range(num_beams)]
-                end_spans = [x for x in end_spans for _ in range(num_beams)]
-                doc_ids = [x for x in doc_ids for _ in range(num_beams)]
-                # Parse predictions
-                pred_concept_codes, pred_concept_names = parse_prediction(
-                    cleaned_output_sequences,
-                    sem_groups,
-                    verb,
-                    self.text_to_code,  # type: ignore
-                    multiple_answers=multiple_answers,
-                )
-                scores = compute_score(
-                    outputs,
-                    self.tokenizer,  # type: ignore
-                    prefix_len=prefix_len,
-                )
-                beam_scores = [
-                    float(torch.exp(s)) if num_beams > 1 else float("nan")
-                    for s in (
-                        outputs.sequences_scores
-                        if num_beams > 1
-                        else [torch.tensor(float("nan"))] * len(scores)
-                    )
-                ]
-                all_outputs.extend([
-                    {
-                        "mention": mention,
-                        "doc_id": doc_id,
-                        "mention_id": mention_id,
-                        "start_span": start_span,
-                        "end_span": end_span,
-                        "semantic_group": group,
-                        "gold_concept_code": gold_concept_code,
-                        "gold_concept_name": gold_concept_name,
-                        "pred_concept_name": pred_concept_name,
-                        "pred_concept_code": pred_concept_code,
-                        "score": score,
-                        "beam_score": beam_score,
-                        "rank": rank + 1,
-                    }
-                    for score, beam_score, pred_concept_code, pred_concept_name, mention, doc_id, mention_id, start_span, end_span, group, gold_concept_code, gold_concept_name, rank in zip(
-                        scores,
-                        beam_scores,
-                        pred_concept_codes,
-                        pred_concept_names,
-                        mentions,
-                        doc_ids,
-                        mentions_id,
-                        start_spans,
-                        end_spans,
-                        sem_groups,
-                        gold_concept_codes,
-                        gold_concept_names,
-                        list(range(num_beams)) * batch_size,
-                    )
-                ])
-
-                print(f"Sampling completed. Generated {len(all_outputs)} predictions.")
         return all_outputs  # type: ignore
 
     def encode(self, sentence):
