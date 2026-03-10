@@ -258,14 +258,14 @@ def _process_hf_dataset(
                     current_tgt = split_t[0] + "<SEP>"
                 else:
                     raise ValueError(f"Unexpected target format: {t}")
-                current_tgt_split = current_tgt.split("}" + transition_verb)
+                current_tgt_split = current_tgt.split("} " + transition_verb)
                 if len(current_tgt_split) == 2:
                     current_tgt_prefix.append(
-                        current_tgt_split[0] + "}" + transition_verb
+                        current_tgt_split[0] + "} " + transition_verb
                     )
                     completions.append(current_tgt_split[1])
                 else:
-                    raise ValueError(f"Unexpected target format: {current_tgt}")
+                    raise ValueError(f"Unexpected current target format: {current_tgt}")
             # Add Instruction prefix to source
             prompts = [
                 f"### Context\n{s}\n\n### Previous Normalizations\n{p}\n\n### Prediction\n{prefix}"
