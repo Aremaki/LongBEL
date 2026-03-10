@@ -117,6 +117,7 @@ def clean_natural(text):
         .replace("}", ")")
         .replace("[", "(")
         .replace("]", ")")
+        .replace("\n", " ")
     )
 
 
@@ -174,7 +175,6 @@ def parse_text(
     start_group,
     end_group,
     nlp,
-    transition_verb,
     code_to_title=None,
     code_to_syn=None,
     code_to_group=None,
@@ -411,7 +411,6 @@ def parse_text(
                     + marked_sent_text[end_in_sent:]
                 )
 
-            marked_sent_text += "<SEP>"
             # Emit the pair
             doc_id = data.get("id", "")
             if train_mode:
@@ -451,12 +450,10 @@ def parse_text(
             )
             if train_mode:
                 target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {transition_verb} {annotation}<SEP>"
+                    f"{target_entity_text} {annotation}"
                 )
             else:
-                target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {transition_verb}"
-                )
+                target_texts_dict[(global_start, global_end)] = target_entity_text
     # Sort keys to have a deterministic order
     sorted_keys = sorted(tsv_lines_dict.keys(), key=lambda x: (x[0], x[1]))
     for entity_id, entity_span in enumerate(sorted_keys):
@@ -481,7 +478,6 @@ def parse_text_hybrid_long(
     start_group,
     end_group,
     nlp,
-    transition_verb,
     code_to_title=None,
     code_to_syn=None,
     code_to_group=None,
@@ -686,7 +682,6 @@ def parse_text_hybrid_long(
                     marked_text = other_passage_text + "\n" + marked_text
                 elif other_passage_id > i:
                     marked_text = marked_text + "\n" + other_passage_text
-            marked_text += "<SEP>"
             # Emit the pair
             doc_id = data.get("id", "")
             if train_mode:
@@ -725,12 +720,10 @@ def parse_text_hybrid_long(
             )
             if train_mode:
                 target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {transition_verb} {annotation}<SEP>"
+                    f"{target_entity_text} {annotation}\n"
                 )
             else:
-                target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {transition_verb}"
-                )
+                target_texts_dict[(global_start, global_end)] = target_entity_text
     # Sort keys to have a deterministic order
     sorted_keys = sorted(tsv_lines_dict.keys(), key=lambda x: (x[0], x[1]))
     for entity_id, entity_span in enumerate(sorted_keys):
@@ -756,7 +749,6 @@ def parse_text_hybrid_short(
     start_group,
     end_group,
     nlp,
-    transition_verb,
     code_to_title=None,
     code_to_syn=None,
     code_to_group=None,
@@ -991,7 +983,6 @@ def parse_text_hybrid_short(
                     + end_entity
                     + marked_sent_text[end_in_sent:]
                 )
-            marked_sent_text += "<SEP>"
             # Emit the pair
             doc_id = data.get("id", "")
             if train_mode:
@@ -1031,12 +1022,10 @@ def parse_text_hybrid_short(
             )
             if train_mode:
                 target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {transition_verb} {annotation}<SEP>"
+                    f"{target_entity_text} {annotation}\n"
                 )
             else:
-                target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {transition_verb}"
-                )
+                target_texts_dict[(global_start, global_end)] = target_entity_text
     # Sort keys to have a deterministic order
     sorted_keys = sorted(tsv_lines_dict.keys(), key=lambda x: (x[0], x[1]))
     for entity_id, entity_span in enumerate(sorted_keys):
@@ -1061,7 +1050,6 @@ def parse_text_long(
     end_entity,
     start_group,
     end_group,
-    transition_verb,
     code_to_title=None,
     code_to_syn=None,
     code_to_group=None,
@@ -1291,12 +1279,10 @@ def parse_text_long(
             )
             if train_mode:
                 target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {transition_verb} {annotation}<SEP>"
+                    f"{target_entity_text} {annotation}<SEP>"
                 )
             else:
-                target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {transition_verb}"
-                )
+                target_texts_dict[(global_start, global_end)] = target_entity_text
 
         # Insert all entity markers in a single pass to avoid offset shifts
         passage_text = _insert_entity_markers(
@@ -1306,7 +1292,6 @@ def parse_text_long(
             end_entity=end_entity,
         )
         source_text += passage_text.rstrip("\n") + "\n"
-    source_text += "<SEP>"
     # Sort keys to have a deterministic order
     target_texts = []
     sorted_keys = sorted(target_texts_dict.keys(), key=lambda x: (x[0], x[1]))
@@ -1363,13 +1348,10 @@ def process_bigbio_dataset(
     # transition verb and sentence tokenizer depend on language (french, english, spanish)
     if lang == "fr":
         nlp = nltk.data.load("tokenizers/punkt/french.pickle")
-        transition_verb = "est"
     elif lang == "es":
         nlp = nltk.data.load("tokenizers/punkt/spanish.pickle")
-        transition_verb = "es"
     elif lang == "en":
         nlp = nltk.data.load("tokenizers/punkt/english.pickle")
-        transition_verb = "is"
     else:
         raise ValueError(f"Unsupported language '{lang}' for transition verb.")
 
@@ -1404,7 +1386,6 @@ def process_bigbio_dataset(
                 start_group=start_group,
                 end_group=end_group,
                 nlp=nlp,
-                transition_verb=transition_verb,
                 code_to_title=code_to_title,
                 code_to_syn=code_to_syn,
                 code_to_group=code_to_group,
@@ -1428,7 +1409,6 @@ def process_bigbio_dataset(
                 start_group=start_group,
                 end_group=end_group,
                 nlp=nlp,
-                transition_verb=transition_verb,
                 code_to_title=code_to_title,
                 code_to_syn=code_to_syn,
                 code_to_group=code_to_group,
@@ -1452,7 +1432,6 @@ def process_bigbio_dataset(
                 start_group=start_group,
                 end_group=end_group,
                 nlp=nlp,
-                transition_verb=transition_verb,
                 code_to_title=code_to_title,
                 code_to_syn=code_to_syn,
                 code_to_group=code_to_group,
@@ -1476,7 +1455,6 @@ def process_bigbio_dataset(
                     end_entity=end_entity,
                     start_group=start_group,
                     end_group=end_group,
-                    transition_verb=transition_verb,
                     code_to_title=code_to_title,
                     code_to_syn=code_to_syn,
                     code_to_group=code_to_group,

@@ -131,14 +131,6 @@ def _process_hf_dataset(
     context_format: str = "short",
 ):
     typer.echo(f"→ Loading dataset {hf_id}:{data_dir} ...")
-    if lang == "fr":
-        transition_verb = "est"
-    elif lang == "es":
-        transition_verb = "es"
-    elif lang == "en":
-        transition_verb = "is"
-    else:
-        raise ValueError(f"Unsupported language '{lang}' for transition verb.")
     data_folder = out_root / name
     _ensure_dir(data_folder)
     try:
@@ -245,9 +237,9 @@ def _process_hf_dataset(
             prefixes = []
             completions = []
             for t in tgt:
-                t_split = t.split("} " + transition_verb)
+                t_split = t.split("} ")
                 if len(t_split) == 2:
-                    prefixes.append(t_split[0] + "} " + transition_verb)
+                    prefixes.append(t_split[0] + "} ")
                     completions.append(t_split[1])
                 else:
                     raise ValueError(f"Unexpected target format: {t}")
@@ -265,22 +257,20 @@ def _process_hf_dataset(
             current_tgt_prefix = []
             completions = []
             for t in tgt:
-                split_t = t.split("<SEP>")
+                split_t = t.split("\n")
                 # remove empty string
                 split_t = [s for s in split_t if s]
                 if len(split_t) >= 2:
-                    previous_tgt.append("<SEP>".join(split_t[:-1]) + "<SEP>")
-                    current_tgt = split_t[-1] + "<SEP>"
+                    previous_tgt.append("\n".join(split_t[:-1]) + "\n")
+                    current_tgt = split_t[-1]
                 elif len(split_t) == 1:
                     previous_tgt.append("None")
-                    current_tgt = split_t[0] + "<SEP>"
+                    current_tgt = split_t[0]
                 else:
                     raise ValueError(f"Unexpected target format: {t}")
-                current_tgt_split = current_tgt.split("} " + transition_verb)
+                current_tgt_split = current_tgt.split("} ")
                 if len(current_tgt_split) == 2:
-                    current_tgt_prefix.append(
-                        current_tgt_split[0] + "} " + transition_verb
-                    )
+                    current_tgt_prefix.append(current_tgt_split[0] + "} ")
                     completions.append(current_tgt_split[1])
                 else:
                     raise ValueError(f"Unexpected current target format: {current_tgt}")

@@ -39,17 +39,14 @@ def get_split_marker(
     # Determine verb based on dataset
     if dataset_name == "MedMentions":
         nlp = nltk.data.load("tokenizers/punkt/english.pickle")
-        verb = "is"
     elif dataset_name == "SPACCC":
         nlp = nltk.data.load("tokenizers/punkt/spanish.pickle")
-        verb = "es"
     elif dataset_name in ["EMEA", "MEDLINE"]:
         nlp = nltk.data.load("tokenizers/punkt/french.pickle")
-        verb = "est"
     else:
         raise ValueError(f"Unknown dataset_name: {dataset_name}")
 
-    return "} " + verb, nlp, verb
+    return "} ", nlp
 
 
 def sentence_tokenize_safe(text, nlp):
@@ -96,36 +93,34 @@ def sentence_tokenize_safe(text, nlp):
     return sentences
 
 
-def add_headers_to_prompt(
-    source: str, target: str, context_format: str, transition_verb: str
-):
+def add_headers_to_prompt(source: str, target: str, context_format: str):
     if context_format == "long":
         prompt = f"### Context\n{source}\n\n"
         completion = f"### Predictions\n{target}"
     elif context_format == "short":
-        target_split = target.split("} " + transition_verb)
+        target_split = target.split("} ")
         if len(target_split) == 2:
-            prefix = target_split[0] + "} " + transition_verb
+            prefix = target_split[0] + "} "
             completion = target_split[1]
         else:
             raise ValueError(f"Unexpected target format: {target}")
         # Add Instruction prefix to source
         prompt = f"### Context\n{source}\n\n### Prediction\n{prefix}"
     elif context_format in ["hybrid_short", "hybrid_long"]:
-        split_target = target.split("<SEP>")
+        split_target = target.split("\n")
         # remove empty string
         split_target = [s for s in split_target if s]
         if len(split_target) >= 2:
-            previous_tgt = "<SEP>".join(split_target[:-1]) + "<SEP>"
-            current_tgt = split_target[-1] + "<SEP>"
+            previous_tgt = "\n".join(split_target[:-1]) + "\n"
+            current_tgt = split_target[-1]
         elif len(split_target) == 1:
             previous_tgt = "None"
-            current_tgt = split_target[0] + "<SEP>"
+            current_tgt = split_target[0]
         else:
             raise ValueError(f"Unexpected target format: {target}")
-        current_tgt_split = current_tgt.split("} " + transition_verb)
+        current_tgt_split = current_tgt.split("} ")
         if len(current_tgt_split) == 2:
-            current_tgt_prefix = current_tgt_split[0] + "} " + transition_verb
+            current_tgt_prefix = current_tgt_split[0] + "} "
             completion = current_tgt_split[1]
         else:
             raise ValueError(f"Unexpected current target format: {current_tgt}")
@@ -141,7 +136,6 @@ def create_prompt_completion_dataset(
     nlp,
     complete_mode: bool,
     context_format: str,
-    transition_verb: str,
     add_headers: bool = True,
 ):
     def format_example(example):
@@ -150,7 +144,7 @@ def create_prompt_completion_dataset(
         for source, target in zip(example["source"], example["target"]):
             if add_headers:
                 prompt, completion = add_headers_to_prompt(
-                    source, target, context_format, transition_verb
+                    source, target, context_format
                 )
             else:
                 prompt, completion = source, target
@@ -163,7 +157,7 @@ def create_prompt_completion_dataset(
                         split_target = split_target + "<SEP>"
                         if add_headers:
                             prompt, completion = add_headers_to_prompt(
-                                source, split_target, context_format, transition_verb
+                                source, split_target, context_format
                             )
                         else:
                             prompt, completion = source, split_target
@@ -416,10 +410,8 @@ def main(
         tokenizer.add_special_tokens({"pad_token": tokenizer.eos_token})
         model.resize_token_embeddings(len(tokenizer))
     # Add SEP special token and resize embeddings if needed
-    sep_token_str = "<SEP>"
     plus_token_str = "<+>"
     num_added = tokenizer.add_special_tokens({
-        "sep_token": sep_token_str,
         "additional_special_tokens": [
             start_entity_token,
             end_entity_token,
@@ -428,6 +420,9 @@ def main(
             plus_token_str,
         ],
     })
+    if context_format == "long":
+        sep_token_str = "<SEP>"
+        num_added += tokenizer.add_special_tokens({"sep_token": sep_token_str})
     if num_added > 0:
         model.resize_token_embeddings(len(tokenizer))
         print("Added special tokens to tokenizer and resized model embeddings.")
@@ -593,7 +588,7 @@ def main(
                 num_train_epochs = 70
             else:
                 num_train_epochs = 20
-    split_marker, nlp, verb = get_split_marker(dataset_name)
+    split_marker, nlp = get_split_marker(dataset_name)
 
     # Format datasets into prompt/completion format
     train_dataset = create_prompt_completion_dataset(
@@ -601,7 +596,6 @@ def main(
         nlp,
         complete_mode=complete_mode,
         context_format=context_format,
-        transition_verb=verb,
         add_headers=add_headers,
     )
     validation_dataset = create_prompt_completion_dataset(
@@ -609,7 +603,6 @@ def main(
         nlp,
         complete_mode=complete_mode,
         context_format=context_format,
-        transition_verb=verb,
         add_headers=add_headers,
     )
     if context_format == "long":
