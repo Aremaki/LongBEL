@@ -326,7 +326,7 @@ def main(
     augmented_data: str,
     max_length: int = 16_000,
     selection_method: str = "tfidf",
-    long_format: str = "",
+    long_format: str = "short",
     start_entity_token: str = "[",
     end_entity_token: str = "]",
     start_group_token: str = "{",
@@ -366,7 +366,7 @@ def main(
             local_dir = (
                 Path("models")
                 / "NED"
-                / f"{dataset_name}_synth_only_{selection_method}{long_format}"
+                / f"{dataset_name}_synth_only_{selection_method}_{long_format}"
                 / model_short_name
                 / "model_last"
             )
@@ -429,16 +429,19 @@ def main(
 
     # ---------- Load validation dataset (same logic) ----------
     data_folder = Path("data/final_data")
-
+    long_format_source_data = (
+        "" if long_format in ["short", "hybrid", "hybrid_complete"] else "_long"
+    )
+    long_format_target_data = "" if long_format == "short" else "_long"
     validation_source_path = (
         data_folder
         / dataset_name
-        / f"validation_{selection_method}_source{long_format}.pkl"
+        / f"validation_{selection_method}_source{long_format_source_data}.pkl"
     )
     validation_target_path = (
         data_folder
         / dataset_name
-        / f"validation_{selection_method}_target{long_format}.pkl"
+        / f"validation_{selection_method}_target{long_format_target_data}.pkl"
     )
     validation_source_data = load_pickle(validation_source_path)
     validation_target_data = load_pickle(validation_target_path)
@@ -463,12 +466,12 @@ def main(
         human_train_source_data = load_pickle(
             data_folder
             / dataset_name
-            / f"train_{selection_method}_source{long_format}.pkl"
+            / f"train_{selection_method}_source{long_format_source_data}.pkl"
         )
         human_train_target_data = load_pickle(
             data_folder
             / dataset_name
-            / f"train_{selection_method}_target{long_format}.pkl"
+            / f"train_{selection_method}_target{long_format_target_data}.pkl"
         )
         human_train_dataset = Dataset.from_dict({
             "source": human_train_source_data,
@@ -562,7 +565,7 @@ def main(
     split_marker, nlp = get_split_marker(dataset_name)
 
     # Format datasets into prompt/completion format
-    complete_mode = long_format == "mixte"
+    complete_mode = long_format in ["hybrid_complete", "long_complete"]
     train_dataset = create_prompt_completion_dataset(
         train_dataset, nlp, complete_mode=complete_mode, max_length=max_length
     )
@@ -615,12 +618,12 @@ def main(
     output_dir = (
         Path("models")
         / "NED"
-        / f"{dataset_name}_{augmented_data}_{selection_method}{long_format}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}_{long_format}"
         / model_short_name
     )
     logging_dir = (
         Path("logs")
-        / f"{dataset_name}_{augmented_data}_{selection_method}{long_format}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}_{long_format}"
         / model_short_name
     )
     model.gradient_checkpointing_enable()
@@ -736,9 +739,11 @@ if __name__ == "__main__":
         type=str,
         default="short",
         choices=[
-            "",
+            "short",
             "long",
-            "mixte",
+            "long_complete",
+            "hybrid",
+            "hybrid_complete",
         ],
         help="Whether to use augmented data for training",
     )

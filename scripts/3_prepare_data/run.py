@@ -128,7 +128,7 @@ def _process_hf_dataset(
     selection_method: str,
     corrected_code_path: Optional[Path] = None,
     data_dir: Optional[str] = None,
-    long_format: bool = False,
+    context_format: str = "short",
 ):
     typer.echo(f"→ Loading dataset {hf_id}:{data_dir} ...")
 
@@ -195,10 +195,10 @@ def _process_hf_dataset(
             lang=lang,
             selection_method=selection_method,
             best_syn_map=best_syn_map,
-            long_format=long_format,
+            context_format=context_format,
         )
         processed[split_name] = (src, tgt, tsv_data)
-        if long_format:
+        if context_format == "long":
             processed_data_folder = data_folder / "bigbio_dataset/processed_data"
             _ensure_dir(processed_data_folder)
             # Convert HF dataset to Parquet
@@ -211,16 +211,16 @@ def _process_hf_dataset(
         _dump(
             src,
             data_folder
-            / f"{split_name}_{selection_method}_source{'_long' if long_format else ''}.pkl",
+            / f"{split_name}_{selection_method}_source_{context_format}.pkl",
         )
         _dump(
             tgt,
             data_folder
-            / f"{split_name}_{selection_method}_target{'_long' if long_format else ''}.pkl",
+            / f"{split_name}_{selection_method}_target_{context_format}.pkl",
         )
         pl.DataFrame(tsv_data).write_csv(
             file=data_folder
-            / f"{split_name}_{selection_method}_annotations{'_long' if long_format else ''}.tsv",
+            / f"{split_name}_{selection_method}_annotations_{context_format}.tsv",
             separator="\t",
             include_header=True,
         )
@@ -229,7 +229,7 @@ def _process_hf_dataset(
         _ensure_dir(training_data_folder)
         pl.DataFrame({"prompt": src, "completion": tgt}).write_parquet(
             training_data_folder
-            / f"{split_name}_{selection_method}{'_long' if long_format else ''}.parquet"
+            / f"{split_name}_{selection_method}_{context_format}.parquet"
         )
 
 
@@ -283,7 +283,7 @@ def _process_synth_dataset(
         lang=lang,
         selection_method=selection_method,
         best_syn_map=best_syn_map,
-        long_format=False,  # synthetic data is always in short format (no context sentences)
+        context_format="short",  # synthetic data is always in short format (no context sentences)
     )
     # Treat as train split for the synthetic dataset
     _dump(src, data_folder / f"train_{selection_method}_source.pkl")
@@ -358,8 +358,9 @@ def run(
         Path("data/corrected_code/SPACCC_adapted.csv"),
         help="Corrected SNOMED mapping file for SPACCC",
     ),
-    long_format: bool = typer.Option(
-        False, help="Use long format parsing (with context sentences)"
+    context_format: str = typer.Option(
+        "short",
+        help="Whether to include full context in source sequences: 'short' (entity only), 'long' (all passages), or 'hybrid'...",
     ),
 ) -> None:
     """Run preprocessing pipeline for selected datasets and models."""
@@ -410,7 +411,7 @@ def run(
             out_root,
             selection_method,
             data_dir="original_data",
-            long_format=long_format,
+            context_format=context_format,
         )
         # Synthetic MM as its own dataset
         if synth_mm is not None:
@@ -457,7 +458,7 @@ def run(
                     selection_method,
                     corrected_code_path=corrected_code_quaero_path,
                     data_dir="original_data",
-                    long_format=long_format,
+                    context_format=context_format,
                 )
 
             if "MEDLINE" in datasets:
@@ -479,7 +480,7 @@ def run(
                     selection_method,
                     corrected_code_path=corrected_code_quaero_path,
                     data_dir="original_data",
-                    long_format=long_format,
+                    context_format=context_format,
                 )
             if synth_quaero is not None:
                 _process_synth_dataset(
@@ -527,7 +528,7 @@ def run(
             selection_method,
             corrected_code_path=corrected_code_spaccc_path,
             data_dir="original_data",
-            long_format=long_format,
+            context_format=context_format,
         )
 
         # Synthetic SPACCC

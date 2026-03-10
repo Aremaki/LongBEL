@@ -435,9 +435,9 @@ def parse_text(
                     + marked_sent_text[start_in_sent:end_in_sent]
                     + end_entity
                     + marked_sent_text[end_in_sent:]
-                    + "<SEP>"
                 )
 
+            marked_sent_text += "<SEP>"
             # Emit the pair
             doc_id = data.get("document_id", "")
             tsv_line = {
@@ -718,7 +718,7 @@ class _LongBELHubInterface:
         start_group: str = "{",
         end_group: str = "}",
         show_progress: bool = True,
-        long_format: bool = True,
+        context_format: str = "short",
         **kwargs,
     ) -> list[list[dict[str, str]]]:
         # Prepare input batch
@@ -749,7 +749,7 @@ class _LongBELHubInterface:
         all_examples = []
         all_entities_info = []
         for data in bigbio_pages:
-            if long_format:
+            if context_format == "long":
                 examples, entities_info = parse_text_long(
                     data=data,
                     start_entity=start_entity,
@@ -758,7 +758,7 @@ class _LongBELHubInterface:
                     end_group=end_group,
                     verb=verb,
                 )
-            else:
+            elif context_format == "short":
                 examples, entities_info = parse_text(
                     data=data,
                     start_entity=start_entity,
@@ -771,7 +771,7 @@ class _LongBELHubInterface:
             all_examples.append(examples)
             all_entities_info.append(entities_info)
 
-        if not long_format:
+        if not context_format == "long":
             # Flatten examples and entities_info for batch processing
             all_examples = [ex for page in all_examples for ex in page]
             all_entities_info = [info for page in all_entities_info for info in page]
@@ -783,11 +783,11 @@ class _LongBELHubInterface:
             range(0, len(all_examples), batch_size),
             desc="Processing batches",
             total=total_batches,
-            show=show_progress and not long_format,
+            show=show_progress and not context_format == "long",
         ):
             batch_examples = all_examples[i : i + batch_size]
             batch_entities = all_entities_info[i : i + batch_size]
-            if not long_format:
+            if not context_format == "long":
                 sem_groups = [entity["semantic_group"] for entity in batch_entities]
                 mentions = [entity["mention"] for entity in batch_entities]
                 doc_ids = [entity["doc_id"] for entity in batch_entities]
@@ -846,10 +846,7 @@ class _LongBELHubInterface:
                         zip(batch_examples, batch_entities)
                     ):
                         if sent_id < len(example):
-                            if long_format:
-                                sentences[batch_id] += example[sent_id]
-                            else:
-                                sentences[batch_id] = example[sent_id]
+                            sentences[batch_id] += example[sent_id]
                             sem_groups.append(entity[sent_id]["semantic_group"])
                             mentions_id.append(entity[sent_id]["mention_id"])
                             mentions.append(entity[sent_id]["mention"])
