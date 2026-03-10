@@ -1,4 +1,5 @@
 import os
+import re
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import argparse
@@ -7,6 +8,7 @@ import shutil
 from pathlib import Path
 
 import idr_torch  # type: ignore
+import nltk
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -31,27 +33,120 @@ def load_pickle(file_path):
         return pickle.load(file)
 
 
-def get_split_marker(dataset_name: str) -> str:
+def get_split_marker(
+    dataset_name: str,
+) -> tuple[str, nltk.tokenize.PunktSentenceTokenizer]:
     # Determine verb based on dataset
     if dataset_name == "MedMentions":
+        nlp = nltk.data.load("tokenizers/punkt/english.pickle")
         verb = "is"
     elif dataset_name == "SPACCC":
+        nlp = nltk.data.load("tokenizers/punkt/spanish.pickle")
         verb = "es"
     elif dataset_name in ["EMEA", "MEDLINE"]:
+        nlp = nltk.data.load("tokenizers/punkt/french.pickle")
         verb = "est"
     else:
         raise ValueError(f"Unknown dataset_name: {dataset_name}")
 
-    return "} " + verb
+    return "} " + verb, nlp
 
 
-def create_prompt_completion_dataset(dataset):
+def sentence_tokenize_safe(text, nlp):
+    """
+    Split text into sentences while avoiding splits inside entity mentions `[ ... ]`.
+    Returns a list of sentences.
+    """
+    sentences = []
+
+    # split text by newline blocks first
+    chunks = re.split(r"\n+", text)
+
+    cursor = 0
+
+    for chunk in chunks:
+        if not chunk.strip():
+            cursor += len(chunk) + 1
+            continue
+
+        spans = nlp.span_tokenize(chunk)
+
+        last_end = 0
+        open_brackets = 0  # track open entity brackets
+
+        for _, end in spans:
+            # count brackets in the current span
+            open_brackets += chunk[last_end:end].count("[")
+            open_brackets -= chunk[last_end:end].count("]")
+
+            # only allow a break if no unclosed brackets
+            if open_brackets == 0:
+                sent = chunk[last_end:end].strip()
+                if sent:
+                    sentences.append(sent)
+                last_end = end
+
+        # leftover
+        tail = chunk[last_end:].strip()
+        if tail:
+            sentences.append(tail)
+
+        cursor += len(chunk) + 1
+
+    return sentences
+
+
+def create_prompt_completion_dataset(
+    dataset, nlp, complete_mode: bool = False, max_length: int = 16_000
+):
     def format_example(example):
         prompts = []
         completions = []
         for source, target in zip(example["source"], example["target"]):
+            if len(source) + len(target) + 1 > max_length:
+                print(
+                    f"Warning: example exceeds max_length ({len(source) + len(target) + 1} tokens). It will be truncated."
+                )
+                # cut into sentences
+                sentences = sentence_tokenize_safe(source, nlp)
+                target_entities = target.split("<SEP>")
+                new_source = []
+                entity_ref = 0
+                entity_count = 0
+                for sent in sentences:
+                    sent_entities = sent.count("[")
+                    source_trunc = " ".join(new_source + [sent])
+                    target_trunc = (
+                        "<SEP>".join(
+                            target_entities[entity_ref : entity_count + sent_entities]
+                        )
+                        + "<SEP>"
+                    )
+                    if len(source_trunc) + len(target_trunc) + 1 >= max_length:
+                        prompts.append(" ".join(new_source))
+                        completions.append(
+                            "<SEP>".join(target_entities[entity_ref:entity_count])
+                            + "<SEP>"
+                        )
+                        new_source = [sent]
+                        entity_ref = entity_count
+                        entity_count += sent_entities
+                    else:
+                        new_source.append(sent)
+                        entity_count += sent_entities
+
+                source = " ".join(new_source)
+                target = (
+                    "<SEP>".join(target_entities[entity_ref:entity_count]) + "<SEP>"
+                )
             prompts.append(source)
             completions.append(target)
+        if complete_mode:
+            for source, target in zip(example["source"], example["target"]):
+                for split_target in target.split("<SEP>"):
+                    if split_target:
+                        prompts.append(source)
+                        completions.append(split_target + "<SEP>")
         return {"prompt": prompts, "completion": completions}
 
     return dataset.map(
@@ -229,8 +324,9 @@ def main(
     lr: float,
     dataset_name: str,
     augmented_data: str,
+    max_length: int = 16_000,
     selection_method: str = "tfidf",
-    long_format: bool = False,
+    long_format: str = "",
     start_entity_token: str = "[",
     end_entity_token: str = "]",
     start_group_token: str = "{",
@@ -254,9 +350,8 @@ def main(
         )
 
     model_short_name = model_name.split("/")[-1]
-    long_format_str = "_long" if long_format else ""
     print(
-        f"The model {model_short_name} will start SFT with lr={lr} on dataset {augmented_data} {dataset_name} using selection {selection_method} and long_format_str is {long_format_str}."
+        f"The model {model_short_name} will start SFT with lr={lr} on dataset {augmented_data} {dataset_name} using selection {selection_method} and long_format_str is {long_format}."
     )
     # Load tokenizer and model
     try:
@@ -271,7 +366,7 @@ def main(
             local_dir = (
                 Path("models")
                 / "NED"
-                / f"{dataset_name}_synth_only_{selection_method}{long_format_str}"
+                / f"{dataset_name}_synth_only_{selection_method}{long_format}"
                 / model_short_name
                 / "model_last"
             )
@@ -338,24 +433,15 @@ def main(
     validation_source_path = (
         data_folder
         / dataset_name
-        / f"validation_{selection_method}_source{long_format_str}.pkl"
+        / f"validation_{selection_method}_source{long_format}.pkl"
     )
-    if validation_source_path.exists():
-        split_name = "validation"
-    else:
-        split_name = "test"
-        print("Validation file not found, using test file instead.")
-
-    validation_source_data = load_pickle(
+    validation_target_path = (
         data_folder
         / dataset_name
-        / f"{split_name}_{selection_method}_source{long_format_str}.pkl"
+        / f"validation_{selection_method}_target{long_format}.pkl"
     )
-    validation_target_data = load_pickle(
-        data_folder
-        / dataset_name
-        / f"{split_name}_{selection_method}_target{long_format_str}.pkl"
-    )
+    validation_source_data = load_pickle(validation_source_path)
+    validation_target_data = load_pickle(validation_target_path)
 
     validation_data = {
         "source": validation_source_data,
@@ -363,7 +449,7 @@ def main(
     }
     dev_dataset = Dataset.from_dict(validation_data)
 
-    # Reduce validation dataset to 10% as before
+    # Reduce validation dataset to 10%
     indexes = list(range(len(dev_dataset)))
     split = int(len(dev_dataset) * 0.9)
     split_val = indexes[split:]
@@ -377,24 +463,23 @@ def main(
         human_train_source_data = load_pickle(
             data_folder
             / dataset_name
-            / f"train_{selection_method}_source{long_format_str}.pkl"
+            / f"train_{selection_method}_source{long_format}.pkl"
         )
         human_train_target_data = load_pickle(
             data_folder
             / dataset_name
-            / f"train_{selection_method}_target{long_format_str}.pkl"
+            / f"train_{selection_method}_target{long_format}.pkl"
         )
         human_train_dataset = Dataset.from_dict({
             "source": human_train_source_data,
             "target": human_train_target_data,
         })
         # if validation present, add rest to training (same logic)
-        if split_name == "validation":
-            split_train = indexes[:split]
-            human_train_dataset = concatenate_datasets([
-                human_train_dataset,
-                dev_dataset.select(split_train),
-            ])
+        split_train = indexes[:split]
+        human_train_dataset = concatenate_datasets([
+            human_train_dataset,
+            dev_dataset.select(split_train),
+        ])
 
     if augmented_data not in ["human_only", "human_only_ft"]:
         if dataset_name == "MedMentions":
@@ -474,11 +559,16 @@ def main(
                 num_train_epochs = 70
             else:
                 num_train_epochs = 20
-    split_marker = get_split_marker(dataset_name)
+    split_marker, nlp = get_split_marker(dataset_name)
 
     # Format datasets into prompt/completion format
-    train_dataset = create_prompt_completion_dataset(train_dataset)
-    validation_dataset = create_prompt_completion_dataset(validation_dataset)
+    complete_mode = long_format == "mixte"
+    train_dataset = create_prompt_completion_dataset(
+        train_dataset, nlp, complete_mode=complete_mode, max_length=max_length
+    )
+    validation_dataset = create_prompt_completion_dataset(
+        validation_dataset, nlp, complete_mode=complete_mode, max_length=max_length
+    )
 
     train_dataset = train_dataset.map(
         lambda x: preprocess_prompt_completion_example(x, tokenizer, split_marker),
@@ -499,7 +589,6 @@ def main(
         if seq_len > longest_train:
             longest_train = seq_len
 
-    max_length = 16_000
     print(f"Longest training example has {longest_train} tokens.")
     if longest_train > max_length:
         if "8B" in model_name:
@@ -526,12 +615,12 @@ def main(
     output_dir = (
         Path("models")
         / "NED"
-        / f"{dataset_name}_{augmented_data}_{selection_method}{long_format_str}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}{long_format}"
         / model_short_name
     )
     logging_dir = (
         Path("logs")
-        / f"{dataset_name}_{augmented_data}_{selection_method}{long_format_str}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}{long_format}"
         / model_short_name
     )
     model.gradient_checkpointing_enable()
@@ -644,8 +733,20 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--long-format",
-        action="store_true",
-        help="Whether to use long format for training examples",
+        type=str,
+        default="short",
+        choices=[
+            "",
+            "long",
+            "mixte",
+        ],
+        help="Whether to use augmented data for training",
+    )
+    parser.add_argument(
+        "--max-length",
+        type=int,
+        default=16_000,
+        help="The maximum sequence length for training examples (after tokenization). Examples longer than this will be truncated. Default is 16,000 tokens.",
     )
     parser.add_argument(
         "--start-entity-token",
@@ -680,6 +781,7 @@ if __name__ == "__main__":
         augmented_data=args.augmented_data,
         selection_method=args.selection_method,
         long_format=args.long_format,
+        max_length=args.max_length,
         start_entity_token=args.start_entity_token,
         end_entity_token=args.end_entity_token,
         start_group_token=args.start_group_token,
