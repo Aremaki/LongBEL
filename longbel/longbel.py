@@ -24,6 +24,13 @@ from transformers import (
     LlamaForCausalLM,
 )
 
+from longbel.parse_data import (
+    parse_text,
+    parse_text_hybrid_long,
+    parse_text_hybrid_short,
+    parse_text_long,
+)
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO,  # Display INFO and above
@@ -84,398 +91,6 @@ def get_prefix_allowed_tokens_fn(
         return trie_out
 
     return prefix_allowed_tokens_fn
-
-
-def clean_natural(text):
-    return (
-        text.replace("\xa0", " ")
-        .replace("{", "(")
-        .replace("}", ")")
-        .replace("[", "(")
-        .replace("]", ")")
-    )
-
-
-def _insert_entity_markers(
-    text: str, spans: list[tuple[int, int]], start_entity: str, end_entity: str
-) -> str:
-    """Insert entity markers into text using original offsets, handling nested spans.
-
-    The insertion is done in a single pass using start/end events, so offsets
-    remain valid even when spans are nested or adjacent.
-    """
-    if not spans:
-        return text
-
-    text_len = len(text)
-    starts: dict[int, list[tuple[int, int]]] = {}
-    ends: dict[int, list[tuple[int, int]]] = {}
-
-    for start, end in spans:
-        if 0 <= start < end <= text_len:
-            starts.setdefault(start, []).append((start, end))
-            ends.setdefault(end, []).append((start, end))
-
-    if not starts and not ends:
-        return text
-
-    positions = sorted(set(starts) | set(ends))
-    out: list[str] = []
-    last_idx = 0
-
-    for idx in positions:
-        if last_idx < idx:
-            out.append(text[last_idx:idx])
-
-        # Close inner spans first when multiple end at the same position
-        for _ in sorted(ends.get(idx, []), key=lambda x: x[0], reverse=True):
-            out.append(end_entity)
-
-        # Open outer spans first when multiple start at the same position
-        for _ in sorted(starts.get(idx, []), key=lambda x: x[1], reverse=True):
-            out.append(start_entity)
-
-        last_idx = idx
-
-    if last_idx < text_len:
-        out.append(text[last_idx:])
-
-    return "".join(out)
-
-
-def parse_text_long(
-    data,
-    start_entity,
-    end_entity,
-    start_group,
-    end_group,
-    verb,
-) -> tuple[list[str], list[dict[str, str]]]:
-    """Create simple (source, target) pairs per entity.
-
-    For each entity in the BigBio page, returns one pair where:
-      - source: the sentence text that contains the entity mention
-      - target: "<entity> is <annotation>" where <annotation> is the best synonym
-        if available (or the normalized id otherwise).
-    """
-    target_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
-    target_texts: list = []
-    tsv_lines_dict: dict[tuple[tuple[int, int], ...], dict[str, str]] = {}
-    tsv_lines: list[dict[str, str]] = []
-    source_text: str = ""
-    for passage in data.get("passages", []):
-        passage_text = passage["text"][0]
-        start_offset_passage = passage["offsets"][0][0]
-        end_offset_passage = passage["offsets"][0][1]
-        passage_text = clean_natural(passage_text)
-
-        # Iterate over entities and emit one pair per entity found in this passage
-        all_relative_spans = []
-        for entity in data.get("entities", []):
-            global_start = min(off[0] for off in entity["offsets"])
-            global_end = max(off[1] for off in entity["offsets"])
-            # Keep only entities whose start falls inside this passage
-            if not (start_offset_passage <= global_start < end_offset_passage):
-                continue
-            entity_text = " ".join(entity["text"])
-            entity_text = clean_natural(entity_text)
-
-            # Define entity group
-            entity_group = entity.get("type")
-
-            # Get all offsets, convert to relative, and filter for this sentence
-            relative_entity_spans = []
-            for off in entity["offsets"]:
-                global_start_off, global_end_off = off
-                if not (start_offset_passage <= global_start_off < end_offset_passage):
-                    continue
-
-                rel_start_off = global_start_off - start_offset_passage
-                rel_end_off = global_end_off - start_offset_passage
-                relative_entity_spans.append((rel_start_off, rel_end_off))
-            relative_entity_spans.sort(key=lambda x: x[0])
-            all_relative_spans.append([
-                relative_entity_spans[0][0],
-                relative_entity_spans[-1][1],
-            ])
-
-            # Emit the pair
-            doc_id = data.get("document_id", "")
-            tsv_line = {
-                "doc_id": doc_id,
-                "semantic_group": entity_group,
-                "start_span": global_start,
-                "end_span": global_end,
-                "mention": entity_text,
-            }
-            if entity.get("normalized"):
-                tsv_line["gold_concept_code"] = entity["normalized"][0]["db_id"]
-                tsv_line["gold_concept_name"] = entity["normalized"][0]["db_match"]
-            tsv_lines_dict[(global_start, global_end)] = tsv_line
-            target_entity_text = (
-                start_entity
-                + entity_text
-                + end_entity
-                + start_group
-                + entity_group
-                + end_group
-            )
-            target_texts_dict[(global_start, global_end)] = (
-                f"{target_entity_text} {verb}"
-            )
-
-        # Insert all entity markers in a single pass to avoid offset shifts
-        passage_text = _insert_entity_markers(
-            passage_text,
-            all_relative_spans,
-            start_entity=start_entity,
-            end_entity=end_entity,
-        )
-        source_text += passage_text.rstrip("\n") + "\n"
-    source_text += "<SEP>"
-    # Sort keys to have a deterministic order
-    sorted_keys = sorted(target_texts_dict.keys(), key=lambda x: (x[0], x[1]))
-    for entity_id, entity_span in enumerate(sorted_keys):
-        target_texts.append(target_texts_dict[entity_span])
-        tsv_line = tsv_lines_dict[entity_span]
-        tsv_line["mention_id"] = f"{data.get('document_id', '')}.{entity_id + 1}"
-        tsv_lines.append(tsv_line)
-
-    all_inputs = [source_text + target_texts[0]]
-    for i in range(len(target_texts) - 1):
-        all_inputs.append(target_texts[i + 1])
-
-    return all_inputs, tsv_lines
-
-
-def _process_chunk(chunk, offset, text, sent_spans, nlp, entity_spans=None):
-    """Helper to process a chunk of text for sentence tokenization."""
-    if not chunk:
-        return
-
-    chunk_entity_spans = []
-    if entity_spans:
-        for estart, eend in entity_spans:
-            if estart >= offset and eend <= offset + len(chunk):
-                chunk_entity_spans.append((estart - offset, eend - offset))
-
-    last_break = 0
-    spans_from_nlp = nlp.span_tokenize(chunk)
-    for _, end in spans_from_nlp:
-        should_break = True
-        if chunk_entity_spans:
-            for estart, eend in chunk_entity_spans:
-                if estart < end < eend:
-                    should_break = False
-                    break
-        if should_break:
-            abs_start = offset + last_break
-            abs_end = offset + end
-            while abs_start < abs_end and text[abs_start].isspace():
-                abs_start += 1
-            while abs_end > abs_start and text[abs_end - 1].isspace():
-                abs_end -= 1
-            if abs_start < abs_end:
-                sent_spans.append((abs_start, abs_end))
-            last_break = end
-
-    if last_break < len(chunk):
-        abs_start = offset + last_break
-        abs_end = offset + len(chunk)
-        while abs_start < abs_end and text[abs_start].isspace():
-            abs_start += 1
-        while abs_end > abs_start and text[abs_end - 1].isspace():
-            abs_end -= 1
-        if abs_start < abs_end:
-            sent_spans.append((abs_start, abs_end))
-
-
-def span_tokenize_with_trailing_newlines(text, nlp, entity_spans=None):
-    """
-    Tokenize text into sentence spans, treating punctuation and line breaks as sentence boundaries.
-
-    Newlines are NOT included in the resulting spans, and leading/trailing
-    whitespace is trimmed so each span covers the sentence content only
-    (no space before or after).
-
-    Args:
-        text (str): The input passage.
-        nlp (PunktSentenceTokenizer): Pre-trained NLTK sentence tokenizer.
-        entity_spans (List[Tuple[int, int]], optional): List of (start, end) character
-            offsets of entities in the text. If provided, sentence splitting will be
-            avoided within these spans.
-    """
-    sent_spans = []
-    last_break = 0
-
-    # Find all potential break points (newlines)
-    break_points = [m.start() for m in re.finditer(r"\n+", text)]
-    break_points.append(len(text))
-
-    for point in break_points:
-        is_in_entity = False
-        if entity_spans:
-            for estart, eend in entity_spans:
-                if estart <= point < eend:
-                    is_in_entity = True
-                    break
-
-        if not is_in_entity:
-            chunk = text[last_break:point]
-            offset = last_break
-            _process_chunk(chunk, offset, text, sent_spans, nlp, entity_spans)
-            last_break = point
-
-    # Process the final chunk if it wasn't handled
-    if last_break < len(text):
-        chunk = text[last_break:]
-        offset = last_break
-        _process_chunk(chunk, offset, text, sent_spans, nlp, entity_spans)
-
-    return sent_spans
-
-
-def parse_text(
-    data,
-    start_entity,
-    end_entity,
-    start_group,
-    end_group,
-    nlp,
-    verb,
-) -> tuple[list[str], list[dict[str, str]]]:
-    """Create simple (source, target) pairs per entity.
-
-    For each entity in the BigBio page, returns one pair where:
-      - source: the sentence text that contains the entity mention
-      - target: "<entity> is <annotation>" where <annotation> is the best synonym
-        if available (or the normalized id otherwise).
-    """
-    source_sentences: dict[tuple[tuple[int, int], ...], str] = {}
-    target_sentences: dict[tuple[tuple[int, int], ...], str] = {}
-    tsv_lines: list[dict[str, str]] = []
-    tsv_lines_dict: dict[tuple[tuple[int, int], ...], dict[str, str]] = {}
-    for passage in data.get("passages", []):
-        passage_text = passage["text"][0]
-        start_offset_passage = passage["offsets"][0][0]
-        end_offset_passage = passage["offsets"][0][1]
-        passage_text = clean_natural(passage_text)
-
-        # Collect entity spans to avoid sentence splitting inside them
-        entity_spans = []
-        for entity in data.get("entities", []):
-            for start, end in entity.get("offsets", []):
-                if start_offset_passage <= start < end_offset_passage:
-                    rel_start = start - start_offset_passage
-                    rel_end = end - start_offset_passage
-                    entity_spans.append((rel_start, rel_end))
-
-        # Compute sentence spans within the passage text
-        sent_spans = span_tokenize_with_trailing_newlines(
-            passage_text, nlp, entity_spans=entity_spans
-        )
-
-        # Pre-extract sentences with text for quick access
-        sentences = [
-            (s_start, s_end, passage_text[s_start:s_end])
-            for s_start, s_end in sent_spans
-        ]
-
-        # Iterate over entities and emit one pair per entity found in this passage
-        for entity in data.get("entities", []):
-            # min and max of all entity offsets to get the global span of the entity for filtering sentences
-            global_start = min(off[0] for off in entity["offsets"])
-            global_end = max(off[1] for off in entity["offsets"])
-            # Keep only entities whose start falls inside this passage
-            if not (start_offset_passage <= global_start < end_offset_passage):
-                continue
-            rel_start = global_start - start_offset_passage
-            entity_text = " ".join(entity["text"])
-            entity_text = clean_natural(entity_text)
-
-            # Define entity group
-            entity_group = entity.get("type")
-
-            # Find the sentence that contains the entity start
-            sent_text = passage_text
-            sent_start_offset = 0
-            for s_start, s_end, s_text in sentences:
-                if s_start <= rel_start < s_end:
-                    sent_text = s_text
-                    sent_start_offset = s_start
-                    break
-
-            # Add entity markers around all occurrences of the entity
-            marked_sent_text = sent_text
-            # Get all offsets, convert to relative, and filter for this sentence
-            all_spans_in_sent = []
-            for off in entity["offsets"]:
-                global_start_off, global_end_off = off
-                if not (start_offset_passage <= global_start_off < end_offset_passage):
-                    continue
-
-                rel_start_off = global_start_off - start_offset_passage
-                rel_end_off = global_end_off - start_offset_passage
-
-                start_in_sent = rel_start_off - sent_start_offset
-                end_in_sent = rel_end_off - sent_start_offset
-
-                if 0 <= start_in_sent < len(sent_text) and 0 < end_in_sent <= len(
-                    sent_text
-                ):
-                    all_spans_in_sent.append((start_in_sent, end_in_sent))
-
-            # Sort spans in reverse to mark from the end, preventing offset shifts
-            all_spans_in_sent.sort(key=lambda x: x[0], reverse=True)
-
-            for start_in_sent, end_in_sent in all_spans_in_sent:
-                marked_sent_text = (
-                    marked_sent_text[:start_in_sent]
-                    + start_entity
-                    + marked_sent_text[start_in_sent:end_in_sent]
-                    + end_entity
-                    + marked_sent_text[end_in_sent:]
-                )
-
-            marked_sent_text += "<SEP>"
-            # Emit the pair
-            doc_id = data.get("document_id", "")
-            tsv_line = {
-                "doc_id": doc_id,
-                "semantic_group": entity_group,
-                "start_span": global_start,
-                "end_span": global_end,
-                "mention": entity_text,
-            }
-            if entity.get("normalized"):
-                tsv_line["gold_concept_code"] = entity["normalized"][0]["db_id"]
-                tsv_line["gold_concept_name"] = entity["normalized"][0]["db_match"]
-            tsv_lines_dict[(global_start, global_end)] = tsv_line
-            source_sentences[(global_start, global_end)] = marked_sent_text
-            target_entity_text = (
-                start_entity
-                + entity_text
-                + end_entity
-                + start_group
-                + entity_group
-                + end_group
-            )
-            target_sentences[(global_start, global_end)] = (
-                f"{target_entity_text} {verb}"
-            )
-
-    # Sort keys to have a deterministic order
-    all_inputs = []
-    sorted_keys = sorted(tsv_lines_dict.keys(), key=lambda x: (x[0], x[1]))
-    for entity_id, entity_span in enumerate(sorted_keys):
-        tsv_line = tsv_lines_dict[entity_span]
-        source = source_sentences[entity_span]
-        target = target_sentences[entity_span]
-        tsv_line["mention_id"] = f"{data.get('document_id', '')}.{entity_id + 1}"
-        tsv_lines.append(tsv_line)
-        all_inputs.append(source + target)
-
-    return all_inputs, tsv_lines
 
 
 def parse_prediction(
@@ -756,7 +371,7 @@ class _LongBELHubInterface:
                     end_entity=end_entity,
                     start_group=start_group,
                     end_group=end_group,
-                    verb=verb,
+                    transition_verb=verb,
                 )
             elif context_format == "short":
                 examples, entities_info = parse_text(
@@ -766,7 +381,34 @@ class _LongBELHubInterface:
                     start_group=start_group,
                     end_group=end_group,
                     nlp=nlp,  # type: ignore
-                    verb=verb,
+                    transition_verb=verb,
+                    train_mode=False,
+                )
+            elif context_format == "hybrid_long":
+                examples, entities_info = parse_text_hybrid_long(
+                    data=data,
+                    start_entity=start_entity,
+                    end_entity=end_entity,
+                    start_group=start_group,
+                    end_group=end_group,
+                    nlp=nlp,  # type: ignore
+                    transition_verb=verb,
+                    train_mode=False,
+                )
+            elif context_format == "hybrid_short":
+                examples, entities_info = parse_text_hybrid_short(
+                    data=data,
+                    start_entity=start_entity,
+                    end_entity=end_entity,
+                    start_group=start_group,
+                    end_group=end_group,
+                    nlp=nlp,  # type: ignore
+                    transition_verb=verb,
+                    train_mode=False,
+                )
+            else:
+                raise ValueError(
+                    f"Unsupported context_format value '{context_format}'."
                 )
             all_examples.append(examples)
             all_entities_info.append(entities_info)

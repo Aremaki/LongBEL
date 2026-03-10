@@ -17,10 +17,13 @@ For each entity mention, the script creates:
 ## Usage
 
 ### 1. Standard Run
-Process the default datasets (MedMentions, EMEA, MEDLINE) using embedding-based synonym selection.
+Process the default datasets (MedMentions, EMEA, MEDLINE, SPACCC) using tfidf synonym selection.
 
 ```bash
-python scripts/3_prepare_data/run.py
+python scripts/3_prepare_data/run.py --context-format long --process-synth
+python scripts/3_prepare_data/run.py --context-format short
+python scripts/3_prepare_data/run.py --context-format hybrid_short
+python scripts/3_prepare_data/run.py --context-format hybrid_long
 ```
 
 Then upload them to the HuggingFace Repository:
