@@ -326,7 +326,8 @@ def main(
     augmented_data: str,
     max_length: int = 16_000,
     selection_method: str = "tfidf",
-    long_format: str = "short",
+    context_format: str = "short",
+    complete_mode: bool = False,
     start_entity_token: str = "[",
     end_entity_token: str = "]",
     start_group_token: str = "{",
@@ -351,8 +352,9 @@ def main(
 
     model_short_name = model_name.split("/")[-1]
     print(
-        f"The model {model_short_name} will start SFT with lr={lr} on dataset {augmented_data} {dataset_name} using selection {selection_method} and long_format_str is {long_format}."
+        f"The model {model_short_name} will start SFT with lr={lr} on dataset {augmented_data} {dataset_name} using selection {selection_method} and context_format is {context_format} and complete_mode is {complete_mode}."
     )
+    complete_mode_str = "_complete" if complete_mode else ""
     # Load tokenizer and model
     try:
         tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
@@ -366,7 +368,7 @@ def main(
             local_dir = (
                 Path("models")
                 / "NED"
-                / f"{dataset_name}_synth_only_{selection_method}_{long_format}"
+                / f"{dataset_name}_synth_only_{selection_method}_{context_format}{complete_mode_str}"
                 / model_short_name
                 / "model_last"
             )
@@ -429,19 +431,16 @@ def main(
 
     # ---------- Load validation dataset (same logic) ----------
     data_folder = Path("data/final_data")
-    long_format_source_data = (
-        "" if long_format in ["short", "hybrid", "hybrid_complete"] else "_long"
-    )
-    long_format_target_data = "" if long_format == "short" else "_long"
+
     validation_source_path = (
         data_folder
         / dataset_name
-        / f"validation_{selection_method}_source{long_format_source_data}.pkl"
+        / f"validation_{selection_method}_source_{context_format}.pkl"
     )
     validation_target_path = (
         data_folder
         / dataset_name
-        / f"validation_{selection_method}_target{long_format_target_data}.pkl"
+        / f"validation_{selection_method}_target_{context_format}.pkl"
     )
     validation_source_data = load_pickle(validation_source_path)
     validation_target_data = load_pickle(validation_target_path)
@@ -466,12 +465,12 @@ def main(
         human_train_source_data = load_pickle(
             data_folder
             / dataset_name
-            / f"train_{selection_method}_source{long_format_source_data}.pkl"
+            / f"train_{selection_method}_source_{context_format}.pkl"
         )
         human_train_target_data = load_pickle(
             data_folder
             / dataset_name
-            / f"train_{selection_method}_target{long_format_target_data}.pkl"
+            / f"train_{selection_method}_target_{context_format}.pkl"
         )
         human_train_dataset = Dataset.from_dict({
             "source": human_train_source_data,
@@ -487,10 +486,10 @@ def main(
     if augmented_data not in ["human_only", "human_only_ft"]:
         if dataset_name == "MedMentions":
             synth_train_source_data = load_pickle(
-                data_folder / "SynthMM" / f"train_{selection_method}_source.pkl"
+                data_folder / "SynthMM" / f"train_{selection_method}_source_short.pkl"
             )
             synth_train_target_data = load_pickle(
-                data_folder / "SynthMM" / f"train_{selection_method}_target.pkl"
+                data_folder / "SynthMM" / f"train_{selection_method}_target_short.pkl"
             )
             synth_train_dataset = Dataset.from_dict({
                 "source": synth_train_source_data,
@@ -498,10 +497,14 @@ def main(
             })
         elif dataset_name in ["EMEA", "MEDLINE"]:
             synth_train_source_data = load_pickle(
-                data_folder / "SynthQUAERO" / f"train_{selection_method}_source.pkl"
+                data_folder
+                / "SynthQUAERO"
+                / f"train_{selection_method}_source_short.pkl"
             )
             synth_train_target_data = load_pickle(
-                data_folder / "SynthQUAERO" / f"train_{selection_method}_target.pkl"
+                data_folder
+                / "SynthQUAERO"
+                / f"train_{selection_method}_target_short.pkl"
             )
             synth_train_dataset = Dataset.from_dict({
                 "source": synth_train_source_data,
@@ -509,10 +512,14 @@ def main(
             })
         else:  # SPACCC logic
             synth_train_source_data = load_pickle(
-                data_folder / "SynthSPACCC" / f"train_{selection_method}_source.pkl"
+                data_folder
+                / "SynthSPACCC"
+                / f"train_{selection_method}_source_short.pkl"
             )
             synth_train_target_data = load_pickle(
-                data_folder / "SynthSPACCC" / f"train_{selection_method}_target.pkl"
+                data_folder
+                / "SynthSPACCC"
+                / f"train_{selection_method}_target_short.pkl"
             )
             synth_train_dataset = Dataset.from_dict({
                 "source": synth_train_source_data,
@@ -565,7 +572,6 @@ def main(
     split_marker, nlp = get_split_marker(dataset_name)
 
     # Format datasets into prompt/completion format
-    complete_mode = long_format in ["hybrid_complete", "long_complete"]
     train_dataset = create_prompt_completion_dataset(
         train_dataset, nlp, complete_mode=complete_mode, max_length=max_length
     )
@@ -618,12 +624,12 @@ def main(
     output_dir = (
         Path("models")
         / "NED"
-        / f"{dataset_name}_{augmented_data}_{selection_method}_{long_format}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}"
         / model_short_name
     )
     logging_dir = (
         Path("logs")
-        / f"{dataset_name}_{augmented_data}_{selection_method}_{long_format}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}"
         / model_short_name
     )
     model.gradient_checkpointing_enable()
@@ -735,17 +741,21 @@ if __name__ == "__main__":
         help="The method to select concept synonyms",
     )
     parser.add_argument(
-        "--long-format",
+        "--context-format",
         type=str,
         default="short",
         choices=[
             "short",
             "long",
-            "long_complete",
-            "hybrid",
-            "hybrid_complete",
+            "hybrid_short",
+            "hybrid_long",
         ],
         help="Whether to use augmented data for training",
+    )
+    parser.add_argument(
+        "--complete-mode",
+        action="store_true",
+        help="Whether to use complete mode for prompt/completion formatting",
     )
     parser.add_argument(
         "--max-length",
@@ -785,7 +795,8 @@ if __name__ == "__main__":
         dataset_name=args.dataset_name,
         augmented_data=args.augmented_data,
         selection_method=args.selection_method,
-        long_format=args.long_format,
+        context_format=args.context_format,
+        complete_mode=args.complete_mode,
         max_length=args.max_length,
         start_entity_token=args.start_entity_token,
         end_entity_token=args.end_entity_token,

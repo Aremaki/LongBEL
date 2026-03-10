@@ -362,6 +362,9 @@ def run(
         "short",
         help="Whether to include full context in source sequences: 'short' (entity only), 'long' (all passages), or 'hybrid'...",
     ),
+    process_synth: bool = typer.Option(
+        False, help="Whether to process synthetic datasets"
+    ),
 ) -> None:
     """Run preprocessing pipeline for selected datasets and models."""
 
@@ -414,7 +417,7 @@ def run(
             context_format=context_format,
         )
         # Synthetic MM as its own dataset
-        if synth_mm is not None:
+        if process_synth and synth_mm is not None:
             _process_synth_dataset(
                 "SynthMM",
                 synth_mm,
@@ -482,7 +485,7 @@ def run(
                     data_dir="original_data",
                     context_format=context_format,
                 )
-            if synth_quaero is not None:
+            if process_synth and synth_quaero is not None:
                 _process_synth_dataset(
                     "SynthQUAERO",
                     synth_quaero,
@@ -532,7 +535,7 @@ def run(
         )
 
         # Synthetic SPACCC
-        if synth_spaccc is not None:
+        if process_synth and synth_spaccc is not None:
             _process_synth_dataset(
                 "SynthSPACCC",
                 synth_spaccc,

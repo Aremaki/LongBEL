@@ -18,7 +18,7 @@ module load arch/h100
 module load pytorch-gpu/py3/2.3.1
 
 # Run script
-python scripts/3_prepare_data/run.py --context-format long # Use long format for data preparation
+python scripts/3_prepare_data/run.py --context-format long --process-synth # Use long format for data preparation
 python scripts/3_prepare_data/run.py --context-format short # Use short format for data preparation
 python scripts/3_prepare_data/run.py --context-format hybrid_short # Use hybrid short format for data preparation
 python scripts/3_prepare_data/run.py --context-format hybrid_long # Use hybrid long format for data preparation
