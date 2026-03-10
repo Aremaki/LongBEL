@@ -730,7 +730,11 @@ def main(
         best_model_chkpt_dir = Path(trainer.state.best_model_checkpoint)  # type: ignore
         model_dir = best_model_chkpt_dir.parent
         best_model_dir = model_dir / "model_best"
-        shutil.copytree(best_model_chkpt_dir, best_model_dir, dirs_exist_ok=True)
+        # Remove target if it exists
+        if best_model_dir.exists():
+            shutil.rmtree(best_model_dir)
+        # Rename checkpoint to target
+        best_model_chkpt_dir.rename(best_model_dir)
         best_step = str(trainer.state.best_model_checkpoint).split("-")[-1]
         print(f"Best model saved at step {best_step}")
     except Exception as e:
@@ -739,7 +743,11 @@ def main(
     try:
         last_model_chkpt_dir = model_dir / f"checkpoint-{trainer.state.global_step}"  # type: ignore
         last_model_dir = model_dir / "model_last"  # type: ignore
-        shutil.copytree(last_model_chkpt_dir, last_model_dir, dirs_exist_ok=True)
+        # Remove target if it exists
+        if last_model_dir.exists():
+            shutil.rmtree(last_model_dir)
+        # Rename checkpoint to target
+        last_model_chkpt_dir.rename(last_model_dir)
         last_step = str(trainer.state.global_step)
         print(f"Last model saved at step {last_step}")
     except Exception as e:
