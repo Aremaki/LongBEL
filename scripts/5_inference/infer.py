@@ -50,27 +50,39 @@ def deep_getsizeof(obj, seen=None):
 
 
 def main(
-    model_name,
-    num_beams,
-    best,
-    dataset_name,
-    selection_method,
-    split_name="test",
-    augmented_data="human_only",
-    long_format=True,
-    batch_size=64,
-    output_folder="results/inference_outputs",
+    model_name: str,
+    num_beams: int,
+    best: bool,
+    dataset_name: str,
+    selection_method: str,
+    split_name: str = "test",
+    augmented_data: str = "human_only",
+    context_format: str = "short",
+    complete_mode: bool = False,
+    batch_size: int = 64,
+    output_folder: str = "results/inference_outputs",
 ):
     # Set device
     torch.cuda.empty_cache()
     gc.collect()
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # Log the inference configuration
+    print(f"Model Name: {model_name}")
+    print(f"Dataset Name: {dataset_name}")
+    print(f"Selection Method: {selection_method}")
+    print(f"Split Name: {split_name}")
+    print(f"Augmented Data: {augmented_data}")
+    print(f"Context Format: {context_format}")
+    print(f"Complete Mode: {complete_mode}")
+    print(f"Number of Beams: {num_beams}")
+    print(f"Batch Size: {batch_size}")
+
     # Load model
-    long_format_str = "_long" if long_format else ""
+    complete_mode_str = "_complete" if complete_mode else ""
     model_path = (
         Path("models/NED")
-        / f"{dataset_name}_{augmented_data}_{selection_method}{long_format_str}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}"
         / model_name
     )
     if best:
@@ -202,7 +214,7 @@ def main(
     result_folder = (
         Path(output_folder)
         / dataset_name
-        / f"{augmented_data}_{selection_method}{long_format_str}"
+        / f"{augmented_data}_{selection_method}_{context_format}{complete_mode_str}"
         / f"{model_name}_{'best' if best else 'last'}"
     )
     result_folder.mkdir(parents=True, exist_ok=True)
@@ -219,7 +231,8 @@ def main(
         "selection_method": selection_method,
         "split_name": split_name,
         "augmented_data": augmented_data,
-        "long_format": long_format,
+        "context_format": context_format,
+        "complete_mode": complete_mode,
         "num_beams": num_beams,
         "batch_size": batch_size,
         "multiple_answers": multiple_answers,
@@ -248,7 +261,7 @@ def main(
         num_beams=num_beams,
         constrained=False,
         multiple_answers=multiple_answers,
-        long_format=long_format,
+        context_format=context_format,
     )  # type: ignore
     tac = time.time()
     elapsed_time = tac - tic
@@ -312,7 +325,7 @@ def main(
         num_beams=num_beams,
         constrained=True,
         multiple_answers=multiple_answers,
-        long_format=long_format,
+        context_format=context_format,
     )  # type: ignore
     tac = time.time()
     elapsed_time = tac - tic
@@ -423,9 +436,17 @@ if __name__ == "__main__":
         help="Whether to use augmented data for training",
     )
     parser.add_argument(
-        "--long-format",
+        "--context-format",
+        type=str,
+        default="short",
+        choices=["short", "long", "hybrid_long", "hybrid_short"],
+        help="The context format for training",
+    )
+    parser.add_argument(
+        "--complete-mode",
+        default=False,
         action="store_true",
-        help="Whether to use the long format for training",
+        help="Whether to use complete mode for training and inference",
     )
     parser.add_argument(
         "--batch-size",
@@ -451,7 +472,8 @@ if __name__ == "__main__":
         selection_method=args.selection_method,
         split_name=args.split_name,
         augmented_data=args.augmented_data,
-        long_format=args.long_format,
+        context_format=args.context_format,
+        complete_mode=args.complete_mode,
         batch_size=args.batch_size,
         output_folder=args.output_folder,
     )
