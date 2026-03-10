@@ -49,7 +49,7 @@ def get_split_marker(
     else:
         raise ValueError(f"Unknown dataset_name: {dataset_name}")
 
-    return "} " + verb, nlp
+    return "} " + verb, nlp, verb
 
 
 def sentence_tokenize_safe(text, nlp):
@@ -96,57 +96,79 @@ def sentence_tokenize_safe(text, nlp):
     return sentences
 
 
+def add_headers_to_prompt(
+    source: str, target: str, context_format: str, transition_verb: str
+):
+    if context_format == "long":
+        prompt = f"### Context\n{source}\n\n"
+        completion = f"### Predictions\n{target}"
+    elif context_format == "short":
+        target_split = target.split("} " + transition_verb)
+        if len(target_split) == 2:
+            prefix = target_split[0] + "} " + transition_verb
+            completion = target_split[1]
+        else:
+            raise ValueError(f"Unexpected target format: {target}")
+        # Add Instruction prefix to source
+        prompt = f"### Context\n{source}\n\n### Prediction\n{prefix}"
+    elif context_format in ["hybrid_short", "hybrid_long"]:
+        split_target = target.split("<SEP>")
+        # remove empty string
+        split_target = [s for s in split_target if s]
+        if len(split_target) >= 2:
+            previous_tgt = "<SEP>".join(split_target[:-1]) + "<SEP>"
+            current_tgt = split_target[-1] + "<SEP>"
+        elif len(split_target) == 1:
+            previous_tgt = "None"
+            current_tgt = split_target[0] + "<SEP>"
+        else:
+            raise ValueError(f"Unexpected target format: {target}")
+        current_tgt_split = current_tgt.split("} " + transition_verb)
+        if len(current_tgt_split) == 2:
+            current_tgt_prefix = current_tgt_split[0] + "} " + transition_verb
+            completion = current_tgt_split[1]
+        else:
+            raise ValueError(f"Unexpected current target format: {current_tgt}")
+        # Add Instruction prefix to source
+        prompt = f"### Context\n{source}\n\n### Previous Normalizations\n{previous_tgt}\n\n### Prediction\n{current_tgt_prefix}"
+    else:
+        raise ValueError(f"Unknown context_format: {context_format}")
+    return prompt, completion
+
+
 def create_prompt_completion_dataset(
-    dataset, nlp, complete_mode: bool = False, max_length: int = 16_000
+    dataset,
+    nlp,
+    complete_mode: bool,
+    context_format: str,
+    transition_verb: str,
+    add_headers: bool = True,
 ):
     def format_example(example):
         prompts = []
         completions = []
         for source, target in zip(example["source"], example["target"]):
-            if len(source) + len(target) + 1 > max_length:
-                print(
-                    f"Warning: example exceeds max_length ({len(source) + len(target) + 1} tokens). It will be truncated."
+            if add_headers:
+                prompt, completion = add_headers_to_prompt(
+                    source, target, context_format, transition_verb
                 )
-                # cut into sentences
-                sentences = sentence_tokenize_safe(source, nlp)
-                target_entities = target.split("<SEP>")
-                new_source = []
-                entity_ref = 0
-                entity_count = 0
-                for sent in sentences:
-                    sent_entities = sent.count("[")
-                    source_trunc = " ".join(new_source + [sent])
-                    target_trunc = (
-                        "<SEP>".join(
-                            target_entities[entity_ref : entity_count + sent_entities]
-                        )
-                        + "<SEP>"
-                    )
-                    if len(source_trunc) + len(target_trunc) + 1 >= max_length:
-                        prompts.append(" ".join(new_source))
-                        completions.append(
-                            "<SEP>".join(target_entities[entity_ref:entity_count])
-                            + "<SEP>"
-                        )
-                        new_source = [sent]
-                        entity_ref = entity_count
-                        entity_count += sent_entities
-                    else:
-                        new_source.append(sent)
-                        entity_count += sent_entities
-
-                source = " ".join(new_source)
-                target = (
-                    "<SEP>".join(target_entities[entity_ref:entity_count]) + "<SEP>"
-                )
-            prompts.append(source)
-            completions.append(target)
+            else:
+                prompt, completion = source, target
+            prompts.append(prompt)
+            completions.append(completion)
         if complete_mode:
             for source, target in zip(example["source"], example["target"]):
                 for split_target in target.split("<SEP>"):
                     if split_target:
-                        prompts.append(source)
-                        completions.append(split_target + "<SEP>")
+                        split_target = split_target + "<SEP>"
+                        if add_headers:
+                            prompt, completion = add_headers_to_prompt(
+                                source, split_target, context_format, transition_verb
+                            )
+                        else:
+                            prompt, completion = source, split_target
+                        prompts.append(prompt)
+                        completions.append(completion)
         return {"prompt": prompts, "completion": completions}
 
     return dataset.map(
@@ -328,6 +350,7 @@ def main(
     selection_method: str = "tfidf",
     context_format: str = "short",
     complete_mode: bool = False,
+    add_headers: bool = False,
     start_entity_token: str = "[",
     end_entity_token: str = "]",
     start_group_token: str = "{",
@@ -352,9 +375,10 @@ def main(
 
     model_short_name = model_name.split("/")[-1]
     print(
-        f"The model {model_short_name} will start SFT with lr={lr} on dataset {augmented_data} {dataset_name} using selection {selection_method} and context_format is {context_format} and complete_mode is {complete_mode}."
+        f"The model {model_short_name} will start SFT with lr={lr} on dataset {augmented_data} {dataset_name} using selection {selection_method} and context_format is {context_format} and complete_mode is {complete_mode} and add_headers is {add_headers}."
     )
     complete_mode_str = "_complete" if complete_mode else ""
+    add_headers_str = "_addheaders" if add_headers else ""
     # Load tokenizer and model
     try:
         tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
@@ -368,7 +392,7 @@ def main(
             local_dir = (
                 Path("models")
                 / "NED"
-                / f"{dataset_name}_synth_only_{selection_method}_{context_format}{complete_mode_str}"
+                / f"{dataset_name}_synth_only_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}"
                 / model_short_name
                 / "model_last"
             )
@@ -569,27 +593,49 @@ def main(
                 num_train_epochs = 70
             else:
                 num_train_epochs = 20
-    split_marker, nlp = get_split_marker(dataset_name)
+    split_marker, nlp, verb = get_split_marker(dataset_name)
 
     # Format datasets into prompt/completion format
     train_dataset = create_prompt_completion_dataset(
-        train_dataset, nlp, complete_mode=complete_mode, max_length=max_length
+        train_dataset,
+        nlp,
+        complete_mode=complete_mode,
+        context_format=context_format,
+        transition_verb=verb,
+        add_headers=add_headers,
     )
     validation_dataset = create_prompt_completion_dataset(
-        validation_dataset, nlp, complete_mode=complete_mode, max_length=max_length
+        validation_dataset,
+        nlp,
+        complete_mode=complete_mode,
+        context_format=context_format,
+        transition_verb=verb,
+        add_headers=add_headers,
     )
+    if context_format == "long":
+        train_dataset = train_dataset.map(
+            lambda x: preprocess_prompt_completion_example(x, tokenizer, split_marker),
+            remove_columns=train_dataset.column_names,
+            num_proc=8,
+        )
 
-    train_dataset = train_dataset.map(
-        lambda x: preprocess_prompt_completion_example(x, tokenizer, split_marker),
-        remove_columns=train_dataset.column_names,
-        num_proc=8,
-    )
-
-    validation_dataset = validation_dataset.map(
-        lambda x: preprocess_prompt_completion_example(x, tokenizer, split_marker),
-        remove_columns=validation_dataset.column_names,
-        num_proc=8,
-    )
+        validation_dataset = validation_dataset.map(
+            lambda x: preprocess_prompt_completion_example(x, tokenizer, split_marker),
+            remove_columns=validation_dataset.column_names,
+            num_proc=8,
+        )
+        completion_only_loss = False
+        # Sanity check for tokenization and formatting
+        example = train_dataset[0]
+        decoded = tokenizer.decode([
+            t if lab != -100 else 0
+            for t, lab in zip(example["input_ids"], example["labels"])
+        ])
+        print(decoded)
+    else:
+        completion_only_loss = True
+        # Sanity check for tokenization and formatting
+        print(train_dataset[0])
 
     # Compute longest training example
     longest_train = 0
@@ -612,24 +658,17 @@ def main(
             f"⚠️ training-set max_length ({max_length}) is larger than model context length ({model_context_length})."
         )
 
-    # Sanity check for tokenization and formatting
-    example = train_dataset[0]
-    decoded = tokenizer.decode([
-        t if lab != -100 else 0
-        for t, lab in zip(example["input_ids"], example["labels"])
-    ])
-    print(decoded)
     # ---------- SFT TrainingArguments ----------
 
     output_dir = (
         Path("models")
         / "NED"
-        / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}"
         / model_short_name
     )
     logging_dir = (
         Path("logs")
-        / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}"
         / model_short_name
     )
     model.gradient_checkpointing_enable()
@@ -660,6 +699,7 @@ def main(
         eval_packing=False,
         packing=True,
         max_length=max_length,
+        completion_only_loss=completion_only_loss,
     )
 
     # ---------- SFTTrainer ----------
@@ -787,6 +827,11 @@ if __name__ == "__main__":
         default="}",
         help="The token marking the end of the entity group",
     )
+    parser.add_argument(
+        "--add-context",
+        action="store_true",
+        help="Whether to add context to the prompt even for short format (for ablation)",
+    )
     args = parser.parse_args()
 
     main(
@@ -797,6 +842,7 @@ if __name__ == "__main__":
         selection_method=args.selection_method,
         context_format=args.context_format,
         complete_mode=args.complete_mode,
+        add_headers=args.add_headers,
         max_length=args.max_length,
         start_entity_token=args.start_entity_token,
         end_entity_token=args.end_entity_token,

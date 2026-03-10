@@ -8,36 +8,47 @@ SELECTION_METHODS=("tfidf")
 AUGMENTED_OPTIONS=("human_only")
 CONTEXT_FORMAT=("short" "long" "hybrid_short" "hybrid_long")
 COMPLETE_MODE=(true false)
+ADD_HEADERS=(true false)
 
 for dataset in "${DATASETS[@]}"; do
     for selection in "${SELECTION_METHODS[@]}"; do
         for augmented in "${AUGMENTED_OPTIONS[@]}"; do
             for context_format in "${CONTEXT_FORMAT[@]}"; do
                 for complete_mode in "${COMPLETE_MODE[@]}"; do
-                for model in "${MODELS[@]}"; do
-                    COMPLETE_MODE_ARG=""
-                    if [[ "${complete_mode}" == true ]]; then
-                        COMPLETE_MODE_ARG=" --complete-mode"
-                    fi
-                    # Check if model already exists
-                    MODEL_DIR="${BASE_OUTPUT_DIR}/${dataset}_${augmented}_${selection}_${context_format}"
-                    if [[ "${complete_mode}" == true ]]; then
-                        MODEL_DIR="${MODEL_DIR}_complete"
-                    fi
-                    MODEL_DIR="${MODEL_DIR}/${model}/model_best"
-                    if [ -d "$MODEL_DIR" ]; then
-                        echo "Skipping: Model already exists → ${MODEL_DIR}"
-                        continue
-                    fi
+                    for add_headers in "${ADD_HEADERS[@]}"; do
+                        for model in "${MODELS[@]}"; do
+                            ADD_HEADERS_ARG=""
+                            if [[ "${add_headers}" == true ]]; then
+                                ADD_HEADERS_ARG=" --add-headers"
+                            fi
+                            COMPLETE_MODE_ARG=""
+                            if [[ "${complete_mode}" == true ]]; then
+                                COMPLETE_MODE_ARG=" --complete-mode"
+                            fi
+                            # Check if model already exists
+                            MODEL_DIR="${BASE_OUTPUT_DIR}/${dataset}_${augmented}_${selection}_${context_format}"
+                            if [[ "${complete_mode}" == true ]]; then
+                                MODEL_DIR="${MODEL_DIR}_complete"
+                            fi
+                            if [[ "${add_headers}" == true ]]; then
+                                MODEL_DIR="${MODEL_DIR}_addheaders"
+                            fi
+                            MODEL_DIR="${MODEL_DIR}/${model}/model_best"
+                            if [ -d "$MODEL_DIR" ]; then
+                                echo "Skipping: Model already exists → ${MODEL_DIR}"
+                                continue
+                            fi
 
-                    # Construct arguments for the training script (pass full model id)
-                    ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --augmented-data ${augmented} --context-format ${context_format} ${COMPLETE_MODE_ARG}"
+                            # Construct arguments for the training script (pass full model id)
+                            ARGS="--model-name ${model} --dataset-name ${dataset} --selection-method ${selection} --augmented-data ${augmented} --context-format ${context_format} ${COMPLETE_MODE_ARG} ${ADD_HEADERS_ARG}"
 
-                    # Submit job
-                    echo "Submitting training job (missing): ${MODEL_DIR}"
-                    echo "  ARGS=${ARGS}"
-                    sbatch --export=ALL,SCRIPT_ARGS="${ARGS}" -A ssq@h100 scripts/4_training_decoder/run.slurm
-                    sleep 1
+                            # Submit job
+                            echo "Submitting training job (missing): ${MODEL_DIR}"
+                            echo "  ARGS=${ARGS}"
+                            sbatch --export=ALL,SCRIPT_ARGS="${ARGS}" -A ssq@h100 scripts/4_training_decoder/run.slurm
+                            sleep 1
+                        done
+                    done
                 done
             done
         done

@@ -241,7 +241,25 @@ def _process_hf_dataset(
                 training_data_folder
                 / f"{split_name}_{selection_method}_{context_format}.parquet"
             )
-        else:
+        elif context_format == "short":
+            prefixes = []
+            completions = []
+            for t in tgt:
+                t_split = t.split("} " + transition_verb)
+                if len(t_split) == 2:
+                    prefixes.append(t_split[0] + "} " + transition_verb)
+                    completions.append(t_split[1])
+                else:
+                    raise ValueError(f"Unexpected target format: {t}")
+            prompts = [
+                f"### Context\n{s}\n\n### Prediction\n{prefix}"
+                for s, prefix in zip(src, prefixes)
+            ]
+            pl.DataFrame({"prompt": prompts, "completion": completions}).write_parquet(
+                training_data_folder
+                / f"{split_name}_{selection_method}_{context_format}.parquet"
+            )
+        elif context_format in ["hybrid_short", "hybrid_long"]:
             # Split tgt into "previous" and "current" annotations for training data
             previous_tgt = []
             current_tgt_prefix = []
