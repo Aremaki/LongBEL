@@ -413,7 +413,7 @@ def parse_text(
 
             marked_sent_text += "<SEP>"
             # Emit the pair
-            doc_id = data.get("document_id", "")
+            doc_id = data.get("id", "")
             if train_mode:
                 tsv_line = {
                     "doc_id": doc_id,
@@ -463,7 +463,7 @@ def parse_text(
         tsv_line = tsv_lines_dict[entity_span]
         source_sentences.append(source_texts_dict[entity_span])
         target_sentences.append(target_texts_dict[entity_span])
-        tsv_line["mention_id"] = f"{data.get('document_id', '')}.{entity_id + 1}"
+        tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
     if train_mode:
         return source_sentences, target_sentences, tsv_lines
@@ -688,7 +688,7 @@ def parse_text_hybrid_long(
                     marked_text = marked_text + "\n" + other_passage_text
             marked_text += "<SEP>"
             # Emit the pair
-            doc_id = data.get("document_id", "")
+            doc_id = data.get("id", "")
             if train_mode:
                 tsv_line = {
                     "doc_id": doc_id,
@@ -738,7 +738,7 @@ def parse_text_hybrid_long(
         source_sentences.append(source_texts_dict[entity_span])
         target_text += target_texts_dict[entity_span]
         target_sentences.append(target_text)
-        tsv_line["mention_id"] = f"{data.get('document_id', '')}.{entity_id + 1}"
+        tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
     if train_mode:
         return source_sentences, target_sentences, tsv_lines
@@ -993,7 +993,7 @@ def parse_text_hybrid_short(
                 )
             marked_sent_text += "<SEP>"
             # Emit the pair
-            doc_id = data.get("document_id", "")
+            doc_id = data.get("id", "")
             if train_mode:
                 tsv_line = {
                     "doc_id": doc_id,
@@ -1044,7 +1044,7 @@ def parse_text_hybrid_short(
         source_sentences.append(source_texts_dict[entity_span])
         target_text += target_texts_dict[entity_span]
         target_sentences.append(target_text)
-        tsv_line["mention_id"] = f"{data.get('document_id', '')}.{entity_id + 1}"
+        tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
     if train_mode:
         return source_sentences, target_sentences, tsv_lines
@@ -1255,7 +1255,7 @@ def parse_text_long(
             ])
 
             # Emit the pair
-            doc_id = data.get("document_id", "")
+            doc_id = data.get("id", "")
             if train_mode:
                 tsv_line = {
                     "doc_id": doc_id,
@@ -1313,7 +1313,7 @@ def parse_text_long(
     for entity_id, entity_span in enumerate(sorted_keys):
         target_text += target_texts_dict[entity_span]
         tsv_line = tsv_lines_dict[entity_span]
-        tsv_line["mention_id"] = f"{data.get('document_id', '')}.{entity_id + 1}"
+        tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
         target_texts.append(target_texts_dict[entity_span])
     if train_mode:
@@ -1492,7 +1492,7 @@ def process_bigbio_dataset(
             )
             target_data.append(target_text)
             source_data.append(source_text)
-            raw_data[page["document_id"]] = passages
+            raw_data[page["id"]] = passages
             if not db_name:
                 db_name = page_db_name
             tsv_data.extend(tsv_lines)
