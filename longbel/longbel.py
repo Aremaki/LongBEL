@@ -96,14 +96,13 @@ def get_prefix_allowed_tokens_fn(
 def parse_prediction(
     outputs: list[str],
     sem_groups: list[str],
-    verb: str,
     text_to_code: Optional[dict[str, dict[str, str]]] = None,
     multiple_answers: bool = False,
 ) -> tuple[list[str], list[str]]:
     codes = []
     predictions = []
     for output, group in zip(outputs, sem_groups):
-        splits = output.split("} " + verb)  # type: ignore
+        splits = output.split("} ")  # type: ignore
         if len(splits) > 1 and splits[-1].strip():
             prediction = splits[-1].strip().replace("<SEP>", "")
             if text_to_code:
@@ -209,7 +208,6 @@ class _LongBELHubInterface:
         constrained,
         multiple_answers,
         num_beams,
-        verb,
         **kwargs,
     ):
         input_args = {
@@ -269,7 +267,6 @@ class _LongBELHubInterface:
         pred_concept_codes, pred_concept_names = parse_prediction(
             cleaned_output_sequences,
             sem_groups,
-            verb,
             self.text_to_code,  # type: ignore
             multiple_answers=multiple_answers,
         )
@@ -339,13 +336,10 @@ class _LongBELHubInterface:
         # Prepare input batch
         if self.lang == "fr":  # type: ignore
             nlp = nltk.data.load("tokenizers/punkt/french.pickle")
-            verb = "est"
         elif self.lang == "en":  # type: ignore
             nlp = nltk.data.load("tokenizers/punkt/english.pickle")
-            verb = "is"
         elif self.lang == "es":  # type: ignore
             nlp = nltk.data.load("tokenizers/punkt/spanish.pickle")
-            verb = "es"
         else:
             raise ValueError(f"Unsupported language: {self.lang}")  # type: ignore
 
@@ -371,7 +365,7 @@ class _LongBELHubInterface:
                     end_entity=end_entity,
                     start_group=start_group,
                     end_group=end_group,
-                    transition_verb=verb,
+                    train_mode=False,
                 )
             elif context_format == "short":
                 examples, entities_info = parse_text(
@@ -381,7 +375,6 @@ class _LongBELHubInterface:
                     start_group=start_group,
                     end_group=end_group,
                     nlp=nlp,  # type: ignore
-                    transition_verb=verb,
                     train_mode=False,
                 )
             elif context_format == "hybrid_long":
@@ -392,7 +385,6 @@ class _LongBELHubInterface:
                     start_group=start_group,
                     end_group=end_group,
                     nlp=nlp,  # type: ignore
-                    transition_verb=verb,
                     train_mode=False,
                 )
             elif context_format == "hybrid_short":
@@ -403,7 +395,6 @@ class _LongBELHubInterface:
                     start_group=start_group,
                     end_group=end_group,
                     nlp=nlp,  # type: ignore
-                    transition_verb=verb,
                     train_mode=False,
                 )
             else:
@@ -443,7 +434,7 @@ class _LongBELHubInterface:
                     entity.get("gold_concept_name", None) for entity in batch_entities
                 ]  # type: ignore
                 prefix_templates = [
-                    f"[{entity['mention']}]{{{entity['semantic_group']}}} {verb}"
+                    f"[{entity['mention']}]{{{entity['semantic_group']}}}"
                     for entity in batch_entities
                 ]
                 input_sentences = batch_examples
@@ -463,7 +454,6 @@ class _LongBELHubInterface:
                     constrained=constrained,
                     multiple_answers=multiple_answers,
                     num_beams=num_beams,
-                    verb=verb,
                     **kwargs,
                 )
             else:
@@ -502,7 +492,7 @@ class _LongBELHubInterface:
                                 entity[sent_id].get("gold_concept_name", None)
                             )  # type: ignore
                             prefix_templates.append(
-                                f"[{entity[sent_id]['mention']}]{{{entity[sent_id]['semantic_group']}}} {verb}"
+                                f"[{entity[sent_id]['mention']}]{{{entity[sent_id]['semantic_group']}}}"
                             )
                         # Remove the sentence
                         else:
@@ -526,7 +516,6 @@ class _LongBELHubInterface:
                         constrained=constrained,
                         multiple_answers=multiple_answers,
                         num_beams=num_beams,
-                        verb=verb,
                         **kwargs,
                     )
                     batch_ids = list(sentences.keys())
