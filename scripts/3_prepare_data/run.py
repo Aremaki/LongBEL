@@ -227,7 +227,7 @@ def _process_hf_dataset(
         training_data_folder = data_folder / "bigbio_dataset/training_data"
         _ensure_dir(training_data_folder)
         if context_format == "long":
-            prompts = [f"### Context\n{s}\n\n" for s in src]
+            prompts = [f"### Context\n{s.rstrip()}\n\n" for s in src]
             completions = [f"### Predictions\n{t}" for t in tgt]
             pl.DataFrame({"prompt": prompts, "completion": completions}).write_parquet(
                 training_data_folder
@@ -244,7 +244,7 @@ def _process_hf_dataset(
                 else:
                     raise ValueError(f"Unexpected target format: {t}")
             prompts = [
-                f"### Context\n{s}\n\n### Prediction\n{prefix}"
+                f"### Context\n{s.rstrip()}\n\n### Prediction\n{prefix}"
                 for s, prefix in zip(src, prefixes)
             ]
             pl.DataFrame({"prompt": prompts, "completion": completions}).write_parquet(
@@ -276,7 +276,7 @@ def _process_hf_dataset(
                     raise ValueError(f"Unexpected current target format: {current_tgt}")
             # Add Instruction prefix to source
             prompts = [
-                f"### Context\n{s}\n\n### Previous Normalizations\n{p}\n\n### Prediction\n{prefix}"
+                f"### Context\n{s.rstrip()}\n\n### Previous Normalizations\n{p.rstrip()}\n\n### Prediction\n{prefix}"
                 for s, p, prefix in zip(src, previous_tgt, current_tgt_prefix)
             ]
             pl.DataFrame({"prompt": prompts, "completion": completions}).write_parquet(

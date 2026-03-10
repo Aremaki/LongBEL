@@ -95,7 +95,7 @@ def sentence_tokenize_safe(text, nlp):
 
 def add_headers_to_prompt(source: str, target: str, context_format: str):
     if context_format == "long":
-        prompt = f"### Context\n{source}\n\n"
+        prompt = f"### Context\n{source.rstrip()}\n\n"
         completion = f"### Predictions\n{target}"
     elif context_format == "short":
         target_split = target.split("} ")
@@ -105,7 +105,7 @@ def add_headers_to_prompt(source: str, target: str, context_format: str):
         else:
             raise ValueError(f"Unexpected target format: {target}")
         # Add Instruction prefix to source
-        prompt = f"### Context\n{source}\n\n### Prediction\n{prefix}"
+        prompt = f"### Context\n{source.rstrip()}\n\n### Prediction\n{prefix}"
     elif context_format in ["hybrid_short", "hybrid_long"]:
         split_target = target.split("\n")
         # remove empty string
@@ -125,7 +125,7 @@ def add_headers_to_prompt(source: str, target: str, context_format: str):
         else:
             raise ValueError(f"Unexpected current target format: {current_tgt}")
         # Add Instruction prefix to source
-        prompt = f"### Context\n{source}\n\n### Previous Normalizations\n{previous_tgt}\n\n### Prediction\n{current_tgt_prefix}"
+        prompt = f"### Context\n{source.rstrip()}\n\n### Previous Normalizations\n{previous_tgt.rstrip()}\n\n### Prediction\n{current_tgt_prefix}"
     else:
         raise ValueError(f"Unknown context_format: {context_format}")
     return prompt, completion
@@ -625,31 +625,31 @@ def main(
             for t, lab in zip(example["input_ids"], example["labels"])
         ])
         print(decoded)
+
+        # Compute longest training example
+        longest_train = 0
+        for example in train_dataset:
+            seq_len = len(example["input_ids"])  # type: ignore
+            if seq_len > longest_train:
+                longest_train = seq_len
+
+        print(f"Longest training example has {longest_train} tokens.")
+        if longest_train > max_length:
+            if "8B" in model_name:
+                print(
+                    f"⚠️ Longest training example ({longest_train} tokens) exceeds hard max_length ({max_length}). They will be truncated..."
+                )
+            else:
+                max_length = longest_train + 512
+        print(f"Using training-set max_length: {max_length}")
+        if max_length > model_context_length:
+            print(
+                f"⚠️ training-set max_length ({max_length}) is larger than model context length ({model_context_length})."
+            )
     else:
         completion_only_loss = True
         # Sanity check for tokenization and formatting
         print(train_dataset[0])
-
-    # Compute longest training example
-    longest_train = 0
-    for example in train_dataset:
-        seq_len = len(example["input_ids"])  # type: ignore
-        if seq_len > longest_train:
-            longest_train = seq_len
-
-    print(f"Longest training example has {longest_train} tokens.")
-    if longest_train > max_length:
-        if "8B" in model_name:
-            print(
-                f"⚠️ Longest training example ({longest_train} tokens) exceeds hard max_length ({max_length}). They will be truncated..."
-            )
-        else:
-            max_length = longest_train + 512
-    print(f"Using training-set max_length: {max_length}")
-    if max_length > model_context_length:
-        print(
-            f"⚠️ training-set max_length ({max_length}) is larger than model context length ({model_context_length})."
-        )
 
     # ---------- SFT TrainingArguments ----------
 
