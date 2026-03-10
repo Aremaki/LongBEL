@@ -131,7 +131,14 @@ def _process_hf_dataset(
     context_format: str = "short",
 ):
     typer.echo(f"→ Loading dataset {hf_id}:{data_dir} ...")
-
+    if lang == "fr":
+        transition_verb = "est"
+    elif lang == "es":
+        transition_verb = "es"
+    elif lang == "en":
+        transition_verb = "is"
+    else:
+        raise ValueError(f"Unsupported language '{lang}' for transition verb.")
     data_folder = out_root / name
     _ensure_dir(data_folder)
     try:
@@ -227,10 +234,47 @@ def _process_hf_dataset(
         # Save training data
         training_data_folder = data_folder / "bigbio_dataset/training_data"
         _ensure_dir(training_data_folder)
-        pl.DataFrame({"prompt": src, "completion": tgt}).write_parquet(
-            training_data_folder
-            / f"{split_name}_{selection_method}_{context_format}.parquet"
-        )
+        if context_format == "long":
+            prompts = [f"### Context\n{s}\n\n" for s in src]
+            completions = [f"### Predictions\n{t}" for t in tgt]
+            pl.DataFrame({"prompt": prompts, "completion": completions}).write_parquet(
+                training_data_folder
+                / f"{split_name}_{selection_method}_{context_format}.parquet"
+            )
+        else:
+            # Split tgt into "previous" and "current" annotations for training data
+            previous_tgt = []
+            current_tgt_prefix = []
+            completions = []
+            for t in tgt:
+                split_t = t.split("<SEP>")
+                # remove empty string
+                split_t = [s for s in split_t if s]
+                if len(split_t) >= 2:
+                    previous_tgt.append("<SEP>".join(split_t[:-1]) + "<SEP>")
+                    current_tgt = split_t[-1] + "<SEP>"
+                elif len(split_t) == 1:
+                    previous_tgt.append("None")
+                    current_tgt = split_t[0] + "<SEP>"
+                else:
+                    raise ValueError(f"Unexpected target format: {t}")
+                current_tgt_split = current_tgt.split("}" + transition_verb)
+                if len(current_tgt_split) == 2:
+                    current_tgt_prefix.append(
+                        current_tgt_split[0] + "}" + transition_verb
+                    )
+                    completions.append(current_tgt_split[1])
+                else:
+                    raise ValueError(f"Unexpected target format: {current_tgt}")
+            # Add Instruction prefix to source
+            prompts = [
+                f"### Context\n{s}\n\n### Previous Normalizations\n{p}\n\n### Prediction\n{prefix}"
+                for s, p, prefix in zip(src, previous_tgt, current_tgt_prefix)
+            ]
+            pl.DataFrame({"prompt": prompts, "completion": completions}).write_parquet(
+                training_data_folder
+                / f"{split_name}_{selection_method}_{context_format}.parquet"
+            )
 
 
 def _process_synth_dataset(
