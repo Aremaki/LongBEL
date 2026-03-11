@@ -609,43 +609,18 @@ def main(
     validation_dataset = create_prompt_completion_dataset(
         validation_dataset,
         nlp,
-        complete_mode=complete_mode,
+        complete_mode=False,  # no need for complete mode in validation
         context_format=context_format,
         add_headers=add_headers,
     )
+
     num_proc = os.cpu_count() // 2
-    if context_format == "long":
-        train_dataset = train_dataset.map(
-            lambda x: preprocess_prompt_completion_example(x, tokenizer, split_marker),
-            remove_columns=train_dataset.column_names,
-            num_proc=num_proc,
-        )
-
-        validation_dataset = validation_dataset.map(
-            lambda x: preprocess_prompt_completion_example(x, tokenizer, split_marker),
-            remove_columns=validation_dataset.column_names,
-            num_proc=num_proc,
-        )
-        completion_only_loss = False
-        # Sanity check for tokenization and formatting
-        example = train_dataset[0]
-        decoded = tokenizer.decode([
-            t if lab != -100 else 0
-            for t, lab in zip(example["input_ids"], example["labels"])
-        ])
-        print(decoded)
-
-    else:
-        completion_only_loss = True
-        # Sanity check for tokenization and formatting
-        print(train_dataset[10])
 
     # Compute longest training example
     lengths = train_dataset.map(
         lambda x: get_length(x, tokenizer), batched=True, num_proc=num_proc
     )
     longest_train = max(lengths["length"])
-
     print(f"Longest training example has {longest_train} tokens.")
     if longest_train > max_length:
         if "8B" in model_name:
@@ -659,6 +634,46 @@ def main(
         print(
             f"⚠️ training-set max_length ({max_length}) is larger than model context length ({model_context_length})."
         )
+    if context_format == "long":
+        train_dataset = (
+            train_dataset.map(
+                lambda x: preprocess_prompt_completion_example(
+                    x, tokenizer, split_marker
+                ),
+                remove_columns=train_dataset.column_names,
+                num_proc=num_proc,
+            )
+            .shuffle(seed=42)
+            .flatten_indices()
+        )
+
+        validation_dataset = (
+            validation_dataset.map(
+                lambda x: preprocess_prompt_completion_example(
+                    x, tokenizer, split_marker
+                ),
+                remove_columns=validation_dataset.column_names,
+                num_proc=num_proc,
+            )
+            .shuffle(seed=42)
+            .flatten_indices()
+        )
+        completion_only_loss = False
+        # Sanity check for tokenization and formatting
+        example = train_dataset[0]
+        decoded = tokenizer.decode([
+            t if lab != -100 else 0
+            for t, lab in zip(example["input_ids"], example["labels"])
+        ])
+        print(decoded)
+
+    else:
+        train_dataset = train_dataset.shuffle(seed=42).flatten_indices()
+        validation_dataset = validation_dataset.shuffle(seed=42).flatten_indices()
+        completion_only_loss = True
+        # Sanity check for tokenization and formatting
+        print(train_dataset[10])
+
     # ---------- SFT TrainingArguments ----------
 
     output_dir = (
