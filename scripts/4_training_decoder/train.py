@@ -616,10 +616,13 @@ def main(
     num_proc = os.cpu_count() // 2
 
     # Compute longest training example
-    lengths = train_dataset.map(
+    train_lengths = train_dataset.map(
         lambda x: get_length(x, tokenizer), batched=True, num_proc=num_proc
     )
-    longest_training = max(lengths["length"])
+    val_lengths = validation_dataset.map(
+        lambda x: get_length(x, tokenizer), batched=True, num_proc=num_proc
+    )
+    longest_training = max(train_lengths["length"] + val_lengths["length"])
     print(f"Longest training example has {longest_training} tokens.")
     max_length = max(longest_training + 16, 2048)
     print(f"Using training-set max_length: {max_length}")
