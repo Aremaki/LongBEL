@@ -616,7 +616,7 @@ def main(
     )
     longest_training = max(train_lengths["length"] + val_lengths["length"])
     print(f"Longest training example has {longest_training} tokens.")
-    max_length = max(longest_training + 16, 2048)
+    max_length = longest_training + 16  # add some buffer for special tokens
     print(f"Using training-set max_length: {max_length}")
     if max_length > model_context_length:
         print(
