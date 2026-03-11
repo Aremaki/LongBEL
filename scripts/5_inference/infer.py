@@ -59,6 +59,7 @@ def main(
     augmented_data: str = "human_only",
     context_format: str = "short",
     complete_mode: bool = False,
+    add_headers: bool = False,
     batch_size: int = 64,
     output_folder: str = "results/inference_outputs",
 ):
@@ -75,14 +76,16 @@ def main(
     print(f"Augmented Data: {augmented_data}")
     print(f"Context Format: {context_format}")
     print(f"Complete Mode: {complete_mode}")
+    print(f"Add Headers: {add_headers}")
     print(f"Number of Beams: {num_beams}")
     print(f"Batch Size: {batch_size}")
 
     # Load model
     complete_mode_str = "_complete" if complete_mode else ""
+    add_headers_str = "_addheaders" if add_headers else ""
     model_path = (
         Path("models/NED")
-        / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}"
         / model_name
     )
     if best:
@@ -214,7 +217,7 @@ def main(
     result_folder = (
         Path(output_folder)
         / dataset_name
-        / f"{augmented_data}_{selection_method}_{context_format}{complete_mode_str}"
+        / f"{augmented_data}_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}"
         / f"{model_name}_{'best' if best else 'last'}"
     )
     result_folder.mkdir(parents=True, exist_ok=True)
@@ -460,6 +463,12 @@ if __name__ == "__main__":
         default="results/inference_outputs",
         help="Folder to save inference outputs",
     )
+    parser.add_argument(
+        "--add-headers",
+        default=False,
+        action="store_true",
+        help="Whether to add headers to the output",
+    )
     # Parse the command-line arguments
     args = parser.parse_args()
 
@@ -474,6 +483,7 @@ if __name__ == "__main__":
         augmented_data=args.augmented_data,
         context_format=args.context_format,
         complete_mode=args.complete_mode,
+        add_headers=args.add_headers,
         batch_size=args.batch_size,
         output_folder=args.output_folder,
     )

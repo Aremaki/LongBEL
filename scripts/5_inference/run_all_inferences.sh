@@ -8,6 +8,7 @@ SPLIT_NAMES=("test")
 AUGMENTED_OPTIONS=("human_only")
 CONTEXT_FORMAT=("short" "long" "hybrid_short" "hybrid_long")
 COMPLETE_MODE=(true false)
+ADD_HEADERS=(true false)
 NUM_BEAMS=(5)
 MODELS=("Llama-3.2-1B-Instruct" "Llama-3.2-3B-Instruct" "Llama-3.1-8B-Instruct")
 BEST_OPTIONS=(true false)
@@ -30,9 +31,17 @@ for dataset in "${DATASETS[@]}"; do
                                     if [[ "${complete_mode}" == true ]]; then
                                         complete_mode_str="_complete"
                                     fi
-    
+
+                                    # ----------------------------
+                                    # Compute add headers string
+                                    # ----------------------------
+                                    add_headers_str=""
+                                    if [[ "${add_headers}" == true ]]; then
+                                        add_headers_str="_addheaders"
+                                    fi
+
                                     # Determine the output folder
-                                    FOLDER="${BASE_OUTPUT_DIR}/${dataset}/${augmented}_${selection}_${context_format}${complete_mode_str}"
+                                    FOLDER="${BASE_OUTPUT_DIR}/${dataset}/${augmented}_${selection}_${context_format}${complete_mode_str}${add_headers_str}"
 
                                     MODEL_FOLDER="${FOLDER}/${model}_"
                                     if [ "$best" = true ]; then
@@ -60,6 +69,9 @@ for dataset in "${DATASETS[@]}"; do
                                         ARGS="${ARGS} --complete-mode"
                                     fi
 
+                                    if [[ "${add_headers}" == true ]]; then
+                                        ARGS="${ARGS} --add-headers"
+                                    fi
 
                                     # Submit job
                                     echo "Submitting: ${ARGS} (missing output)"
