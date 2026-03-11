@@ -46,7 +46,7 @@ def get_split_marker(
     else:
         raise ValueError(f"Unknown dataset_name: {dataset_name}")
 
-    return "} ", nlp
+    return "}", nlp
 
 
 def sentence_tokenize_safe(text, nlp):
@@ -98,9 +98,9 @@ def add_headers_to_prompt(source: str, target: str, context_format: str):
         prompt = f"### Context\n{source.rstrip()}\n\n"
         completion = f"### Predictions\n{target}"
     elif context_format == "short":
-        target_split = target.split("} ")
+        target_split = target.split("}")
         if len(target_split) == 2:
-            prefix = target_split[0] + "} "
+            prefix = target_split[0] + "}"
             completion = target_split[1]
         else:
             raise ValueError(f"Unexpected target format: {target}")
@@ -118,9 +118,9 @@ def add_headers_to_prompt(source: str, target: str, context_format: str):
             current_tgt = split_target[0]
         else:
             raise ValueError(f"Unexpected target format: {target}")
-        current_tgt_split = current_tgt.split("} ")
+        current_tgt_split = current_tgt.split("}")
         if len(current_tgt_split) == 2:
-            current_tgt_prefix = current_tgt_split[0] + "} "
+            current_tgt_prefix = current_tgt_split[0] + "}"
             completion = current_tgt_split[1]
         else:
             raise ValueError(f"Unexpected current target format: {current_tgt}")
@@ -171,6 +171,12 @@ def create_prompt_completion_dataset(
         remove_columns=dataset.column_names,
         desc="Formatting prompt/completion dataset",
     )
+
+
+def get_length(example, tokenizer):
+    texts = [p + c for p, c in zip(example["prompt"], example["completion"])]
+    enc = tokenizer(texts, add_special_tokens=False)
+    return {"length": [len(x) for x in enc["input_ids"]]}
 
 
 def extract_entity_char_spans(completion: str, split_marker: str):
@@ -406,12 +412,12 @@ def main(
             raise hub_err
 
     # Ensure pad_token exists (use eos_token as pad if necessary)
+    num_added = 0
     if tokenizer.pad_token is None:
-        tokenizer.add_special_tokens({"pad_token": tokenizer.eos_token})
-        model.resize_token_embeddings(len(tokenizer))
+        num_added += tokenizer.add_special_tokens({"pad_token": tokenizer.eos_token})
     # Add SEP special token and resize embeddings if needed
     plus_token_str = "<+>"
-    num_added = tokenizer.add_special_tokens({
+    num_added += tokenizer.add_special_tokens({
         "additional_special_tokens": [
             start_entity_token,
             end_entity_token,
@@ -605,17 +611,18 @@ def main(
         context_format=context_format,
         add_headers=add_headers,
     )
+    num_proc = os.cpu_count() // 2
     if context_format == "long":
         train_dataset = train_dataset.map(
             lambda x: preprocess_prompt_completion_example(x, tokenizer, split_marker),
             remove_columns=train_dataset.column_names,
-            num_proc=8,
+            num_proc=num_proc,
         )
 
         validation_dataset = validation_dataset.map(
             lambda x: preprocess_prompt_completion_example(x, tokenizer, split_marker),
             remove_columns=validation_dataset.column_names,
-            num_proc=8,
+            num_proc=num_proc,
         )
         completion_only_loss = False
         # Sanity check for tokenization and formatting
@@ -626,31 +633,30 @@ def main(
         ])
         print(decoded)
 
-        # Compute longest training example
-        longest_train = 0
-        for example in train_dataset:
-            seq_len = len(example["input_ids"])  # type: ignore
-            if seq_len > longest_train:
-                longest_train = seq_len
-
-        print(f"Longest training example has {longest_train} tokens.")
-        if longest_train > max_length:
-            if "8B" in model_name:
-                print(
-                    f"⚠️ Longest training example ({longest_train} tokens) exceeds hard max_length ({max_length}). They will be truncated..."
-                )
-            else:
-                max_length = longest_train + 512
-        print(f"Using training-set max_length: {max_length}")
-        if max_length > model_context_length:
-            print(
-                f"⚠️ training-set max_length ({max_length}) is larger than model context length ({model_context_length})."
-            )
     else:
         completion_only_loss = True
         # Sanity check for tokenization and formatting
-        print(train_dataset[0])
+        print(train_dataset[10])
 
+    # Compute longest training example
+    lengths = train_dataset.map(
+        lambda x: get_length(x, tokenizer), batched=True, num_proc=num_proc
+    )
+    longest_train = max(lengths["length"])
+
+    print(f"Longest training example has {longest_train} tokens.")
+    if longest_train > max_length:
+        if "8B" in model_name:
+            print(
+                f"⚠️ Longest training example ({longest_train} tokens) exceeds hard max_length ({max_length}). They will be truncated..."
+            )
+        else:
+            max_length = longest_train + 512
+    print(f"Using training-set max_length: {max_length}")
+    if max_length > model_context_length:
+        print(
+            f"⚠️ training-set max_length ({max_length}) is larger than model context length ({model_context_length})."
+        )
     # ---------- SFT TrainingArguments ----------
 
     output_dir = (

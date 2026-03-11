@@ -237,9 +237,9 @@ def _process_hf_dataset(
             prefixes = []
             completions = []
             for t in tgt:
-                t_split = t.split("} ")
+                t_split = t.split("}")
                 if len(t_split) == 2:
-                    prefixes.append(t_split[0] + "} ")
+                    prefixes.append(t_split[0] + "}")
                     completions.append(t_split[1])
                 else:
                     raise ValueError(f"Unexpected target format: {t}")
@@ -268,9 +268,9 @@ def _process_hf_dataset(
                     current_tgt = split_t[0]
                 else:
                     raise ValueError(f"Unexpected target format: {t}")
-                current_tgt_split = current_tgt.split("} ")
+                current_tgt_split = current_tgt.split("}")
                 if len(current_tgt_split) == 2:
-                    current_tgt_prefix.append(current_tgt_split[0] + "} ")
+                    current_tgt_prefix.append(current_tgt_split[0] + "}")
                     completions.append(current_tgt_split[1])
                 else:
                     raise ValueError(f"Unexpected current target format: {current_tgt}")
