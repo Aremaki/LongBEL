@@ -510,10 +510,10 @@ def main(
     if augmented_data not in ["human_only", "human_only_ft"]:
         if dataset_name == "MedMentions":
             synth_train_source_data = load_pickle(
-                data_folder / "SynthMM" / f"train_{selection_method}_source_short.pkl"
+                data_folder / "SynthMM" / f"train_{selection_method}_source.pkl"
             )
             synth_train_target_data = load_pickle(
-                data_folder / "SynthMM" / f"train_{selection_method}_target_short.pkl"
+                data_folder / "SynthMM" / f"train_{selection_method}_target.pkl"
             )
             synth_train_dataset = Dataset.from_dict({
                 "source": synth_train_source_data,
@@ -521,14 +521,10 @@ def main(
             })
         elif dataset_name in ["EMEA", "MEDLINE"]:
             synth_train_source_data = load_pickle(
-                data_folder
-                / "SynthQUAERO"
-                / f"train_{selection_method}_source_short.pkl"
+                data_folder / "SynthQUAERO" / f"train_{selection_method}_source.pkl"
             )
             synth_train_target_data = load_pickle(
-                data_folder
-                / "SynthQUAERO"
-                / f"train_{selection_method}_target_short.pkl"
+                data_folder / "SynthQUAERO" / f"train_{selection_method}_target.pkl"
             )
             synth_train_dataset = Dataset.from_dict({
                 "source": synth_train_source_data,
@@ -536,14 +532,10 @@ def main(
             })
         else:  # SPACCC logic
             synth_train_source_data = load_pickle(
-                data_folder
-                / "SynthSPACCC"
-                / f"train_{selection_method}_source_short.pkl"
+                data_folder / "SynthSPACCC" / f"train_{selection_method}_source.pkl"
             )
             synth_train_target_data = load_pickle(
-                data_folder
-                / "SynthSPACCC"
-                / f"train_{selection_method}_target_short.pkl"
+                data_folder / "SynthSPACCC" / f"train_{selection_method}_target.pkl"
             )
             synth_train_dataset = Dataset.from_dict({
                 "source": synth_train_source_data,
@@ -558,7 +550,7 @@ def main(
         eval_steps = 2000
         logging_strategy = "steps"
         logging_steps = 2000
-        num_train_epochs = 3
+        num_train_epochs = 10
         if augmented_data == "synth_only":
             num_train_epochs = 5
             train_dataset = synth_train_dataset
@@ -710,8 +702,7 @@ def main(
         report_to="tensorboard",
         save_total_limit=2,
         eval_packing=False,
-        packing=True,
-        packing_strategy="bfd",
+        packing=False,
         padding_free=True,
         max_length=max_length,
         completion_only_loss=completion_only_loss,
