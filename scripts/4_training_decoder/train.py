@@ -852,9 +852,9 @@ if __name__ == "__main__":
         help="The token marking the end of the entity group",
     )
     parser.add_argument(
-        "--add-context",
+        "--add-headers",
         action="store_true",
-        help="Whether to add context to the prompt even for short format (for ablation)",
+        help="Whether to add headers to the prompts (e.g. '### Context', '### Prediction')",
     )
     args = parser.parse_args()
 
