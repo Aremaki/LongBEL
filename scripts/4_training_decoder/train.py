@@ -346,7 +346,6 @@ def main(
     lr: float,
     dataset_name: str,
     augmented_data: str,
-    max_length: int = 16_000,
     selection_method: str = "tfidf",
     context_format: str = "short",
     complete_mode: bool = False,
@@ -620,15 +619,9 @@ def main(
     lengths = train_dataset.map(
         lambda x: get_length(x, tokenizer), batched=True, num_proc=num_proc
     )
-    longest_train = max(lengths["length"])
-    print(f"Longest training example has {longest_train} tokens.")
-    if longest_train > max_length:
-        if "8B" in model_name:
-            print(
-                f"⚠️ Longest training example ({longest_train} tokens) exceeds hard max_length ({max_length}). They will be truncated..."
-            )
-        else:
-            max_length = longest_train + 512
+    longest_training = max(lengths["length"])
+    print(f"Longest training example has {longest_training} tokens.")
+    max_length = longest_training + 16
     print(f"Using training-set max_length: {max_length}")
     if max_length > model_context_length:
         print(
@@ -867,7 +860,6 @@ if __name__ == "__main__":
         context_format=args.context_format,
         complete_mode=args.complete_mode,
         add_headers=args.add_headers,
-        max_length=args.max_length,
         start_entity_token=args.start_entity_token,
         end_entity_token=args.end_entity_token,
         start_group_token=args.start_group_token,
