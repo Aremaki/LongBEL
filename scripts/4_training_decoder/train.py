@@ -586,6 +586,8 @@ def main(
         train_dataset = human_train_dataset
         if augmented_data == "human_only":
             num_train_epochs = 50
+            if "hybrid" in context_format and dataset_name == "MedMentions":
+                num_train_epochs = num_train_epochs // 2
         else:  # human_only_ft
             lr = lr / 3.0
             if dataset_name in ["EMEA", "MEDLINE"]:

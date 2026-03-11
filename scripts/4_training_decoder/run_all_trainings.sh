@@ -1,6 +1,7 @@
 #!/bin/bash
 
 BASE_OUTPUT_DIR="models/NED"
+RESOURCES_PER_NODE="1"  # Default to 1 GPU per node if not provided as an argument
 
 MODELS=("Llama-3.2-1B-Instruct" "Llama-3.2-3B-Instruct" "Llama-3.1-8B-Instruct")
 DATASETS=("MedMentions" "SPACCC" "EMEA" "MEDLINE")
@@ -45,7 +46,11 @@ for dataset in "${DATASETS[@]}"; do
                             # Submit job
                             echo "Submitting training job (missing): ${MODEL_DIR}"
                             echo "  ARGS=${ARGS}"
-                            sbatch --export=ALL,SCRIPT_ARGS="${ARGS}" -A ssq@h100 scripts/4_training_decoder/run.slurm
+                            sbatch --ntasks-per-node="${RESOURCES_PER_NODE}" \
+                                   --gres="gpu:${RESOURCES_PER_NODE}" \
+                                   --export=ALL,SCRIPT_ARGS="${ARGS}" \
+                                   -A ssq@h100 \
+                                   scripts/4_training_decoder/run.slurm
                             sleep 1
                         done
                     done
