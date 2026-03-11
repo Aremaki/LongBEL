@@ -609,7 +609,7 @@ def main(
     validation_dataset = create_prompt_completion_dataset(
         validation_dataset,
         nlp,
-        complete_mode=False,  # no need for complete mode in validation
+        complete_mode=complete_mode,  # no need for complete mode in validation
         context_format=context_format,
         add_headers=add_headers,
     )
