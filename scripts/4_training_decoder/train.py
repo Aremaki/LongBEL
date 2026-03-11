@@ -621,7 +621,7 @@ def main(
     )
     longest_training = max(lengths["length"])
     print(f"Longest training example has {longest_training} tokens.")
-    max_length = longest_training + 16
+    max_length = max(longest_training + 16, 2048)
     print(f"Using training-set max_length: {max_length}")
     if max_length > model_context_length:
         print(
@@ -681,11 +681,12 @@ def main(
         / model_short_name
     )
     model.gradient_checkpointing_enable()
+    bacth_size = max(16_384 // max_length, 1)
     sft_args = SFTConfig(
         output_dir=str(output_dir),
         logging_dir=str(logging_dir),
-        per_device_train_batch_size=1,
-        per_device_eval_batch_size=1,
+        per_device_train_batch_size=bacth_size,
+        per_device_eval_batch_size=bacth_size,
         gradient_accumulation_steps=1,
         eval_strategy=eval_strategy,
         eval_steps=eval_steps if eval_strategy == "steps" else None,
@@ -707,6 +708,8 @@ def main(
         save_total_limit=2,
         eval_packing=False,
         packing=True,
+        packing_strategy="bfd",
+        padding_free=True,
         max_length=max_length,
         completion_only_loss=completion_only_loss,
     )
