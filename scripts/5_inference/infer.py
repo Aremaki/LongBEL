@@ -285,6 +285,7 @@ def main(
     no_constraint_df = pl.DataFrame(no_constraint_pred)
     no_constraint_df = no_constraint_df.sort(["mention_id", "rank"])
     # Compute recall per label
+    metadata["recall_results_no_constraint"] = {}
     top_no_constraint_df = no_constraint_df.filter(pl.col("rank") == 1)
     for label in top_no_constraint_df["semantic_group"].unique().to_list():
         label_df = top_no_constraint_df.filter(pl.col("semantic_group") == label)
@@ -293,6 +294,7 @@ def main(
         ).shape[0]
         total_label = label_df.shape[0]
         recall_label = true_label / total_label if total_label > 0 else 0.0
+        metadata["recall_results_no_constraint"][label] = f"{recall_label:.4f} ({true_label}/{total_label})"
         print(
             f"Semantic Group: {label} - No Constraint Inference Recall: {recall_label:.4f} ({true_label}/{total_label})"
         )
@@ -302,6 +304,7 @@ def main(
     ).shape[0]
     total_overall = top_no_constraint_df.shape[0]
     recall_overall = true_overall / total_overall if total_overall > 0 else 0.0
+    metadata["recall_results_no_constraint"]["overall"] = f"{recall_overall:.4f} ({true_overall}/{total_overall})"
     print(
         f"Overall - No Constraint Inference Recall: {recall_overall:.4f} ({true_overall}/{total_overall})"
     )
@@ -349,6 +352,7 @@ def main(
     }
 
     # Compute recall per label
+    metadata["recall_results_constraint"] = {}
     constraint_df = pl.DataFrame(constraint_preds)
     # sort by mention_id and rank
     constraint_df = constraint_df.sort(["mention_id", "rank"])
@@ -360,6 +364,7 @@ def main(
         ).shape[0]
         total_label = label_df.shape[0]
         recall_label = true_label / total_label if total_label > 0 else 0.0
+        metadata["recall_results_constraint"][semantic_group] = f"{recall_label:.4f} ({true_label}/{total_label})"
         print(
             f"Semantic Group: {semantic_group} - Constraint Inference Recall: {recall_label:.4f} ({true_label}/{total_label})"
         )
@@ -369,6 +374,7 @@ def main(
     ).shape[0]
     total_overall = top_constraint_df.shape[0]
     recall_overall = true_overall / total_overall if total_overall > 0 else 0.0
+    metadata["recall_results_constraint"]["overall"] = f"{recall_overall:.4f} ({true_overall}/{total_overall})"
     print(
         f"Overall - Constraint Inference Recall: {recall_overall:.4f} ({true_overall}/{total_overall})"
     )

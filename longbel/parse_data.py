@@ -726,15 +726,20 @@ def parse_text_hybrid_long(
             else:
                 target_texts_dict[(global_start, global_end)] = target_entity_text
     # Sort keys to have a deterministic order
+    target_texts = []
     sorted_keys = sorted(tsv_lines_dict.keys(), key=lambda x: (x[0], x[1]))
     for entity_id, entity_span in enumerate(sorted_keys):
         tsv_line = tsv_lines_dict[entity_span]
         source_sentences.append(source_texts_dict[entity_span])
         target_text += target_texts_dict[entity_span]
         target_sentences.append(target_text)
+        target_texts.append(target_texts_dict[entity_span])
         tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
-    return source_sentences, target_sentences, tsv_lines
+    if train_mode:
+        return source_sentences, target_sentences, tsv_lines
+    else:
+        return source_sentences, target_texts, tsv_lines
 
 def parse_text_hybrid_short(
     data,
@@ -1029,15 +1034,20 @@ def parse_text_hybrid_short(
             else:
                 target_texts_dict[(global_start, global_end)] = target_entity_text
     # Sort keys to have a deterministic order
+    target_texts = []
     sorted_keys = sorted(tsv_lines_dict.keys(), key=lambda x: (x[0], x[1]))
     for entity_id, entity_span in enumerate(sorted_keys):
         tsv_line = tsv_lines_dict[entity_span]
         source_sentences.append(source_texts_dict[entity_span])
         target_text += target_texts_dict[entity_span]
         target_sentences.append(target_text)
+        target_texts.append(target_texts_dict[entity_span])
         tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
-    return source_sentences, target_sentences, tsv_lines
+    if train_mode:
+        return source_sentences, target_sentences, tsv_lines
+    else:
+        return source_sentences, target_texts, tsv_lines
 
 
 def parse_text_long(
