@@ -6,7 +6,7 @@ DATASETS=("SPACCC" "MedMentions" "EMEA" "MEDLINE")
 SELECTION_METHODS=("tfidf")
 SPLIT_NAMES=("test")
 AUGMENTED_OPTIONS=("human_only")
-CONTEXT_FORMAT=("short" "long" "hybrid_short" "hybrid_long")
+CONTEXT_FORMAT=("short" "long" "hybrid_short" "hybrid_long" "hybrid_medium")
 COMPLETE_MODE=(true false)
 ADD_HEADERS=(true false)
 NUM_BEAMS=(5)
@@ -55,6 +55,23 @@ for dataset in "${DATASETS[@]}"; do
                                     # Check if job already done
                                     if [ -f "$OUTPUT_FILE" ]; then
                                         echo "Skipping: Output already exists → $OUTPUT_FILE"
+                                        continue
+                                    fi
+                                    # Check if model already exists
+                                    MODEL_DIR="${BASE_MODEL_DIR}/${dataset}_${augmented}_${selection}_${context_format}"
+                                    if [[ "${complete_mode}" == true ]]; then
+                                        MODEL_DIR="${MODEL_DIR}_complete"
+                                    fi
+                                    if [[ "${add_headers}" == true ]]; then
+                                        MODEL_DIR="${MODEL_DIR}_addheaders"
+                                    fi
+                                    if [ "$best" = true ]; then
+                                        MODEL_FOLDER="${MODEL_FOLDER}/${model}/model_best"
+                                    else
+                                        MODEL_FOLDER="${MODEL_FOLDER}/${model}/model_last"
+                                    fi
+                                    if [ ! -d "$MODEL_DIR" ]; then
+                                        echo "Skipping: Model already exists → ${MODEL_DIR}"
                                         continue
                                     fi
 
