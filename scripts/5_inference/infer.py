@@ -79,6 +79,7 @@ def main(
     print(f"Add Headers: {add_headers}")
     print(f"Number of Beams: {num_beams}")
     print(f"Batch Size: {batch_size}")
+    print(f"device: {device}")
 
     # Load model
     complete_mode_str = "_complete" if complete_mode else ""
@@ -109,7 +110,7 @@ def main(
     )
 
     # Text to code path
-    text_to_codes_folder = Path("data") / "text_to_codes"
+    text_to_codes_folder = Path("data"/"text_to_codes")
     text_to_codes_folder.mkdir(parents=True, exist_ok=True)
     text_to_code_path = text_to_codes_folder / f"text_to_code_{dataset_short}.json"
 
@@ -183,17 +184,9 @@ def main(
 
         # candidate Trie
         if not os.path.exists(candidate_trie_path):
-            if model.lang == "fr":  # type: ignore
-                verb = "est"
-            elif model.lang == "en":  # type: ignore
-                verb = "is"
-            elif model.lang == "es":  # type: ignore
-                verb = "es"
-            else:
-                raise ValueError(f"Unknown language: {model.lang}")  # type: ignore
             # Compute candidate Trie
             start_idx = 1
-            prefix = f" {verb} "
+            prefix = "} "
             candidate_trie = {}
             for group in umls_df["GROUP"].unique().to_list():  # type: ignore
                 print(f"processing {group}")
@@ -235,6 +228,7 @@ def main(
         "split_name": split_name,
         "augmented_data": augmented_data,
         "context_format": context_format,
+        "add_headers": add_headers,
         "complete_mode": complete_mode,
         "num_beams": num_beams,
         "batch_size": batch_size,
@@ -321,6 +315,8 @@ def main(
     )
 
     # Perform inference with constraint
+    if "timing_results" not in metadata:
+        metadata["timing_results"] = {}
     tic = time.time()
     constraint_preds = model.sample(
         bigbio_pages=test_data,  # type: ignore

@@ -41,7 +41,6 @@ logging.basicConfig(
 def get_prefix_allowed_tokens_fn(
     model,
     sources: list[str],
-    prefix_templates: list[str],
     sem_groups: list[str],
     multiple_answers: bool = False,
 ):
@@ -50,47 +49,60 @@ def get_prefix_allowed_tokens_fn(
     eos_token_id = model.tokenizer.eos_token_id
     pad_token_id = model.tokenizer.pad_token_id
     plus_token_id = model.tokenizer.convert_tokens_to_ids("<+>")  # type: ignore
-    prefix_templates = [
-        model.tokenizer.encode(prefix, add_special_tokens=False)
-        for prefix in prefix_templates
-    ]
+    end_group_token_id = model.tokenizer.convert_tokens_to_ids("}")  # type: ignore
 
     def prefix_allowed_tokens_fn(batch_id, sent):
         sent = sent.tolist()
         if len(sent) > 1 and sent[-1] in [eos_token_id, pad_token_id, sep_token_id]:
-            return [sep_token_id, pad_token_id, eos_token_id]
-        prefix = prefix_templates[batch_id]
+            if sep_token_id:
+                return [sep_token_id, pad_token_id, eos_token_id]
+            else:
+                return [pad_token_id, eos_token_id]
+
         # Remove the prefix from the sent
-        index_sep = len(sent) - 1 - sent[::-1].index(sep_token_id)
-        sent = sent[index_sep + 1 :]
-        # Check if the prefix is present
-        prefix_len = len(prefix)
-        if sent[:prefix_len] == prefix:
-            sent = sent[prefix_len - 1 :]
-        else:
-            raise ValueError("Prefix not found in the generated sentence.")
+        index_sep = len(sent) - 1 - sent[::-1].index(end_group_token_id)
+        sent = sent[index_sep:]
+
         sem_group = sem_groups[batch_id]
         # Remove everything up to last sep_token_id and add prefix and tgt_lang_id
         if multiple_answers and plus_token_id in sent:
             index_plus = len(sent) - 1 - sent[::-1].index(plus_token_id)
             # Start fresh with decoder start
             if index_plus == len(sent) - 1:
-                sent = prefix[-1:]
+                sent = [end_group_token_id]
             # If there are tokens after the last plus_token_id, keep them
             else:
-                sent = prefix[-1:] + sent[index_plus + 1 :]
+                sent = [end_group_token_id] + sent[index_plus + 1 :]
         trie_out = candidates_trie[
             sem_group  # type: ignore
         ].get(sent)
         if eos_token_id in trie_out:
-            trie_out += [sep_token_id]
+            if sep_token_id:
+                trie_out += [sep_token_id]
             if multiple_answers:
                 trie_out += [plus_token_id]
         elif not trie_out:
-            return [sep_token_id, pad_token_id, eos_token_id]
+            if sep_token_id:
+                return [sep_token_id, pad_token_id, eos_token_id]
+            else:
+                return [pad_token_id, eos_token_id]
         return trie_out
 
     return prefix_allowed_tokens_fn
+
+
+def add_headers_to_prompt(source: str, target: str, previous_targets: str, context_format: str):
+    if context_format == "long":
+        input_sentence = f"### Context\n{source.rstrip()}\n\n### Predictions\n{previous_targets}{target}"
+    elif context_format == "short":
+        input_sentence = f"### Context\n{source.rstrip()}\n\n### Prediction\n{target}"
+    elif context_format in ["hybrid_short", "hybrid_long"]:
+        if not previous_targets:
+            previous_targets = "None"
+        input_sentence = f"### Context\n{source.rstrip()}\n\n### Previous Normalizations\n{previous_targets.rstrip()}\n\n### Prediction\n{target}"
+    else:
+        raise ValueError(f"Unknown context_format: {context_format}")
+    return input_sentence
 
 
 def parse_prediction(
@@ -204,7 +216,6 @@ class _LongBELHubInterface:
         end_spans,
         gold_concept_codes,
         gold_concept_names,
-        prefix_templates,
         constrained,
         multiple_answers,
         num_beams,
@@ -227,7 +238,6 @@ class _LongBELHubInterface:
             prefix_allowed_tokens_fn = get_prefix_allowed_tokens_fn(
                 model=self,
                 sources=input_sentences,
-                prefix_templates=prefix_templates,
                 sem_groups=sem_groups,
                 multiple_answers=multiple_answers,
             )
@@ -355,11 +365,12 @@ class _LongBELHubInterface:
             return iterable
 
         all_outputs = []
-        all_examples = []
+        all_sources = []
+        all_targets = []
         all_entities_info = []
         for data in bigbio_pages:
             if context_format == "long":
-                examples, entities_info = parse_text_long(
+                sources, targets, entities_info = parse_text_long(
                     data=data,
                     start_entity=start_entity,
                     end_entity=end_entity,
@@ -368,7 +379,7 @@ class _LongBELHubInterface:
                     train_mode=False,
                 )
             elif context_format == "short":
-                examples, entities_info = parse_text(
+                sources, targets, entities_info = parse_text(
                     data=data,
                     start_entity=start_entity,
                     end_entity=end_entity,
@@ -378,7 +389,7 @@ class _LongBELHubInterface:
                     train_mode=False,
                 )
             elif context_format == "hybrid_long":
-                examples, entities_info = parse_text_hybrid_long(
+                sources, targets, entities_info = parse_text_hybrid_long(
                     data=data,
                     start_entity=start_entity,
                     end_entity=end_entity,
@@ -388,7 +399,7 @@ class _LongBELHubInterface:
                     train_mode=False,
                 )
             elif context_format == "hybrid_short":
-                examples, entities_info = parse_text_hybrid_short(
+                sources, targets, entities_info = parse_text_hybrid_short(
                     data=data,
                     start_entity=start_entity,
                     end_entity=end_entity,
@@ -401,128 +412,124 @@ class _LongBELHubInterface:
                 raise ValueError(
                     f"Unsupported context_format value '{context_format}'."
                 )
-            all_examples.append(examples)
+            all_sources.append(sources)
+            all_targets.append(targets)
             all_entities_info.append(entities_info)
 
-        if not context_format == "long":
+        if context_format == "short":
             # Flatten examples and entities_info for batch processing
-            all_examples = [ex for page in all_examples for ex in page]
-            all_entities_info = [info for page in all_entities_info for info in page]
-        total_batches = (len(all_examples) + batch_size - 1) // batch_size
-        print(
-            f"Input preparation completed. Running generation on {total_batches} batches."
-        )
-        for i in _progress(
-            range(0, len(all_examples), batch_size),
-            desc="Processing batches",
-            total=total_batches,
-            show=show_progress and not context_format == "long",
-        ):
-            batch_examples = all_examples[i : i + batch_size]
-            batch_entities = all_entities_info[i : i + batch_size]
-            if not context_format == "long":
-                sem_groups = [entity["semantic_group"] for entity in batch_entities]
-                mentions = [entity["mention"] for entity in batch_entities]
-                doc_ids = [entity["doc_id"] for entity in batch_entities]
-                mentions_id = [entity["mention_id"] for entity in batch_entities]
-                start_spans = [entity["start_span"] for entity in batch_entities]
-                end_spans = [entity["end_span"] for entity in batch_entities]
-                gold_concept_codes = [
-                    entity.get("gold_concept_code", None) for entity in batch_entities
-                ]  # type: ignore
-                gold_concept_names = [
-                    entity.get("gold_concept_name", None) for entity in batch_entities
-                ]  # type: ignore
-                prefix_templates = [
-                    f"[{entity['mention']}]{{{entity['semantic_group']}}}"
-                    for entity in batch_entities
-                ]
-                input_sentences = batch_examples
-                all_outputs, _ = self.predict_batch(
-                    all_outputs=all_outputs,
-                    batch_size=batch_size,
-                    input_sentences=input_sentences,
-                    sem_groups=sem_groups,
-                    mentions=mentions,
-                    mentions_id=mentions_id,
-                    doc_ids=doc_ids,
-                    start_spans=start_spans,
-                    end_spans=end_spans,
-                    gold_concept_codes=gold_concept_codes,
-                    gold_concept_names=gold_concept_names,
-                    prefix_templates=prefix_templates,
-                    constrained=constrained,
-                    multiple_answers=multiple_answers,
-                    num_beams=num_beams,
-                    **kwargs,
-                )
-            else:
-                sentences = dict.fromkeys(range(len(batch_examples)), "")
-                max_sentences = max(len(batch) for batch in batch_examples)
-                for sent_id in _progress(
-                    range(max_sentences),
-                    desc=f"Batch {i // batch_size + 1}/{total_batches}",
-                    total=max_sentences,
-                    show=show_progress,
-                ):
-                    sem_groups = []
-                    mentions = []
-                    doc_ids = []
-                    mentions_id = []
-                    prefix_templates = []
-                    gold_concept_codes = []
-                    gold_concept_names = []
-                    start_spans = []
-                    end_spans = []
-                    for batch_id, (example, entity) in enumerate(
-                        zip(batch_examples, batch_entities)
-                    ):
-                        if sent_id < len(example):
-                            sentences[batch_id] += example[sent_id]
-                            sem_groups.append(entity[sent_id]["semantic_group"])
-                            mentions_id.append(entity[sent_id]["mention_id"])
-                            mentions.append(entity[sent_id]["mention"])
-                            doc_ids.append(entity[sent_id]["doc_id"])
-                            start_spans.append(entity[sent_id]["start_span"])
-                            end_spans.append(entity[sent_id]["end_span"])
-                            gold_concept_codes.append(
-                                entity[sent_id].get("gold_concept_code", None)
-                            )  # type: ignore
-                            gold_concept_names.append(
-                                entity[sent_id].get("gold_concept_name", None)
-                            )  # type: ignore
-                            prefix_templates.append(
-                                f"[{entity[sent_id]['mention']}]{{{entity[sent_id]['semantic_group']}}}"
-                            )
-                        # Remove the sentence
-                        else:
-                            sentences.pop(batch_id, None)
-
-                    # Encode input batch
-                    input_sentences = list(sentences.values())
-                    all_outputs, cleaned_output_sequences = self.predict_batch(
-                        all_outputs=all_outputs,
-                        batch_size=batch_size,
-                        input_sentences=input_sentences,
-                        sem_groups=sem_groups,
-                        mentions=mentions,
-                        mentions_id=mentions_id,
-                        doc_ids=doc_ids,
-                        start_spans=start_spans,
-                        end_spans=end_spans,
-                        gold_concept_codes=gold_concept_codes,
-                        gold_concept_names=gold_concept_names,
-                        prefix_templates=prefix_templates,
-                        constrained=constrained,
-                        multiple_answers=multiple_answers,
-                        num_beams=num_beams,
-                        **kwargs,
+            flat_sources = [ex for page in all_sources for ex in page]
+            flat_targets = [ex for page in all_targets for ex in page]
+            flat_entities = [info for page in all_entities_info for info in page]
+            # Build batches with is_last always True (no sequential dependency)
+            all_batches = []
+            for i in range(0, len(flat_sources), batch_size):
+                batch = [
+                    (src, tgt, ent, True)
+                    for src, tgt, ent in zip(
+                        flat_sources[i : i + batch_size],
+                        flat_targets[i : i + batch_size],
+                        flat_entities[i : i + batch_size],
                     )
-                    batch_ids = list(sentences.keys())
-                    for i, batch_id in enumerate(batch_ids):
-                        clean_sentence = cleaned_output_sequences[num_beams * i]
-                        clean_sentence = clean_sentence.rstrip("<SEP>") + "<SEP>"
-                        sentences[batch_id] = clean_sentence
+                ]
+                all_batches.append(batch)
+        else:
+            # Build batches processing multiple pages in parallel.
+            # Each slot is a different page, progressing sequentially.
+            # When a page finishes, the next unstarted page takes its slot.
+            page_queue = list(range(len(all_sources)))
+            active_slots = []  # list of (page_idx, item_idx)
+            all_batches = []
+
+            while active_slots or page_queue:
+                # Fill empty slots with new pages
+                while len(active_slots) < batch_size and page_queue:
+                    page_idx = page_queue.pop(0)
+                    active_slots.append((page_idx, 0))
+
+                if not active_slots:
+                    break
+
+                batch = []
+                next_active = []
+                for page_idx, item_idx in active_slots:
+                    is_last = item_idx == len(all_sources[page_idx]) - 1
+                    batch.append((
+                        all_sources[page_idx][item_idx],
+                        all_targets[page_idx][item_idx],
+                        all_entities_info[page_idx][item_idx],
+                        is_last,
+                    ))
+                    if not is_last:
+                        next_active.append((page_idx, item_idx + 1))
+
+                all_batches.append(batch)
+                active_slots = next_active
+
+        print(
+            f"Input preparation completed. Running generation on {len(all_batches)} batches."
+        )
+
+        all_outputs = []
+        batch_previous_targets = dict.fromkeys(range(batch_size), "") # page_idx -> previous target (for hybrid formats)
+        for batch in _progress(
+            all_batches,
+            desc="Processing batches",
+            total=len(all_batches),
+            show=show_progress,
+        ):
+            input_sentences = []
+            sem_groups = []
+            mentions = []
+            doc_ids = []
+            mentions_id = []
+            gold_concept_codes = []
+            gold_concept_names = []
+            start_spans = []
+            end_spans = []
+            for batch_id, source, target, entity, is_last_flag in enumerate(batch):
+                if is_last_flag:
+                    batch_previous_targets[batch_id] = ""
+                previous_targets = batch_previous_targets.get(batch_id)
+                input_sentences.append(add_headers_to_prompt(source, target, previous_targets, context_format))
+                sem_groups.append(entity["semantic_group"])
+                mentions.append(entity["mention"])
+                doc_ids.append(entity["doc_id"])
+                mentions_id.append(entity["mention_id"])
+                start_spans.append(entity["start_span"])
+                end_spans.append(entity["end_span"])
+                gold_concept_codes.append(
+                    entity.get("gold_concept_code", None)
+                )  # type: ignore
+                gold_concept_names.append(
+                    entity.get("gold_concept_name", None)
+                )  # type: ignore
+            all_outputs, cleaned_output_sequences = self.predict_batch(
+                all_outputs=all_outputs,
+                batch_size=batch_size,
+                input_sentences=input_sentences,
+                sem_groups=sem_groups,
+                mentions=mentions,
+                mentions_id=mentions_id,
+                doc_ids=doc_ids,
+                start_spans=start_spans,
+                end_spans=end_spans,
+                gold_concept_codes=gold_concept_codes,
+                gold_concept_names=gold_concept_names,
+                constrained=constrained,
+                multiple_answers=multiple_answers,
+                num_beams=num_beams,
+                **kwargs,
+            )
+        
+            for batch_id in batch_previous_targets:
+                clean_sentence = cleaned_output_sequences[num_beams * batch_id]
+                clean_sentence = start_entity + clean_sentence.split(start_entity)[-1]
+                if context_format in ["hybrid_short", "hybrid_long"]:
+                    clean_sentence = clean_sentence.rstrip() + "\n"
+                elif context_format == "long":
+                    clean_sentence = clean_sentence.rstrip("<SEP>") + "<SEP>"
+                batch_previous_targets[batch_id] += clean_sentence
 
         return all_outputs  # type: ignore
 

@@ -462,14 +462,7 @@ def parse_text(
         target_sentences.append(target_texts_dict[entity_span])
         tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
-    if train_mode:
-        return source_sentences, target_sentences, tsv_lines
-    else:
-        all_inputs = []
-        for source, target in zip(source_sentences, target_sentences):
-            all_inputs.append(source + target)
-        return all_inputs, tsv_lines
-
+    return source_sentences, target_sentences, tsv_lines
 
 def parse_text_hybrid_long(
     data,
@@ -741,14 +734,7 @@ def parse_text_hybrid_long(
         target_sentences.append(target_text)
         tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
-    if train_mode:
-        return source_sentences, target_sentences, tsv_lines
-    else:
-        all_inputs = []
-        for source, target in zip(source_sentences, target_sentences):
-            all_inputs.append(source + target)
-        return all_inputs, tsv_lines
-
+    return source_sentences, target_sentences, tsv_lines
 
 def parse_text_hybrid_short(
     data,
@@ -1051,13 +1037,7 @@ def parse_text_hybrid_short(
         target_sentences.append(target_text)
         tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
-    if train_mode:
-        return source_sentences, target_sentences, tsv_lines
-    else:
-        all_inputs = []
-        for source, target in zip(source_sentences, target_sentences):
-            all_inputs.append(source + target)
-        return all_inputs, tsv_lines
+    return source_sentences, target_sentences, tsv_lines
 
 
 def parse_text_long(
@@ -1310,6 +1290,7 @@ def parse_text_long(
         source_text += passage_text.rstrip("\n") + "\n"
     # Sort keys to have a deterministic order
     target_texts = []
+    source_texts = []
     sorted_keys = sorted(target_texts_dict.keys(), key=lambda x: (x[0], x[1]))
     for entity_id, entity_span in enumerate(sorted_keys):
         target_text += target_texts_dict[entity_span]
@@ -1317,14 +1298,11 @@ def parse_text_long(
         tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
         target_texts.append(target_texts_dict[entity_span])
+        source_texts.append(source_text)
     if train_mode:
         return source_text, target_text, tsv_lines, passages, db_name
     else:
-        all_inputs = [source_text + target_texts[0]]
-        for i in range(len(target_texts) - 1):
-            all_inputs.append(target_texts[i + 1])
-
-        return all_inputs, tsv_lines
+        return source_texts, target_texts, tsv_lines
 
 
 def process_bigbio_dataset(
