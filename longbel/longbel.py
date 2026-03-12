@@ -487,7 +487,7 @@ class _LongBELHubInterface:
             gold_concept_names = []
             start_spans = []
             end_spans = []
-            for batch_id, source, target, entity, is_last_flag in enumerate(batch):
+            for batch_id, (source, target, entity, is_last_flag) in enumerate(batch):
                 if is_last_flag:
                     batch_previous_targets[batch_id] = ""
                 previous_targets = batch_previous_targets.get(batch_id)
