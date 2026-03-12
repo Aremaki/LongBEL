@@ -475,7 +475,7 @@ class _LongBELHubInterface:
         )
 
         all_outputs = []
-        batch_previous_targets = dict.fromkeys(range(batch_size), "") # page_idx -> previous target (for hybrid formats)
+        batch_previous_targets = {}
         for batch in _progress(
             all_batches,
             desc="Processing batches",
@@ -492,13 +492,15 @@ class _LongBELHubInterface:
             start_spans = []
             end_spans = []
             for batch_id, (source, target, entity, is_last_flag) in enumerate(batch):
-                if is_last_flag:
-                    batch_previous_targets[batch_id] = ""
-                previous_targets = batch_previous_targets.get(batch_id)
+                doc_id = entity["doc_id"]
+                if doc_id not in batch_previous_targets:
+                    batch_previous_targets[doc_id] = ""
+                previous_targets = batch_previous_targets.get(doc_id)
+
                 input_sentences.append(add_headers_to_prompt(source, target, previous_targets, context_format))
                 sem_groups.append(entity["semantic_group"])
                 mentions.append(entity["mention"])
-                doc_ids.append(entity["doc_id"])
+                doc_ids.append(doc_id)
                 mentions_id.append(entity["mention_id"])
                 start_spans.append(entity["start_span"])
                 end_spans.append(entity["end_span"])
@@ -525,15 +527,16 @@ class _LongBELHubInterface:
                 num_beams=num_beams,
                 **kwargs,
             )
-        
-            for batch_id in batch_previous_targets:
-                clean_sentence = cleaned_output_sequences[num_beams * batch_id]
+            if is_last_flag:
+                batch_previous_targets[doc_id] = ""
+            for i, doc_id in enumerate(doc_ids):
+                clean_sentence = cleaned_output_sequences[num_beams * i]
                 clean_sentence = start_entity + clean_sentence.split(start_entity)[-1]
                 if context_format in ["hybrid_short", "hybrid_long"]:
                     clean_sentence = clean_sentence.rstrip() + "\n"
                 elif context_format == "long":
                     clean_sentence = clean_sentence.rstrip("<SEP>") + "<SEP>"
-                batch_previous_targets[batch_id] += clean_sentence
+                batch_previous_targets[doc_id] += clean_sentence
 
         return all_outputs  # type: ignore
 
