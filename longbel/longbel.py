@@ -93,13 +93,13 @@ def get_prefix_allowed_tokens_fn(
 
 def add_headers_to_prompt(source: str, target: str, previous_targets: str, context_format: str):
     if context_format == "long":
-        input_sentence = f"### Context\n{source.rstrip()}\n\n### Predictions\n{previous_targets}{target}"
-    elif context_format == "short":
-        input_sentence = f"### Context\n{source.rstrip()}\n\n### Prediction\n{target}"
+        input_sentence = f"### Context\n{source.rstrip()}\n\n### Predictions\n{previous_targets}{target.rstrip()}"
+    elif context_format in ["short", "hybrid_medium"]:
+        input_sentence = f"### Context\n{source.rstrip()}\n\n### Prediction\n{target.rstrip()}"
     elif context_format in ["hybrid_short", "hybrid_long"]:
         if not previous_targets:
             previous_targets = "None"
-        input_sentence = f"### Context\n{source.rstrip()}\n\n### Previous Normalizations\n{previous_targets.rstrip()}\n\n### Prediction\n{target}"
+        input_sentence = f"### Context\n{source.rstrip()}\n\n### Previous Normalizations\n{previous_targets.rstrip()}\n\n### Prediction\n{target.rstrip()}"
     else:
         raise ValueError(f"Unknown context_format: {context_format}")
     return input_sentence

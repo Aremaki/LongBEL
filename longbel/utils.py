@@ -93,12 +93,12 @@ def convert_tsv_as_bigbio(
 def add_headers_to_prompt(source: str, target: str, context_format: str):
     if context_format == "long":
         prompt = f"### Context\n{source.rstrip()}\n\n"
-        completion = f"### Predictions\n{target}"
+        completion = f"### Predictions\n{target.rstrip()}"
     elif context_format in ["short", "hybrid_medium"]:
         target_split = target.split("}")
         if len(target_split) == 2:
             prefix = target_split[0] + "}"
-            completion = target_split[1]
+            completion = target_split[1].rstrip()
         else:
             raise ValueError(f"Unexpected target format: {target}")
         # Add Instruction prefix to source
@@ -118,7 +118,7 @@ def add_headers_to_prompt(source: str, target: str, context_format: str):
         current_tgt_split = current_tgt.split("}")
         if len(current_tgt_split) == 2:
             current_tgt_prefix = current_tgt_split[0] + "}"
-            completion = current_tgt_split[1]
+            completion = current_tgt_split[1].rstrip()
         else:
             raise ValueError(f"Unexpected current target format: {current_tgt}")
         # Add Instruction prefix to source

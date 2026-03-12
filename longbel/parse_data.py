@@ -1306,7 +1306,7 @@ def parse_text_hybrid_medium(
             )
             if train_mode:
                 target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {annotation}\n"
+                    f"{target_entity_text} {annotation}"
                 )
             else:
                 target_texts_dict[(global_start, global_end)] = target_entity_text
