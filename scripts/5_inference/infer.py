@@ -110,7 +110,7 @@ def main(
     )
 
     # Text to code path
-    text_to_codes_folder = Path("data"/"text_to_codes")
+    text_to_codes_folder = Path("data/text_to_codes")
     text_to_codes_folder.mkdir(parents=True, exist_ok=True)
     text_to_code_path = text_to_codes_folder / f"text_to_code_{dataset_short}.json"
 
