@@ -1,6 +1,7 @@
 #!/bin/bash
 
 BASE_OUTPUT_DIR="results/inference_outputs"
+BASE_MODEL_DIR="models/NED"
 
 DATASETS=("SPACCC" "MedMentions" "EMEA" "MEDLINE")
 SELECTION_METHODS=("tfidf")
