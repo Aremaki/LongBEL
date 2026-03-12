@@ -16,6 +16,7 @@ import typer
 from datasets import load_dataset
 
 from longbel.parse_data import compute_best_synonym_df, process_bigbio_dataset
+from longbel.utils import add_headers_to_prompt
 
 app = typer.Typer(
     help="Preprocess BigBio datasets into model-specific train/dev/test pickles."
@@ -226,63 +227,16 @@ def _process_hf_dataset(
         # Save training data
         training_data_folder = data_folder / "bigbio_dataset/training_data"
         _ensure_dir(training_data_folder)
-        if context_format == "long":
-            prompts = [f"### Context\n{s.rstrip()}\n\n" for s in src]
-            completions = [f"### Predictions\n{t}" for t in tgt]
-            pl.DataFrame({"prompt": prompts, "completion": completions}).write_parquet(
-                training_data_folder
-                / f"{split_name}_{selection_method}_{context_format}.parquet"
-            )
-        elif context_format == "short":
-            prefixes = []
-            completions = []
-            for t in tgt:
-                t_split = t.split("}")
-                if len(t_split) == 2:
-                    prefixes.append(t_split[0] + "}")
-                    completions.append(t_split[1])
-                else:
-                    raise ValueError(f"Unexpected target format: {t}")
-            prompts = [
-                f"### Context\n{s.rstrip()}\n\n### Prediction\n{prefix}"
-                for s, prefix in zip(src, prefixes)
-            ]
-            pl.DataFrame({"prompt": prompts, "completion": completions}).write_parquet(
-                training_data_folder
-                / f"{split_name}_{selection_method}_{context_format}.parquet"
-            )
-        elif context_format in ["hybrid_short", "hybrid_long"]:
-            # Split tgt into "previous" and "current" annotations for training data
-            previous_tgt = []
-            current_tgt_prefix = []
-            completions = []
-            for t in tgt:
-                split_t = t.split("\n")
-                # remove empty string
-                split_t = [s for s in split_t if s]
-                if len(split_t) >= 2:
-                    previous_tgt.append("\n".join(split_t[:-1]) + "\n")
-                    current_tgt = split_t[-1]
-                elif len(split_t) == 1:
-                    previous_tgt.append("None")
-                    current_tgt = split_t[0]
-                else:
-                    raise ValueError(f"Unexpected target format: {t}")
-                current_tgt_split = current_tgt.split("}")
-                if len(current_tgt_split) == 2:
-                    current_tgt_prefix.append(current_tgt_split[0] + "}")
-                    completions.append(current_tgt_split[1])
-                else:
-                    raise ValueError(f"Unexpected current target format: {current_tgt}")
-            # Add Instruction prefix to source
-            prompts = [
-                f"### Context\n{s.rstrip()}\n\n### Previous Normalizations\n{p.rstrip()}\n\n### Prediction\n{prefix}"
-                for s, p, prefix in zip(src, previous_tgt, current_tgt_prefix)
-            ]
-            pl.DataFrame({"prompt": prompts, "completion": completions}).write_parquet(
-                training_data_folder
-                / f"{split_name}_{selection_method}_{context_format}.parquet"
-            )
+        prompts = []
+        completions = []
+        for s, t in zip(src, tgt):
+            prompt, completion = add_headers_to_prompt(s, t, context_format)
+            prompts.append(prompt)
+            completions.append(completion)
+        pl.DataFrame({"prompt": prompts, "completion": completions}).write_parquet(
+            training_data_folder
+            / f"{split_name}_{selection_method}_{context_format}.parquet"
+        )
 
 
 def _process_synth_dataset(

@@ -1049,6 +1049,276 @@ def parse_text_hybrid_short(
     else:
         return source_sentences, target_texts, tsv_lines
 
+def parse_text_hybrid_medium(
+    data,
+    start_entity,
+    end_entity,
+    start_group,
+    end_group,
+    nlp,
+    code_to_title=None,
+    code_to_syn=None,
+    code_to_group=None,
+    cat_to_group=None,
+    sem_to_group=None,
+    corrected_code=None,
+    selection_method: str = "levenshtein",
+    encoder: Optional[TextEncoder] = None,
+    tfidf_vectorizer=None,
+    best_syn_map: Optional[dict[tuple[str, str], str]] = None,
+    train_mode: bool = False,
+) -> tuple[list[str], list[str], list[dict[str, str]]]:
+    """Create simple (source, target) pairs per entity.
+
+    For each entity in the BigBio page, returns one pair where:
+      - source: the sentence text that contains the entity mention
+      - target: "<entity> is <annotation>" where <annotation> is the best synonym
+        if available (or the normalized id otherwise).
+    """
+    source_sentences: list[str] = []
+    target_sentences: list[str] = []
+    target_text: str = ""
+    tsv_lines: list[dict[str, str]] = []
+    target_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
+    source_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
+    tsv_lines_dict: dict[tuple[tuple[int, int], ...], dict[str, str]] = {}
+    all_passages = {}
+    all_annotations = {}
+    for i, passage in enumerate(data.get("passages", [])):
+        all_passages[i] = clean_natural(passage["text"][0])
+    for i, passage in enumerate(data.get("passages", [])):
+        passage_text = passage["text"][0]
+        start_offset_passage = passage["offsets"][0][0]
+        end_offset_passage = passage["offsets"][0][1]
+
+        passage_text = clean_natural(passage_text)
+
+        # Iterate over entities and emit one pair per entity found in this passage
+        for entity in data.get("entities", []):
+            # min and max of all entity offsets to get the global span of the entity for filtering sentences
+            global_start = min(off[0] for off in entity["offsets"])
+            global_end = max(off[1] for off in entity["offsets"])
+            # Keep only entities whose start falls inside this passage
+            if not (start_offset_passage <= global_start < end_offset_passage):
+                continue
+            entity_text = " ".join(entity["text"])
+            entity_text = clean_natural(entity_text)
+            if train_mode:
+                if not entity.get("normalized"):
+                    logging.warning(
+                        f"Entity '{' '.join(entity['text'])}' has no code; skipping."
+                    )
+                    # No normalized id -> skip (no annotation)
+                    continue
+
+                normalized_ids = entity["normalized"][0]["db_id"]
+                if not normalized_ids:
+                    logging.warning(
+                        f"Entity '{entity_text}' has empty code; skipping entity."
+                    )
+                    continue
+                normalized_ids = normalized_ids.split("+")  # Handle multiple codes
+                annotations = []
+                group_annotations = []
+                for i, normalized_id in enumerate(normalized_ids):
+                    if corrected_code and normalized_id in corrected_code:
+                        normalized_id = corrected_code[normalized_id]
+                        normalized_ids[i] = normalized_id
+                        logging.info(
+                            f"Corrected code {entity['normalized'][0]['db_id']} -> {normalized_id} for entity '{entity_text}'"
+                        )
+
+                    possible_syns = None
+                    annotation = None
+                    # First try to get annotation from the mapping of all annotations
+                    if normalized_id in all_annotations:
+                        annotation = all_annotations[normalized_id]
+                    else:
+                        if selection_method == "title":
+                            if code_to_title is not None:
+                                annotation = code_to_title.get(normalized_id)
+                            else:
+                                logging.warning(
+                                    f"Title selection requested but no title mapping available for code {normalized_id} (entity '{entity_text}');"
+                                )
+                                continue
+                        # Prefer precomputed best synonyms if provided
+                        elif selection_method == "embedding":
+                            if best_syn_map is not None:
+                                pre_key = (normalized_id, entity_text)
+                                if pre_key in best_syn_map:
+                                    annotation = best_syn_map[pre_key]
+                            # Otherwise select from possible synonyms
+                            if annotation is None and code_to_syn is not None:
+                                possible_syns = code_to_syn.get(normalized_id)
+                                if possible_syns and encoder is not None:
+                                    logging.warning(
+                                        f"No precomputed best synonym map provided; Selecting best synonym by embedding for code {normalized_id} (entity '{entity_text}')"
+                                    )
+                                    best_syn, _ = best_by_cosine(
+                                        encoder=encoder,
+                                        mention=entity_text,
+                                        candidates=list(possible_syns),
+                                    )  # type: ignore
+                                    annotation = best_syn
+                        elif selection_method == "tfidf":
+                            if code_to_syn is not None:
+                                possible_syns = code_to_syn.get(normalized_id)
+                            if possible_syns and tfidf_vectorizer is not None:
+                                best_idx, best_score = cal_similarity_tfidf(
+                                    possible_syns, entity_text, tfidf_vectorizer
+                                )
+                                annotation = possible_syns[best_idx]
+                            else:
+                                logging.warning(
+                                    f"TF-IDF selection requested but no synonyms or vectorizer available for code {normalized_id} (entity '{entity_text}');"
+                                )
+                                continue
+                        elif selection_method == "levenshtein":
+                            if code_to_syn is not None:
+                                possible_syns = code_to_syn.get(normalized_id)
+                            if possible_syns:
+                                # Default to Levenshtein matching (previous behavior)
+                                text = entity_text
+                                dists = [
+                                    nltk.edit_distance(text, syn)
+                                    for syn in possible_syns
+                                ]
+                                best_syn = possible_syns[int(np.argmin(dists))]
+                                annotation = best_syn
+                    if annotation is None:
+                        # If no synonyms mapping, skip entity
+                        logging.warning(
+                            f"No synonyms found for code {normalized_id} (entity '{entity_text}'); skipping entity."
+                        )
+                        continue
+
+                    if isinstance(annotation, str):
+                        annotations.append(clean_natural(annotation))
+                        if normalized_id not in all_annotations:
+                            all_annotations[normalized_id] = clean_natural(annotation)
+
+                    # Define entity group
+                    entity_type = entity.get("type")
+                    groups = code_to_group.get(normalized_id, [])
+                    if len(groups) == 1:
+                        group = groups[0]
+                    else:
+                        if entity_type in cat_to_group.values():
+                            group = entity_type
+                        elif entity_type in cat_to_group.keys():
+                            group = cat_to_group[entity_type]
+                        elif entity_type in sem_to_group.keys():
+                            group = sem_to_group[entity_type]
+                        else:
+                            group = "Unknown"
+                            logging.info(
+                                f"No group found for entity type {entity_type}."
+                            )
+                        if group not in groups and groups:
+                            group = groups[0]
+                    if group == "Unknown":
+                        logging.info(
+                            f"Group is 'Unknown' for code {normalized_id} and entity type {entity_type}. skipping."
+                        )
+                        continue
+
+                    # Append only if different
+                    if group not in group_annotations:
+                        group_annotations.append(group)
+                        # Warning if multiple groups found
+                        if len(group_annotations) > 1:
+                            logging.warning(
+                                f"Multiple groups {group_annotations} found for code {normalized_id} (entity '{entity_text}')"
+                            )
+
+                # Merge annotations in a string with | separator
+                if not annotations:
+                    continue
+                group_annotation = "<+>".join(group_annotations)
+                annotation = "<+>".join(annotations)
+            else:
+                # Define entity group
+                group_annotation = entity.get("type")
+
+            # Get all offsets, convert to relative, and filter for this sentence
+            relative_entity_spans = []
+            for off in entity["offsets"]:
+                global_start_off, global_end_off = off
+                if not (start_offset_passage <= global_start_off < end_offset_passage):
+                    continue
+
+                rel_start_off = global_start_off - start_offset_passage
+                rel_end_off = global_end_off - start_offset_passage
+                relative_entity_spans.append((rel_start_off, rel_end_off))
+            relative_entity_spans.sort(key=lambda x: x[0])
+
+            marked_text = passage_text
+            for start_in_sent, end_in_sent in relative_entity_spans:
+                marked_text = (
+                    marked_text[:start_in_sent]
+                    + start_entity
+                    + marked_text[start_in_sent:end_in_sent]
+                    + end_entity
+                    + marked_text[end_in_sent:]
+                )
+
+            for other_passage_id, other_passage_text in all_passages.items():
+                if other_passage_id < i:
+                    marked_text = other_passage_text + "\n" + marked_text
+                elif other_passage_id > i:
+                    marked_text = marked_text + "\n" + other_passage_text
+            # Emit the pair
+            doc_id = data.get("id", "")
+            if train_mode:
+                tsv_line = {
+                    "doc_id": doc_id,
+                    "semantic_group": group_annotation,
+                    "start_span": global_start,
+                    "end_span": global_end,
+                    "mention": entity_text,
+                    "gold_concept_code": "+".join(normalized_ids),
+                    "semantic_rel": "EXACT"
+                    if len(normalized_ids) == 1
+                    else "COMPOSITE",
+                    "gold_concept_name": annotation,
+                }
+            else:
+                tsv_line = {
+                    "doc_id": doc_id,
+                    "semantic_group": group_annotation,
+                    "start_span": global_start,
+                    "end_span": global_end,
+                    "mention": entity_text,
+                }
+                if entity.get("normalized"):
+                    tsv_line["gold_concept_code"] = entity["normalized"][0]["db_id"]
+                    tsv_line["gold_concept_name"] = entity["normalized"][0]["db_match"]
+            tsv_lines_dict[(global_start, global_end)] = tsv_line
+            source_texts_dict[(global_start, global_end)] = marked_text
+            target_entity_text = (
+                start_entity
+                + entity_text
+                + end_entity
+                + start_group
+                + group_annotation
+                + end_group
+            )
+            if train_mode:
+                target_texts_dict[(global_start, global_end)] = (
+                    f"{target_entity_text} {annotation}\n"
+                )
+            else:
+                target_texts_dict[(global_start, global_end)] = target_entity_text
+    # Sort keys to have a deterministic order
+    sorted_keys = sorted(tsv_lines_dict.keys(), key=lambda x: (x[0], x[1]))
+    for entity_id, entity_span in enumerate(sorted_keys):
+        tsv_line = tsv_lines_dict[entity_span]
+        source_sentences.append(source_texts_dict[entity_span])
+        target_sentences.append(target_texts_dict[entity_span])
+        tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
+        tsv_lines.append(tsv_line)
+    return source_sentences, target_sentences, tsv_lines
 
 def parse_text_long(
     data,
@@ -1384,6 +1654,29 @@ def process_bigbio_dataset(
     for page in tqdm(bigbio_dataset, total=len(bigbio_dataset)):
         if context_format == "short":
             source_texts, target_texts, tsv_lines = parse_text(
+                data=page,
+                start_entity=start_entity,
+                end_entity=end_entity,
+                start_group=start_group,
+                end_group=end_group,
+                nlp=nlp,
+                code_to_title=code_to_title,
+                code_to_syn=code_to_syn,
+                code_to_group=code_to_group,
+                cat_to_group=cat_to_group,
+                sem_to_group=sem_to_group,
+                corrected_code=corrected_code,
+                selection_method=selection_method,
+                encoder=encoder,
+                tfidf_vectorizer=tfidf_vectorizer,
+                best_syn_map=best_syn_map,
+                train_mode=True,
+            )
+            target_data.extend(target_texts)
+            source_data.extend(source_texts)
+            tsv_data.extend(tsv_lines)
+        elif context_format == "hybrid_medium":
+            source_texts, target_texts, tsv_lines = parse_text_hybrid_medium(
                 data=page,
                 start_entity=start_entity,
                 end_entity=end_entity,

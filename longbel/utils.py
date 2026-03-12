@@ -88,3 +88,41 @@ def convert_tsv_as_bigbio(
     # Convert to Hugging Face Dataset
     logging.info(f"Loaded {len(pages)} pages")
     return Dataset.from_list(pages)
+
+
+def add_headers_to_prompt(source: str, target: str, context_format: str):
+    if context_format == "long":
+        prompt = f"### Context\n{source.rstrip()}\n\n"
+        completion = f"### Predictions\n{target}"
+    elif context_format in ["short", "hybrid_medium"]:
+        target_split = target.split("}")
+        if len(target_split) == 2:
+            prefix = target_split[0] + "}"
+            completion = target_split[1]
+        else:
+            raise ValueError(f"Unexpected target format: {target}")
+        # Add Instruction prefix to source
+        prompt = f"### Context\n{source.rstrip()}\n\n### Prediction\n{prefix}"
+    elif context_format in ["hybrid_short", "hybrid_long"]:
+        split_target = target.split("\n")
+        # remove empty string
+        split_target = [s for s in split_target if s]
+        if len(split_target) >= 2:
+            previous_tgt = "\n".join(split_target[:-1]) + "\n"
+            current_tgt = split_target[-1]
+        elif len(split_target) == 1:
+            previous_tgt = "None"
+            current_tgt = split_target[0]
+        else:
+            raise ValueError(f"Unexpected target format: {target}")
+        current_tgt_split = current_tgt.split("}")
+        if len(current_tgt_split) == 2:
+            current_tgt_prefix = current_tgt_split[0] + "}"
+            completion = current_tgt_split[1]
+        else:
+            raise ValueError(f"Unexpected current target format: {current_tgt}")
+        # Add Instruction prefix to source
+        prompt = f"### Context\n{source.rstrip()}\n\n### Previous Normalizations\n{previous_tgt.rstrip()}\n\n### Prediction\n{current_tgt_prefix}"
+    else:
+        raise ValueError(f"Unknown context_format: {context_format}")
+    return prompt, completion
