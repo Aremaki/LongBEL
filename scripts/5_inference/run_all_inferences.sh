@@ -71,7 +71,7 @@ for dataset in "${DATASETS[@]}"; do
                                         MODEL_FOLDER="${MODEL_FOLDER}/${model}/model_last"
                                     fi
                                     if [ ! -d "$MODEL_DIR" ]; then
-                                        echo "Skipping: Model already exists → ${MODEL_DIR}"
+                                        echo "Skipping: Model doesn't exist → ${MODEL_DIR}"
                                         continue
                                     fi
 
