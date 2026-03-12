@@ -241,6 +241,10 @@ class _LongBELHubInterface:
                 sem_groups=sem_groups,
                 multiple_answers=multiple_answers,
             )
+        if self.tokenizer.sep_token_id:
+            eos_token_id = self.tokenizer.sep_token_id
+        else:
+            eos_token_id = self.tokenizer.eos_token_id
         outputs = self.generate(  # type: ignore
             **input_args,
             max_new_tokens=128,
@@ -249,7 +253,7 @@ class _LongBELHubInterface:
             output_scores=True,
             return_dict_in_generate=True,
             prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
-            eos_token_id=self.tokenizer.sep_token_id,  # type: ignore
+            eos_token_id=eos_token_id,  # type: ignore
             **kwargs,
         )
         decoded_sequences = self.tokenizer.batch_decode(  # type: ignore
