@@ -28,6 +28,7 @@ from longbel.parse_data import (
     parse_text,
     parse_text_hybrid_long,
     parse_text_hybrid_short,
+    parse_text_hybrid_medium,
     parse_text_long,
 )
 
@@ -404,6 +405,16 @@ class _LongBELHubInterface:
                 )
             elif context_format == "hybrid_short":
                 sources, targets, entities_info = parse_text_hybrid_short(
+                    data=data,
+                    start_entity=start_entity,
+                    end_entity=end_entity,
+                    start_group=start_group,
+                    end_group=end_group,
+                    nlp=nlp,  # type: ignore
+                    train_mode=False,
+                )
+            elif context_format == "hybrid_medium":
+                sources, targets, entities_info = parse_text_hybrid_medium(
                     data=data,
                     start_entity=start_entity,
                     end_entity=end_entity,
