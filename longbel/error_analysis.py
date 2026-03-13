@@ -1199,11 +1199,18 @@ def compute_metrics(
         list(unique_pairs), schema=["mention", "gold_concept_code"], orient="row"
     )
 
-    repeated = (
-        pred_df.group_by(["doc_id", "gold_concept_code"])
-        .agg(pl.len().alias("count"))
-        .filter(pl.col("count") >= 2)
-        .select(["doc_id", "gold_concept_code"])
+    pred_df_with_repeat_rank = pred_df.with_columns(
+        pl.col("mention_id")
+        .str.split(".")
+        .list.get(1)
+        .cast(pl.Float64)
+        .alias("mention_order")
+    ).sort(["doc_id", "mention_order"]).with_columns(
+        pl.cum_count().over(["doc_id", "gold_concept_code"]).alias("repeat_rank")
+    )
+    repeated_df = (
+        pred_df_with_repeat_rank
+        .filter(pl.col("repeat_rank") >= 2)
     )
 
     partition_specs = [
@@ -1276,11 +1283,27 @@ def compute_metrics(
         ),
         (
             "repeated",
-            pred_df.join(repeated, on=["doc_id", "gold_concept_code"], how="inner"),
+            repeated_df,
+        ),
+        (
+            "repeated_rank_2",
+            repeated_df.filter(pl.col("repeat_rank") == 2),
+        ),
+        (
+            "repeated_rank_3",
+            repeated_df.filter(pl.col("repeat_rank") == 3),
+        ),
+        (
+            "repeated_rank_4",
+            repeated_df.filter(pl.col("repeat_rank") == 4),
+        ),
+        (
+            "repeated_rank_gte_5",
+            repeated_df.filter(pl.col("repeat_rank") >= 5),
         ),
         (
             "not_repeated",
-            pred_df.join(repeated, on=["doc_id", "gold_concept_code"], how="anti"),
+            pred_df_with_repeat_rank.filter(pl.col("repeat_rank") == 1),
         ),
     ]
 
