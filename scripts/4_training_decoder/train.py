@@ -693,33 +693,34 @@ def main(
         print("No valid checkpoint found. Starting training from scratch.")
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
-    # Save the best model checkpoint and last model (similar to original script)
-    try:
-        best_model_chkpt_dir = Path(trainer.state.best_model_checkpoint)  # type: ignore
-        model_dir = best_model_chkpt_dir.parent
-        best_model_dir = model_dir / "model_best"
-        # Remove target if it exists
-        if best_model_dir.exists():
-            shutil.rmtree(best_model_dir)
-        # Rename checkpoint to target
-        best_model_chkpt_dir.rename(best_model_dir)
-        best_step = str(trainer.state.best_model_checkpoint).split("-")[-1]
-        print(f"Best model saved at step {best_step}")
-    except Exception as e:
-        print("Warning: unable to copy best model checkpoint:", e)
+    if trainer.is_world_process_zero():
+        # Save the best model checkpoint and last model (similar to original script)
+        try:
+            best_model_chkpt_dir = Path(trainer.state.best_model_checkpoint)  # type: ignore
+            model_dir = best_model_chkpt_dir.parent
+            best_model_dir = model_dir / "model_best"
+            # Remove target if it exists
+            if best_model_dir.exists():
+                shutil.rmtree(best_model_dir)
+            # Rename checkpoint to target
+            best_model_chkpt_dir.rename(best_model_dir)
+            best_step = str(trainer.state.best_model_checkpoint).split("-")[-1]
+            print(f"Best model saved at step {best_step}")
+        except Exception as e:
+            print("Warning: unable to copy best model checkpoint:", e)
 
-    try:
-        last_model_chkpt_dir = model_dir / f"checkpoint-{trainer.state.global_step}"  # type: ignore
-        last_model_dir = model_dir / "model_last"  # type: ignore
-        # Remove target if it exists
-        if last_model_dir.exists():
-            shutil.rmtree(last_model_dir)
-        # Rename checkpoint to target
-        last_model_chkpt_dir.rename(last_model_dir)
-        last_step = str(trainer.state.global_step)
-        print(f"Last model saved at step {last_step}")
-    except Exception as e:
-        print("Warning: unable to copy last model checkpoint:", e)
+        try:
+            last_model_chkpt_dir = model_dir / f"checkpoint-{trainer.state.global_step}"  # type: ignore
+            last_model_dir = model_dir / "model_last"  # type: ignore
+            # Remove target if it exists
+            if last_model_dir.exists():
+                shutil.rmtree(last_model_dir)
+            # Rename checkpoint to target
+            last_model_chkpt_dir.rename(last_model_dir)
+            last_step = str(trainer.state.global_step)
+            print(f"Last model saved at step {last_step}")
+        except Exception as e:
+            print("Warning: unable to copy last model checkpoint:", e)
 
 
 if __name__ == "__main__":
