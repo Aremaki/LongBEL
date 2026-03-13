@@ -1206,7 +1206,10 @@ def compute_metrics(
         .cast(pl.Float64)
         .alias("mention_order")
     ).sort(["doc_id", "mention_order"]).with_columns(
-        pl.cum_count().over(["doc_id", "gold_concept_code"]).alias("repeat_rank")
+        pl.col("mention_id")
+        .cum_count()
+        .over(["doc_id", "gold_concept_code"])
+        .alias("repeat_rank")
     )
     repeated_df = (
         pred_df_with_repeat_rank
