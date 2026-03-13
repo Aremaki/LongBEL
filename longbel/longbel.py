@@ -431,7 +431,7 @@ class _LongBELHubInterface:
             all_targets.append(targets)
             all_entities_info.append(entities_info)
 
-        if context_format == "short":
+        if context_format in ["short", "hybrid_medium"]:
             # Flatten examples and entities_info for batch processing
             flat_sources = [ex for page in all_sources for ex in page]
             flat_targets = [ex for page in all_targets for ex in page]
