@@ -444,7 +444,7 @@ if __name__ == "__main__":
         "--context-format",
         type=str,
         default="short",
-        choices=["short", "long", "hybrid_long", "hybrid_short"],
+        choices=["short", "long", "hybrid_long", "hybrid_short", "hybrid_medium"],
         help="The context format for training",
     )
     parser.add_argument(
