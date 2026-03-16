@@ -12,7 +12,6 @@ import logging
 import os
 import pickle
 import re
-from collections import deque
 from typing import Optional
 
 import nltk
@@ -436,9 +435,12 @@ class _LongBELHubInterface:
             all_targets.append(targets)
             all_entities_info.append(entities_info)
 
-        # Build batches with a single constraint for each document:
+        # Build batches with these constraints for each document:
         # - At most one triplet per doc in a batch
         # - Triplets stay ordered from start to end within each doc
+        # Uses a simple active window of docs:
+        # start with up to batch_size docs, advance only those docs, and when
+        # one finishes, load the next unseen doc into its slot.
         doc_to_triplets = {}
         for sources, targets, entities_info in zip(
             all_sources, all_targets, all_entities_info
@@ -451,25 +453,30 @@ class _LongBELHubInterface:
 
         all_batches = []
         doc_offsets = dict.fromkeys(doc_to_triplets, 0)
-        doc_queue = deque(doc_to_triplets.keys())
+        doc_ids = list(doc_to_triplets.keys())
+        next_doc_idx = 0
+        active_doc_ids = []
 
-        while doc_queue:
+        while active_doc_ids or next_doc_idx < len(doc_ids):
+            while len(active_doc_ids) < batch_size and next_doc_idx < len(doc_ids):
+                active_doc_ids.append(doc_ids[next_doc_idx])
+                next_doc_idx += 1
+
             batch = []
-            requeue = deque()
+            next_active_doc_ids = []
 
-            while doc_queue and len(batch) < batch_size:
-                doc_id = doc_queue.popleft()
+            for doc_id in active_doc_ids:
                 doc_idx = doc_offsets[doc_id]
                 batch.append(doc_to_triplets[doc_id][doc_idx])
-                doc_offsets[doc_id] += 1
 
+                doc_offsets[doc_id] = doc_idx + 1
                 if doc_offsets[doc_id] < len(doc_to_triplets[doc_id]):
-                    requeue.append(doc_id)
+                    next_active_doc_ids.append(doc_id)
 
             if batch:
                 all_batches.append(batch)
 
-            doc_queue.extend(requeue)
+            active_doc_ids = next_active_doc_ids
 
         print(
             f"Input preparation completed. Running generation on {len(all_batches)} batches."
