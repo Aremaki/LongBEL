@@ -435,48 +435,61 @@ class _LongBELHubInterface:
             all_targets.append(targets)
             all_entities_info.append(entities_info)
 
-        # Build batches with these constraints for each document:
-        # - At most one triplet per doc in a batch
-        # - Triplets stay ordered from start to end within each doc
-        # Uses a simple active window of docs:
-        # start with up to batch_size docs, advance only those docs, and when
-        # one finishes, load the next unseen doc into its slot.
-        doc_to_triplets = {}
-        for sources, targets, entities_info in zip(
-            all_sources, all_targets, all_entities_info
-        ):
-            for source, target, entity_info in zip(sources, targets, entities_info):
-                doc_id = entity_info["doc_id"]
-                if doc_id not in doc_to_triplets:
-                    doc_to_triplets[doc_id] = []
-                doc_to_triplets[doc_id].append((source, target, entity_info))
+        def _build_independent_batches():
+            examples = [
+                (src, tgt, ent)
+                for page_sources, page_targets, page_entities in zip(
+                    all_sources,
+                    all_targets,
+                    all_entities_info,
+                )
+                for src, tgt, ent in zip(page_sources, page_targets, page_entities)
+            ]
+            return [
+                examples[i : i + batch_size]
+                for i in range(0, len(examples), batch_size)
+            ]
 
-        all_batches = []
-        doc_offsets = dict.fromkeys(doc_to_triplets, 0)
-        doc_ids = list(doc_to_triplets.keys())
-        next_doc_idx = 0
-        active_doc_ids = []
+        def _build_sequential_batches():
+            # Keep per-page order while still processing multiple pages per batch.
+            page_positions = [0] * len(all_sources)
+            next_page_idx = 0
+            active_pages = []
+            batches = []
 
-        while active_doc_ids or next_doc_idx < len(doc_ids):
-            while len(active_doc_ids) < batch_size and next_doc_idx < len(doc_ids):
-                active_doc_ids.append(doc_ids[next_doc_idx])
-                next_doc_idx += 1
+            while active_pages or next_page_idx < len(all_sources):
+                while len(active_pages) < batch_size and next_page_idx < len(
+                    all_sources
+                ):
+                    if len(all_sources[next_page_idx]) > 0:
+                        active_pages.append(next_page_idx)
+                    next_page_idx += 1
 
-            batch = []
-            next_active_doc_ids = []
+                if not active_pages:
+                    break
 
-            for doc_id in active_doc_ids:
-                doc_idx = doc_offsets[doc_id]
-                batch.append(doc_to_triplets[doc_id][doc_idx])
+                batch = []
+                next_active_pages = []
+                for page_idx in active_pages:
+                    item_idx = page_positions[page_idx]
+                    batch.append((
+                        all_sources[page_idx][item_idx],
+                        all_targets[page_idx][item_idx],
+                        all_entities_info[page_idx][item_idx],
+                    ))
+                    page_positions[page_idx] += 1
+                    if page_positions[page_idx] < len(all_sources[page_idx]):
+                        next_active_pages.append(page_idx)
 
-                doc_offsets[doc_id] = doc_idx + 1
-                if doc_offsets[doc_id] < len(doc_to_triplets[doc_id]):
-                    next_active_doc_ids.append(doc_id)
+                batches.append(batch)
+                active_pages = next_active_pages
 
-            if batch:
-                all_batches.append(batch)
+            return batches
 
-            active_doc_ids = next_active_doc_ids
+        if context_format in ["short", "hybrid_medium"]:
+            all_batches = _build_independent_batches()
+        else:
+            all_batches = _build_sequential_batches()
 
         print(
             f"Input preparation completed. Running generation on {len(all_batches)} batches."
