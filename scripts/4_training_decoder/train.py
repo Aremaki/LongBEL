@@ -18,6 +18,7 @@ from transformers import (
     AutoTokenizer,
 )
 from trl import SFTConfig, SFTTrainer  # type: ignore
+
 from longbel.utils import add_headers_to_prompt
 
 # Enable TF32 paths everywhere
@@ -92,6 +93,7 @@ def sentence_tokenize_safe(text, nlp):
         cursor += len(chunk) + 1
 
     return sentences
+
 
 def create_prompt_completion_dataset(
     dataset,

@@ -464,6 +464,7 @@ def parse_text(
         tsv_lines.append(tsv_line)
     return source_sentences, target_sentences, tsv_lines
 
+
 def parse_text_hybrid_long(
     data,
     start_entity,
@@ -740,6 +741,7 @@ def parse_text_hybrid_long(
         return source_sentences, target_sentences, tsv_lines
     else:
         return source_sentences, target_texts, tsv_lines
+
 
 def parse_text_hybrid_short(
     data,
@@ -1049,6 +1051,7 @@ def parse_text_hybrid_short(
     else:
         return source_sentences, target_texts, tsv_lines
 
+
 def parse_text_hybrid_medium(
     data,
     start_entity,
@@ -1077,7 +1080,6 @@ def parse_text_hybrid_medium(
     """
     source_sentences: list[str] = []
     target_sentences: list[str] = []
-    target_text: str = ""
     tsv_lines: list[dict[str, str]] = []
     target_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
     source_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
@@ -1319,6 +1321,7 @@ def parse_text_hybrid_medium(
         tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
     return source_sentences, target_sentences, tsv_lines
+
 
 def parse_text_long(
     data,

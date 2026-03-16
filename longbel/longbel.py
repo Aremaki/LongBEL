@@ -12,6 +12,7 @@ import logging
 import os
 import pickle
 import re
+from collections import deque
 from typing import Optional
 
 import nltk
@@ -27,8 +28,8 @@ from transformers import (
 from longbel.parse_data import (
     parse_text,
     parse_text_hybrid_long,
-    parse_text_hybrid_short,
     parse_text_hybrid_medium,
+    parse_text_hybrid_short,
     parse_text_long,
 )
 
@@ -92,11 +93,15 @@ def get_prefix_allowed_tokens_fn(
     return prefix_allowed_tokens_fn
 
 
-def add_headers_to_prompt(source: str, target: str, previous_targets: str, context_format: str):
+def add_headers_to_prompt(
+    source: str, target: str, previous_targets: str, context_format: str
+):
     if context_format == "long":
         input_sentence = f"### Context\n{source.rstrip()}\n\n### Predictions\n{previous_targets}{target.rstrip()}"
     elif context_format in ["short", "hybrid_medium"]:
-        input_sentence = f"### Context\n{source.rstrip()}\n\n### Prediction\n{target.rstrip()}"
+        input_sentence = (
+            f"### Context\n{source.rstrip()}\n\n### Prediction\n{target.rstrip()}"
+        )
     elif context_format in ["hybrid_short", "hybrid_long"]:
         if not previous_targets:
             previous_targets = "None"
@@ -431,55 +436,40 @@ class _LongBELHubInterface:
             all_targets.append(targets)
             all_entities_info.append(entities_info)
 
-        if context_format in ["short", "hybrid_medium"]:
-            # Flatten examples and entities_info for batch processing
-            flat_sources = [ex for page in all_sources for ex in page]
-            flat_targets = [ex for page in all_targets for ex in page]
-            flat_entities = [info for page in all_entities_info for info in page]
-            # Build batches with is_last always True (no sequential dependency)
-            all_batches = []
-            for i in range(0, len(flat_sources), batch_size):
-                batch = [
-                    (src, tgt, ent, True)
-                    for src, tgt, ent in zip(
-                        flat_sources[i : i + batch_size],
-                        flat_targets[i : i + batch_size],
-                        flat_entities[i : i + batch_size],
-                    )
-                ]
+        # Build batches with a single constraint for each document:
+        # - At most one triplet per doc in a batch
+        # - Triplets stay ordered from start to end within each doc
+        doc_to_triplets = {}
+        for sources, targets, entities_info in zip(
+            all_sources, all_targets, all_entities_info
+        ):
+            for source, target, entity_info in zip(sources, targets, entities_info):
+                doc_id = entity_info["doc_id"]
+                if doc_id not in doc_to_triplets:
+                    doc_to_triplets[doc_id] = []
+                doc_to_triplets[doc_id].append((source, target, entity_info))
+
+        all_batches = []
+        doc_offsets = dict.fromkeys(doc_to_triplets, 0)
+        doc_queue = deque(doc_to_triplets.keys())
+
+        while doc_queue:
+            batch = []
+            requeue = deque()
+
+            while doc_queue and len(batch) < batch_size:
+                doc_id = doc_queue.popleft()
+                doc_idx = doc_offsets[doc_id]
+                batch.append(doc_to_triplets[doc_id][doc_idx])
+                doc_offsets[doc_id] += 1
+
+                if doc_offsets[doc_id] < len(doc_to_triplets[doc_id]):
+                    requeue.append(doc_id)
+
+            if batch:
                 all_batches.append(batch)
-        else:
-            # Build batches processing multiple pages in parallel.
-            # Each slot is a different page, progressing sequentially.
-            # When a page finishes, the next unstarted page takes its slot.
-            page_queue = list(range(len(all_sources)))
-            active_slots = []  # list of (page_idx, item_idx)
-            all_batches = []
 
-            while active_slots or page_queue:
-                # Fill empty slots with new pages
-                while len(active_slots) < batch_size and page_queue:
-                    page_idx = page_queue.pop(0)
-                    active_slots.append((page_idx, 0))
-
-                if not active_slots:
-                    break
-
-                batch = []
-                next_active = []
-                for page_idx, item_idx in active_slots:
-                    is_last = item_idx == len(all_sources[page_idx]) - 1
-                    batch.append((
-                        all_sources[page_idx][item_idx],
-                        all_targets[page_idx][item_idx],
-                        all_entities_info[page_idx][item_idx],
-                        is_last,
-                    ))
-                    if not is_last:
-                        next_active.append((page_idx, item_idx + 1))
-
-                all_batches.append(batch)
-                active_slots = next_active
+            doc_queue.extend(requeue)
 
         print(
             f"Input preparation completed. Running generation on {len(all_batches)} batches."
@@ -502,25 +492,25 @@ class _LongBELHubInterface:
             gold_concept_names = []
             start_spans = []
             end_spans = []
-            for batch_id, (source, target, entity, is_last_flag) in enumerate(batch):
+            for source, target, entity in batch:
                 doc_id = entity["doc_id"]
                 if doc_id not in batch_previous_targets:
                     batch_previous_targets[doc_id] = ""
                 previous_targets = batch_previous_targets.get(doc_id)
 
-                input_sentences.append(add_headers_to_prompt(source, target, previous_targets, context_format))
+                input_sentences.append(
+                    add_headers_to_prompt(
+                        source, target, previous_targets, context_format
+                    )
+                )
                 sem_groups.append(entity["semantic_group"])
                 mentions.append(entity["mention"])
                 doc_ids.append(doc_id)
                 mentions_id.append(entity["mention_id"])
                 start_spans.append(entity["start_span"])
                 end_spans.append(entity["end_span"])
-                gold_concept_codes.append(
-                    entity.get("gold_concept_code", None)
-                )  # type: ignore
-                gold_concept_names.append(
-                    entity.get("gold_concept_name", None)
-                )  # type: ignore
+                gold_concept_codes.append(entity.get("gold_concept_code", None))  # type: ignore
+                gold_concept_names.append(entity.get("gold_concept_name", None))  # type: ignore
             all_outputs, cleaned_output_sequences = self.predict_batch(
                 all_outputs=all_outputs,
                 batch_size=batch_size,
@@ -538,8 +528,6 @@ class _LongBELHubInterface:
                 num_beams=num_beams,
                 **kwargs,
             )
-            if is_last_flag:
-                batch_previous_targets[doc_id] = ""
             for i, doc_id in enumerate(doc_ids):
                 clean_sentence = cleaned_output_sequences[num_beams * i]
                 clean_sentence = start_entity + clean_sentence.split(start_entity)[-1]
