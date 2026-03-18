@@ -355,7 +355,7 @@ def main(
             local_dir = (
                 Path("models")
                 / "NED"
-                / f"{dataset_name}_full_upsampled_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}"
+                / f"{dataset_name}_full_upsampled_{selection_method}_short_{complete_mode_str}{add_headers_str}"
                 / model_short_name
                 / "model_last"
             )
