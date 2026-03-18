@@ -355,7 +355,7 @@ def main(
             local_dir = (
                 Path("models")
                 / "NED"
-                / f"{dataset_name}_synth_only_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}"
+                / f"{dataset_name}_full_upsampled_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}"
                 / model_short_name
                 / "model_last"
             )
@@ -539,18 +539,9 @@ def main(
         logging_strategy = "epoch"
         logging_steps = 0
         train_dataset = human_train_dataset
-        if augmented_data == "human_only":
-            num_train_epochs = 50
-            if "hybrid" in context_format and dataset_name == "MedMentions":
-                num_train_epochs = num_train_epochs // 2
-        else:  # human_only_ft
+        num_train_epochs = 50
+        if augmented_data == "human_only_fr":
             lr = lr / 3.0
-            if dataset_name in ["EMEA", "MEDLINE"]:
-                num_train_epochs = 50
-            elif dataset_name == "SPACCC":
-                num_train_epochs = 70
-            else:
-                num_train_epochs = 20
     split_marker, nlp = get_split_marker(dataset_name)
 
     # Format datasets into prompt/completion format

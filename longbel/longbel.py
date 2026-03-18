@@ -242,6 +242,7 @@ class _LongBELHubInterface:
         prefix_len: int,
         saliency_method: str = "integrated",
         ig_steps: int = 20,
+        ig_baseline: str = "pad",
     ) -> list[dict[str, object]]:
         if not input_sentences:
             return []
@@ -303,14 +304,22 @@ class _LongBELHubInterface:
             )[0]
             token_importance = gradients.norm(p=2, dim=-1)
         else:
-            if self.tokenizer.pad_token_id is not None:  # type: ignore
+            if ig_baseline == "pad":  # type: ignore
                 baseline_ids = torch.full_like(
                     top_sequences,
                     self.tokenizer.pad_token_id,  # type: ignore
                 )
                 baseline_embeddings = self.get_input_embeddings()(baseline_ids).detach()  # type: ignore
-            else:
+            elif ig_baseline == "zero":
                 baseline_embeddings = torch.zeros_like(input_embeddings)
+            elif ig_baseline == "random":
+                baseline_embeddings = torch.randn_like(input_embeddings)
+            elif ig_baseline == "avg":
+                baseline_embeddings = input_embeddings.mean(dim=1, keepdim=True).expand_as(input_embeddings)
+            else:
+                raise ValueError(
+                    f"Unsupported baseline type '{ig_baseline}'. Choose from 'pad', 'zero', 'random', 'avg'."
+                )
 
             embedding_delta = input_embeddings - baseline_embeddings
             total_gradients = torch.zeros_like(input_embeddings)
@@ -412,6 +421,8 @@ class _LongBELHubInterface:
         multiple_answers,
         num_beams,
         explicability_mode: str = "",
+        ig_steps: int = 20,
+        ig_baseline: str = "pad",
         **kwargs,
     ):
         input_args = {
@@ -546,6 +557,8 @@ class _LongBELHubInterface:
                 num_beams=num_beams,
                 prefix_len=prefix_len,
                 saliency_method=explicability_mode,
+                ig_steps=ig_steps,
+                ig_baseline=ig_baseline,
             )
             for idx, saliency_map in enumerate(saliency_maps):
                 top_prediction_index = idx * num_beams
