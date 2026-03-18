@@ -12,6 +12,7 @@ import logging
 import os
 import pickle
 import re
+from html import escape
 from typing import Optional
 
 import nltk
@@ -207,7 +208,144 @@ def skip_undesired_tokens(outputs, tokenizer):
     return cleaned_outputs
 
 
+def _score_to_rgb(score: float) -> tuple[int, int, int]:
+    clipped_score = max(0.0, min(1.0, score))
+    red = 255
+    channel = int(255 * (1.0 - clipped_score))
+    return red, channel, channel
+
+
+def _build_ansi_saliency_text(token_texts: list[str], saliency_scores: list[float]) -> str:
+    chunks = []
+    for token_text, score in zip(token_texts, saliency_scores):
+        red, green, blue = _score_to_rgb(score)
+        chunks.append(f"\x1b[48;2;{red};{green};{blue}m{token_text}\x1b[0m")
+    return "".join(chunks)
+
+
+def _build_html_saliency_text(token_texts: list[str], saliency_scores: list[float]) -> str:
+    chunks = []
+    for token_text, score in zip(token_texts, saliency_scores):
+        red, green, blue = _score_to_rgb(score)
+        chunks.append(
+            f'<span style="background-color: rgb({red}, {green}, {blue});">{escape(token_text)}</span>'
+        )
+    return "".join(chunks)
+
+
 class _LongBELHubInterface:
+    def _compute_gradient_saliency(
+        self,
+        input_sentences: list[str],
+        generated_sequences: torch.Tensor,
+        num_beams: int,
+        prefix_len: int,
+    ) -> list[dict[str, object]]:
+        if not input_sentences:
+            return []
+
+        top_sequence_indices = torch.arange(
+            len(input_sentences),
+            device=generated_sequences.device,
+        ) * num_beams
+        top_sequences = generated_sequences.index_select(0, top_sequence_indices)
+
+        self.zero_grad(set_to_none=True)
+        attention_mask = (top_sequences != self.tokenizer.pad_token_id).long()  # type: ignore
+        input_embeddings = self.get_input_embeddings()(top_sequences).detach()  # type: ignore
+        input_embeddings.requires_grad_(True)
+
+        with torch.enable_grad():
+            forward_outputs = self(  # type: ignore
+                inputs_embeds=input_embeddings,
+                attention_mask=attention_mask,
+                use_cache=False,
+                return_dict=True,
+            )
+            logits = forward_outputs.logits[:, :-1, :]
+            next_tokens = top_sequences[:, 1:]
+
+            log_probs = F.log_softmax(logits, dim=-1)
+            token_log_probs = log_probs.gather(
+                dim=-1,
+                index=next_tokens.unsqueeze(-1),
+            ).squeeze(-1)
+
+            output_token_mask = torch.zeros_like(next_tokens, dtype=torch.bool)
+            if prefix_len > 0:
+                output_token_mask[:, prefix_len - 1 :] = True
+
+            valid_token_mask = output_token_mask & (
+                (next_tokens != self.tokenizer.pad_token_id)  # type: ignore
+                & (next_tokens != self.tokenizer.eos_token_id)  # type: ignore
+                & (next_tokens != self.tokenizer.bos_token_id)  # type: ignore
+            )
+            objective = token_log_probs.masked_select(valid_token_mask).sum()
+
+        gradients = torch.autograd.grad(
+            outputs=objective,
+            inputs=input_embeddings,
+            retain_graph=False,
+            create_graph=False,
+        )[0]
+
+        token_importance = gradients.norm(p=2, dim=-1)
+        saliency_maps = []
+        sequence_len = top_sequences.size(1)
+        prompt_positions = torch.arange(sequence_len, device=top_sequences.device)
+        prompt_mask = (
+            prompt_positions.unsqueeze(0) < prefix_len
+        ) & (top_sequences != self.tokenizer.pad_token_id)  # type: ignore
+
+        for sequence_ids, importance_scores, sentence, mask in zip(
+            top_sequences,
+            token_importance,
+            input_sentences,
+            prompt_mask,
+        ):
+            selected_ids = sequence_ids[mask]
+            selected_scores = importance_scores[mask]
+
+            if selected_scores.numel() == 0:
+                saliency_maps.append({
+                    "input_sentence": sentence,
+                    "token_ids": [],
+                    "token_strings": [],
+                    "saliency_scores": [],
+                    "saliency_ansi": "",
+                    "saliency_html": "",
+                })
+                continue
+
+            max_score = selected_scores.max().clamp(min=1e-12)
+            normalized_scores = (selected_scores / max_score).tolist()
+            selected_ids_list = selected_ids.tolist()
+            token_strings = [
+                self.tokenizer.decode(  # type: ignore
+                    [token_id],
+                    skip_special_tokens=False,
+                    clean_up_tokenization_spaces=False,
+                )
+                for token_id in selected_ids_list
+            ]
+
+            saliency_maps.append({
+                "input_sentence": sentence,
+                "token_ids": selected_ids_list,
+                "token_strings": token_strings,
+                "saliency_scores": normalized_scores,
+                "saliency_ansi": _build_ansi_saliency_text(
+                    token_strings,
+                    normalized_scores,
+                ),
+                "saliency_html": _build_html_saliency_text(
+                    token_strings,
+                    normalized_scores,
+                ),
+            })
+
+        return saliency_maps
+
     def predict_batch(
         self,
         all_outputs,
@@ -224,6 +362,7 @@ class _LongBELHubInterface:
         constrained,
         multiple_answers,
         num_beams,
+        explicability=False,
         **kwargs,
     ):
         input_args = {
@@ -272,6 +411,15 @@ class _LongBELHubInterface:
         )
 
         prefix_len = input_args["input_ids"].size(1)
+
+        base_sem_groups = sem_groups.copy()
+        base_mentions = mentions.copy()
+        base_mentions_id = mentions_id.copy()
+        base_doc_ids = doc_ids.copy()
+        base_start_spans = start_spans.copy()
+        base_end_spans = end_spans.copy()
+        base_gold_concept_codes = gold_concept_codes.copy()
+        base_gold_concept_names = gold_concept_names.copy()
 
         # Duplicate sem_groups and mentions for each beam
         sem_groups = [x for x in sem_groups for _ in range(num_beams)]
@@ -334,14 +482,41 @@ class _LongBELHubInterface:
                 list(range(num_beams)) * batch_size,
             )
         ])
+
+        saliency_maps = []
+        if explicability:
+            saliency_maps = self._compute_gradient_saliency(
+                input_sentences=input_sentences,
+                generated_sequences=outputs.sequences,
+                num_beams=num_beams,
+                prefix_len=prefix_len,
+            )
+            for idx, saliency_map in enumerate(saliency_maps):
+                top_prediction_index = idx * num_beams
+                saliency_map.update({
+                    "mention": base_mentions[idx],
+                    "doc_id": base_doc_ids[idx],
+                    "mention_id": base_mentions_id[idx],
+                    "start_span": base_start_spans[idx],
+                    "end_span": base_end_spans[idx],
+                    "semantic_group": base_sem_groups[idx],
+                    "gold_concept_code": base_gold_concept_codes[idx],
+                    "gold_concept_name": base_gold_concept_names[idx],
+                    "pred_concept_name": pred_concept_names[top_prediction_index],
+                    "pred_concept_code": pred_concept_codes[top_prediction_index],
+                    "score": scores[top_prediction_index],
+                    "rank": 1,
+                })
+
         print(f"Sampling completed. Generated {len(all_outputs)} predictions.")
-        return all_outputs, cleaned_output_sequences
+        return all_outputs, cleaned_output_sequences, saliency_maps
 
     def sample(
         self,
         bigbio_pages: list[dict],  # type: ignore
         num_beams: int = 5,
         constrained: bool = True,
+        explicability: bool = False,
         multiple_answers: bool = False,
         batch_size: int = 8,
         start_entity: str = "[",
@@ -351,7 +526,10 @@ class _LongBELHubInterface:
         show_progress: bool = True,
         context_format: str = "short",
         **kwargs,
-    ) -> list[list[dict[str, str]]]:
+    ) -> (
+        list[dict[str, object]]
+        | tuple[list[dict[str, object]], list[dict[str, object]]]
+    ):
         # Prepare input batch
         if self.lang == "fr":  # type: ignore
             nlp = nltk.data.load("tokenizers/punkt/french.pickle")
@@ -496,6 +674,7 @@ class _LongBELHubInterface:
         )
 
         all_outputs = []
+        all_saliency_maps = []
         batch_previous_targets = {}
         for batch in _progress(
             all_batches,
@@ -531,7 +710,7 @@ class _LongBELHubInterface:
                 end_spans.append(entity["end_span"])
                 gold_concept_codes.append(entity.get("gold_concept_code", None))  # type: ignore
                 gold_concept_names.append(entity.get("gold_concept_name", None))  # type: ignore
-            all_outputs, cleaned_output_sequences = self.predict_batch(
+            all_outputs, cleaned_output_sequences, batch_saliency_maps = self.predict_batch(
                 all_outputs=all_outputs,
                 batch_size=batch_size,
                 input_sentences=input_sentences,
@@ -546,8 +725,11 @@ class _LongBELHubInterface:
                 constrained=constrained,
                 multiple_answers=multiple_answers,
                 num_beams=num_beams,
+                explicability=explicability,
                 **kwargs,
             )
+            if explicability:
+                all_saliency_maps.extend(batch_saliency_maps)
             for i, doc_id in enumerate(doc_ids):
                 clean_sentence = cleaned_output_sequences[num_beams * i]
                 clean_sentence = start_entity + clean_sentence.split(start_entity)[-1]
@@ -557,6 +739,8 @@ class _LongBELHubInterface:
                     clean_sentence = clean_sentence.rstrip("<SEP>") + "<SEP>"
                 batch_previous_targets[doc_id] += clean_sentence
 
+        if explicability:
+            return all_outputs, all_saliency_maps  # type: ignore
         return all_outputs  # type: ignore
 
     def encode(self, sentence):
