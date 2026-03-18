@@ -240,9 +240,19 @@ class _LongBELHubInterface:
         generated_sequences: torch.Tensor,
         num_beams: int,
         prefix_len: int,
+        saliency_method: str = "integrated",
+        ig_steps: int = 20,
     ) -> list[dict[str, object]]:
         if not input_sentences:
             return []
+
+        method = saliency_method.strip().lower()
+        if method == "integerated":
+            method = "integrated"
+        if method not in {"simple", "integrated"}:
+            raise ValueError(
+                "saliency_method must be one of: 'simple', 'integrated'."
+            )
 
         top_sequence_indices = torch.arange(
             len(input_sentences),
@@ -250,46 +260,83 @@ class _LongBELHubInterface:
         ) * num_beams
         top_sequences = generated_sequences.index_select(0, top_sequence_indices)
 
-        self.zero_grad(set_to_none=True)
         attention_mask = (top_sequences != self.tokenizer.pad_token_id).long()  # type: ignore
         input_embeddings = self.get_input_embeddings()(top_sequences).detach()  # type: ignore
-        input_embeddings.requires_grad_(True)
 
-        with torch.enable_grad():
+        next_tokens = top_sequences[:, 1:]
+        output_token_mask = torch.zeros_like(next_tokens, dtype=torch.bool)
+        if prefix_len > 0:
+            output_token_mask[:, prefix_len - 1 :] = True
+
+        valid_token_mask = output_token_mask & (
+            (next_tokens != self.tokenizer.pad_token_id)  # type: ignore
+            & (next_tokens != self.tokenizer.eos_token_id)  # type: ignore
+            & (next_tokens != self.tokenizer.bos_token_id)  # type: ignore
+        )
+
+        def _objective_from_embeddings(embeddings: torch.Tensor) -> torch.Tensor:
             forward_outputs = self(  # type: ignore
-                inputs_embeds=input_embeddings,
+                inputs_embeds=embeddings,
                 attention_mask=attention_mask,
                 use_cache=False,
                 return_dict=True,
             )
             logits = forward_outputs.logits[:, :-1, :]
-            next_tokens = top_sequences[:, 1:]
-
             log_probs = F.log_softmax(logits, dim=-1)
             token_log_probs = log_probs.gather(
                 dim=-1,
                 index=next_tokens.unsqueeze(-1),
             ).squeeze(-1)
+            return token_log_probs.masked_select(valid_token_mask).sum()
 
-            output_token_mask = torch.zeros_like(next_tokens, dtype=torch.bool)
-            if prefix_len > 0:
-                output_token_mask[:, prefix_len - 1 :] = True
+        if method == "simple":
+            simple_embeddings = input_embeddings.detach()
+            simple_embeddings.requires_grad_(True)
+            self.zero_grad(set_to_none=True)
+            with torch.enable_grad():
+                objective = _objective_from_embeddings(simple_embeddings)
+            gradients = torch.autograd.grad(
+                outputs=objective,
+                inputs=simple_embeddings,
+                retain_graph=False,
+                create_graph=False,
+            )[0]
+            token_importance = gradients.norm(p=2, dim=-1)
+        else:
+            if self.tokenizer.pad_token_id is not None:  # type: ignore
+                baseline_ids = torch.full_like(
+                    top_sequences,
+                    self.tokenizer.pad_token_id,  # type: ignore
+                )
+                baseline_embeddings = self.get_input_embeddings()(baseline_ids).detach()  # type: ignore
+            else:
+                baseline_embeddings = torch.zeros_like(input_embeddings)
 
-            valid_token_mask = output_token_mask & (
-                (next_tokens != self.tokenizer.pad_token_id)  # type: ignore
-                & (next_tokens != self.tokenizer.eos_token_id)  # type: ignore
-                & (next_tokens != self.tokenizer.bos_token_id)  # type: ignore
-            )
-            objective = token_log_probs.masked_select(valid_token_mask).sum()
+            embedding_delta = input_embeddings - baseline_embeddings
+            total_gradients = torch.zeros_like(input_embeddings)
+            steps = max(1, ig_steps)
+            for step in range(1, steps + 1):
+                alpha = float(step) / float(steps)
+                interpolated_embeddings = (
+                    baseline_embeddings + alpha * embedding_delta
+                ).detach()
+                interpolated_embeddings.requires_grad_(True)
+                self.zero_grad(set_to_none=True)
 
-        gradients = torch.autograd.grad(
-            outputs=objective,
-            inputs=input_embeddings,
-            retain_graph=False,
-            create_graph=False,
-        )[0]
+                with torch.enable_grad():
+                    objective = _objective_from_embeddings(interpolated_embeddings)
 
-        token_importance = gradients.norm(p=2, dim=-1)
+                gradients = torch.autograd.grad(
+                    outputs=objective,
+                    inputs=interpolated_embeddings,
+                    retain_graph=False,
+                    create_graph=False,
+                )[0]
+                total_gradients += gradients.detach()
+
+            averaged_gradients = total_gradients / float(steps)
+            integrated_gradients = embedding_delta * averaged_gradients
+            token_importance = integrated_gradients.norm(p=2, dim=-1)
         saliency_maps = []
         sequence_len = top_sequences.size(1)
         prompt_positions = torch.arange(sequence_len, device=top_sequences.device)
@@ -312,6 +359,7 @@ class _LongBELHubInterface:
                     "token_ids": [],
                     "token_strings": [],
                     "saliency_scores": [],
+                    "saliency_method": method,
                     "saliency_ansi": "",
                     "saliency_html": "",
                 })
@@ -334,6 +382,7 @@ class _LongBELHubInterface:
                 "token_ids": selected_ids_list,
                 "token_strings": token_strings,
                 "saliency_scores": normalized_scores,
+                "saliency_method": method,
                 "saliency_ansi": _build_ansi_saliency_text(
                     token_strings,
                     normalized_scores,
@@ -362,7 +411,7 @@ class _LongBELHubInterface:
         constrained,
         multiple_answers,
         num_beams,
-        explicability=False,
+        explicability_mode: str = "",
         **kwargs,
     ):
         input_args = {
@@ -483,13 +532,20 @@ class _LongBELHubInterface:
             )
         ])
 
+        explicability_mode = explicability_mode.strip().lower()
+        if explicability_mode not in {"", "simple", "integrated"}:
+            raise ValueError(
+                "explicability must be one of: '', 'simple', 'integrated'."
+            )
+
         saliency_maps = []
-        if explicability:
+        if explicability_mode:
             saliency_maps = self._compute_gradient_saliency(
                 input_sentences=input_sentences,
                 generated_sequences=outputs.sequences,
                 num_beams=num_beams,
                 prefix_len=prefix_len,
+                saliency_method=explicability_mode,
             )
             for idx, saliency_map in enumerate(saliency_maps):
                 top_prediction_index = idx * num_beams
@@ -516,7 +572,7 @@ class _LongBELHubInterface:
         bigbio_pages: list[dict],  # type: ignore
         num_beams: int = 5,
         constrained: bool = True,
-        explicability: bool = False,
+        explicability_mode: str = "",
         multiple_answers: bool = False,
         batch_size: int = 8,
         start_entity: str = "[",
@@ -530,6 +586,12 @@ class _LongBELHubInterface:
         list[dict[str, object]]
         | tuple[list[dict[str, object]], list[dict[str, object]]]
     ):
+        explicability_mode = explicability_mode.strip().lower()
+        if explicability_mode not in {"", "simple", "integrated"}:
+            raise ValueError(
+                "explicability must be one of: '', 'simple', 'integrated'."
+            )
+
         # Prepare input batch
         if self.lang == "fr":  # type: ignore
             nlp = nltk.data.load("tokenizers/punkt/french.pickle")
@@ -725,10 +787,10 @@ class _LongBELHubInterface:
                 constrained=constrained,
                 multiple_answers=multiple_answers,
                 num_beams=num_beams,
-                explicability=explicability,
+                explicability_mode=explicability_mode,
                 **kwargs,
             )
-            if explicability:
+            if explicability_mode:
                 all_saliency_maps.extend(batch_saliency_maps)
             for i, doc_id in enumerate(doc_ids):
                 clean_sentence = cleaned_output_sequences[num_beams * i]
@@ -739,7 +801,7 @@ class _LongBELHubInterface:
                     clean_sentence = clean_sentence.rstrip("<SEP>") + "<SEP>"
                 batch_previous_targets[doc_id] += clean_sentence
 
-        if explicability:
+        if explicability_mode:
             return all_outputs, all_saliency_maps  # type: ignore
         return all_outputs  # type: ignore
 
