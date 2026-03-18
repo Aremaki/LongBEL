@@ -665,88 +665,110 @@ def compute_partition_metrics(
         # We need to calculate overall stats separately
         # (Polars sum of columns)
 
-        # If df is empty, handle gracefully
-        if df.height == 0:
-            # ... (defaults are 0)
-            pass
-        else:
-            # We can sum the counts from the grouped dataframe or the original df
-            # Using original df is safer/easier for overall
-            strict_correct_all = df.filter(
-                pl.col("gold_concept_code") == pl.col("pred_concept_code")
-            ).height
+        # 5. Overall Metrics (always emitted, including for empty partitions)
+        strict_correct_all = (
+            df.filter(pl.col("gold_concept_code") == pl.col("pred_concept_code")).height
+            if df.height
+            else 0
+        )
 
-            results["recall_strict"]["overall"] = {
-                index_key: round(strict_correct_all / total_pred_overall * 100, 1)
-                if total_pred_overall
-                else 0.0
-            }
+        results["recall_strict"]["overall"] = {
+            index_key: round(strict_correct_all / total_pred_overall * 100, 1)
+            if total_pred_overall
+            else 0.0
+        }
 
-            # Ratio overall
-            if include_ratios:
-                if total_full_count > 0:
-                    ratio_str = f"{round(total_pred_overall / total_full_count * 100, 1)}% ({total_pred_overall}/{total_full_count})"
-                else:
-                    ratio_str = "0% (0/0)"
-                results["ratios"]["overall"] = {index_key: ratio_str}
+        if include_ratios:
+            if total_full_count > 0:
+                ratio_str = f"{round(total_pred_overall / total_full_count * 100, 1)}% ({total_pred_overall}/{total_full_count})"
             else:
-                results["ratios"]["overall"] = {index_key: "N/A"}
+                ratio_str = "0% (0/0)"
+            results["ratios"]["overall"] = {index_key: ratio_str}
+        else:
+            results["ratios"]["overall"] = {index_key: "N/A"}
 
-            if compute_all:
-                correct_all = df.filter(
+        if compute_all:
+            correct_all = (
+                df.filter(
                     (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
                     | (pl.col("LLM_Evaluation_v2") == "EXACT")
                 ).height
-                exact_all = df.filter(pl.col("LLM_Evaluation_v2") == "EXACT").height
-                partial_all = df.filter(pl.col("LLM_Evaluation_v2") == "PARTIAL").height
-                narrow_all = df.filter(pl.col("LLM_Evaluation_v2") == "NARROW").height
-                broad_all = df.filter(
+                if df.height
+                else 0
+            )
+            exact_all = (
+                df.filter(pl.col("LLM_Evaluation_v2") == "EXACT").height
+                if df.height
+                else 0
+            )
+            partial_all = (
+                df.filter(pl.col("LLM_Evaluation_v2") == "PARTIAL").height
+                if df.height
+                else 0
+            )
+            narrow_all = (
+                df.filter(pl.col("LLM_Evaluation_v2") == "NARROW").height
+                if df.height
+                else 0
+            )
+            broad_all = (
+                df.filter(
                     (pl.col("LLM_Evaluation_v2") == "BROAD")
                     | (pl.col("LLM_Evaluation_v2") == "PARTIAL")
                 ).height
-                no_relation_all = df.filter(
-                    pl.col("LLM_Evaluation_v2") == "NO_RELATION"
-                ).height
+                if df.height
+                else 0
+            )
+            no_relation_all = (
+                df.filter(pl.col("LLM_Evaluation_v2") == "NO_RELATION").height
+                if df.height
+                else 0
+            )
 
-                denom = total_pred_overall if total_pred_overall else 1
-                results["recall_correct"]["overall"] = {
-                    index_key: round(correct_all / denom * 100, 1)
-                }
-                results["recall_exact"]["overall"] = {
-                    index_key: round(exact_all / denom * 100, 1)
-                }
-                results["recall_partial"]["overall"] = {
-                    index_key: round(partial_all / denom * 100, 1)
-                }
-                results["recall_narrow"]["overall"] = {
-                    index_key: round(narrow_all / denom * 100, 1)
-                }
-                results["recall_broad"]["overall"] = {
-                    index_key: round(broad_all / denom * 100, 1)
-                }
-                results["recall_no_relation"]["overall"] = {
-                    index_key: round(no_relation_all / denom * 100, 1)
-                }
+            denom = total_pred_overall if total_pred_overall else 1
+            results["recall_correct"]["overall"] = {
+                index_key: round(correct_all / denom * 100, 1)
+            }
+            results["recall_exact"]["overall"] = {
+                index_key: round(exact_all / denom * 100, 1)
+            }
+            results["recall_partial"]["overall"] = {
+                index_key: round(partial_all / denom * 100, 1)
+            }
+            results["recall_narrow"]["overall"] = {
+                index_key: round(narrow_all / denom * 100, 1)
+            }
+            results["recall_broad"]["overall"] = {
+                index_key: round(broad_all / denom * 100, 1)
+            }
+            results["recall_no_relation"]["overall"] = {
+                index_key: round(no_relation_all / denom * 100, 1)
+            }
 
-            if threshold is not None:
-                # Overall thresholded
-                sel_all = df.filter(pl.col(score_column) >= threshold).height
-                tp_all = df.filter(
+        if threshold is not None:
+            sel_all = (
+                df.filter(pl.col(score_column) >= threshold).height if df.height else 0
+            )
+            tp_all = (
+                df.filter(
                     (pl.col(score_column) >= threshold)
                     & (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
                 ).height
+                if df.height
+                else 0
+            )
 
-                rec_all = tp_all / total_pred_overall if total_pred_overall else 0.0
-                prec_all = tp_all / sel_all if sel_all else 0.0
-                f1_all = (
-                    2 * prec_all * rec_all / (prec_all + rec_all)
-                    if (prec_all + rec_all)
-                    else 0.0
-                )
+            rec_all = tp_all / total_pred_overall if total_pred_overall else 0.0
+            prec_all = tp_all / sel_all if sel_all else 0.0
+            f1_all = (
+                2 * prec_all * rec_all / (prec_all + rec_all)
+                if (prec_all + rec_all)
+                else 0.0
+            )
 
-                results["recall"]["overall"] = {index_key: round(rec_all * 100, 1)}
-                results["precision"]["overall"] = {index_key: round(prec_all * 100, 1)}
-                results["f1"]["overall"] = {index_key: round(f1_all * 100, 1)}
+            results["recall"]["overall"] = {index_key: round(rec_all * 100, 1)}
+            results["precision"]["overall"] = {index_key: round(prec_all * 100, 1)}
+            results["f1"]["overall"] = {index_key: round(f1_all * 100, 1)}
 
         return results
 
@@ -1199,22 +1221,23 @@ def compute_metrics(
         list(unique_pairs), schema=["mention", "gold_concept_code"], orient="row"
     )
 
-    pred_df_with_repeat_rank = pred_df.with_columns(
-        pl.col("mention_id")
-        .str.split(".")
-        .list.get(1)
-        .cast(pl.Float64)
-        .alias("mention_order")
-    ).sort(["doc_id", "mention_order"]).with_columns(
-        pl.col("mention_id")
-        .cum_count()
-        .over(["doc_id", "gold_concept_code"])
-        .alias("repeat_rank")
+    pred_df_with_repeat_rank = (
+        pred_df.with_columns(
+            pl.col("mention_id")
+            .str.split(".")
+            .list.get(1)
+            .cast(pl.Float64)
+            .alias("mention_order")
+        )
+        .sort(["doc_id", "mention_order"])
+        .with_columns(
+            pl.col("mention_id")
+            .cum_count()
+            .over(["doc_id", "gold_concept_code"])
+            .alias("repeat_rank")
+        )
     )
-    repeated_df = (
-        pred_df_with_repeat_rank
-        .filter(pl.col("repeat_rank") >= 2)
-    )
+    repeated_df = pred_df_with_repeat_rank.filter(pl.col("repeat_rank") >= 2)
 
     partition_specs = [
         ("All", pred_df),
@@ -1381,11 +1404,14 @@ def compute_metrics(
         precision_map = part.get("precision", {})
         f1_map = part.get("f1", {})
 
-        strict_val = list(rs_map.get(semantic_group, {"": 0.0}).values())[0]
-        ratio_val = list(ratio_map.get(semantic_group, {"": "N/A"}).values())[0]
-        final_results[semantic_group]["index"].append(
-            list(ratio_map.get(semantic_group, {}).keys())[0]
-        )
+        strict_entry = rs_map.get(semantic_group, {"": 0.0})
+        ratio_entry = ratio_map.get(semantic_group, {"": "N/A"})
+
+        strict_val = next(iter(strict_entry.values()))
+        ratio_val = next(iter(ratio_entry.values()))
+        index_val = next(iter(ratio_entry.keys()), next(iter(strict_entry.keys()), ""))
+
+        final_results[semantic_group]["index"].append(index_val)
         final_results[semantic_group]["recall_strict"].append(strict_val)
         final_results[semantic_group]["ratios"].append(ratio_val)
 
