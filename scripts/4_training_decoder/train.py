@@ -301,6 +301,14 @@ def find_latest_resumable_checkpoint(output_dir: Path):
             f"Skipping checkpoint-{step}: missing trainer_state.json, cannot resume safely."
         )
 
+    # Fallback to model_last when no resumable checkpoint-* directory is present.
+    model_last_dir = output_dir / "model_last"
+    if model_last_dir.is_dir():
+        trainer_state_path = model_last_dir / "trainer_state.json"
+        if trainer_state_path.exists():
+            return str(model_last_dir)
+        print("Skipping model_last: missing trainer_state.json, cannot resume safely.")
+
     return None
 
 
