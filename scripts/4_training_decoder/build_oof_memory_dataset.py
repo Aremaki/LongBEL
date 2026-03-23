@@ -229,6 +229,7 @@ def write_fold_training_commands(
     num_folds: int,
     fixed_validation_source_path: Path,
     fixed_validation_target_path: Path,
+    train_models_root: str,
     model_name: str,
     lr: float,
     dataset_name: str,
@@ -293,6 +294,8 @@ def write_fold_training_commands(
             "--run-name-suffix",
             run_suffix,
             "--disable-validation-merge",
+            "--models-root",
+            train_models_root,
         ]
 
         if complete_mode:
@@ -300,7 +303,7 @@ def write_fold_training_commands(
         if add_headers:
             cmd.append("--add-headers")
 
-        fold_lines = header_lines + [" \\\n+    ".join(cmd), ""]
+        fold_lines = header_lines + [" \\\n    ".join(cmd), ""]
         fold_script_path = scripts_dir / f"run_fold_{fold_idx}.slurm"
         fold_script_path.write_text("\n".join(fold_lines), encoding="utf-8")
         fold_script_paths.append(fold_script_path)
@@ -327,6 +330,7 @@ def main(
     seed: int,
     complete_mode: bool,
     add_headers: bool,
+    train_models_root: str,
     generate_oof_predictions: bool,
     checkpoint_kind: str,
     models_root: str,
@@ -440,6 +444,7 @@ def main(
         num_folds=num_folds,
         fixed_validation_source_path=fixed_validation_source_path,
         fixed_validation_target_path=fixed_validation_target_path,
+        train_models_root=train_models_root,
         model_name=model_name,
         lr=lr,
         dataset_name=dataset_name,
@@ -464,6 +469,7 @@ def main(
         "merged_pool_size": len(merged_sources),
         "fixed_validation_source_path": str(fixed_validation_source_path),
         "fixed_validation_target_path": str(fixed_validation_target_path),
+        "train_models_root": train_models_root,
         "fold_sizes": fold_sizes,
         "fold_slurm_scripts": [str(path) for path in fold_script_paths],
         "submit_all_script": str(submit_script_path),
@@ -633,6 +639,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--add-headers", action="store_true", help="Use header mode in path/commands"
     )
+    parser.add_argument(
+        "--train-models-root",
+        type=str,
+        default="$SCRATCH/expe_longbel_fold_models",
+        help="Models root passed to fold training jobs (supports shell env vars in SLURM scripts).",
+    )
 
     parser.add_argument(
         "--generate-oof-predictions",
@@ -681,6 +693,7 @@ if __name__ == "__main__":
         seed=args.seed,
         complete_mode=args.complete_mode,
         add_headers=args.add_headers,
+        train_models_root=args.train_models_root,
         generate_oof_predictions=args.generate_oof_predictions,
         checkpoint_kind=args.checkpoint_kind,
         models_root=args.models_root,

@@ -333,6 +333,7 @@ def main(
     validation_target_path: Optional[str] = None,
     run_name_suffix: str = "",
     merge_validation_into_train: bool = True,
+    models_root: str = "models/NED",
 ):
     # init distributed (if needed)
     if idr_torch.rank == 0:
@@ -368,8 +369,7 @@ def main(
     except Exception as hub_err:  # pragma: no cover - network / availability branch
         if augmented_data == "human_only_ft":
             local_dir = (
-                Path("models")
-                / "NED"
+                Path(models_root)
                 / f"{dataset_name}_full_upsampled_{selection_method}_short{complete_mode_str}{add_headers_str}"
                 / model_short_name
                 / "model_last"
@@ -658,8 +658,7 @@ def main(
     # ---------- SFT TrainingArguments ----------
 
     output_dir = (
-        Path("models")
-        / "NED"
+        Path(models_root)
         / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}{run_name_suffix}"
         / model_short_name
     )
@@ -876,6 +875,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Do not merge the first 90% of default validation data into training.",
     )
+    parser.add_argument(
+        "--models-root",
+        type=str,
+        default="models/NED",
+        help="Root directory where trained models/checkpoints are written.",
+    )
     args = parser.parse_args()
 
     main(
@@ -897,4 +902,5 @@ if __name__ == "__main__":
         validation_target_path=args.validation_target_path,
         run_name_suffix=args.run_name_suffix,
         merge_validation_into_train=not args.disable_validation_merge,
+        models_root=args.models_root,
     )
