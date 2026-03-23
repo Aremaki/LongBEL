@@ -224,7 +224,7 @@ def generate_predictions(
 
 
 def write_fold_training_commands(
-    command_path: Path,
+    scripts_dir: Path,
     folds_root: Path,
     num_folds: int,
     fixed_validation_source_path: Path,
@@ -238,7 +238,7 @@ def write_fold_training_commands(
     complete_mode: bool,
     add_headers: bool,
 ):
-    lines = [
+    header_lines = [
         "#!/bin/bash",
         "#SBATCH --job-name=training       # name of job",
         "#SBATCH -C h100                     # uncomment for gpu_p6 partition (80GB H100 GPU)",
@@ -259,6 +259,9 @@ def write_fold_training_commands(
         "export OMP_NUM_THREADS=1",
         "",
     ]
+
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    fold_script_paths: list[Path] = []
 
     for fold_idx in range(num_folds):
         fold_dir = folds_root / f"fold_{fold_idx}"
@@ -297,11 +300,20 @@ def write_fold_training_commands(
         if add_headers:
             cmd.append("--add-headers")
 
-        lines.append(" \\\n    ".join(cmd))
-        lines.append("")
+        fold_lines = header_lines + [" \\\n+    ".join(cmd), ""]
+        fold_script_path = scripts_dir / f"run_fold_{fold_idx}.slurm"
+        fold_script_path.write_text("\n".join(fold_lines), encoding="utf-8")
+        fold_script_paths.append(fold_script_path)
 
-    command_path.parent.mkdir(parents=True, exist_ok=True)
-    command_path.write_text("\n".join(lines), encoding="utf-8")
+    submit_lines = ["#!/bin/bash", "set -euo pipefail", ""]
+    for fold_script_path in fold_script_paths:
+        submit_lines.append(f"sbatch {fold_script_path}")
+    submit_lines.append("")
+
+    submit_script_path = scripts_dir / "submit_all_folds.sh"
+    submit_script_path.write_text("\n".join(submit_lines), encoding="utf-8")
+
+    return fold_script_paths, submit_script_path
 
 
 def main(
@@ -421,9 +433,9 @@ def main(
             "heldout_size": int(len(heldout_idx)),
         })
 
-    commands_path = folds_root / "run_5fold_training.sh"
-    write_fold_training_commands(
-        command_path=commands_path,
+    scripts_dir = folds_root / "slurm"
+    fold_script_paths, submit_script_path = write_fold_training_commands(
+        scripts_dir=scripts_dir,
         folds_root=folds_root,
         num_folds=num_folds,
         fixed_validation_source_path=fixed_validation_source_path,
@@ -453,7 +465,8 @@ def main(
         "fixed_validation_source_path": str(fixed_validation_source_path),
         "fixed_validation_target_path": str(fixed_validation_target_path),
         "fold_sizes": fold_sizes,
-        "commands_file": str(commands_path),
+        "fold_slurm_scripts": [str(path) for path in fold_script_paths],
+        "submit_all_script": str(submit_script_path),
     }
 
     if generate_oof_predictions:
@@ -569,7 +582,8 @@ def main(
         json.dump(metadata, file, indent=2, ensure_ascii=False)
 
     print(f"Saved fold files in: {folds_root}")
-    print(f"Saved training commands in: {commands_path}")
+    print(f"Saved fold SLURM scripts in: {scripts_dir}")
+    print(f"Saved submit-all script in: {submit_script_path}")
     if generate_oof_predictions:
         print("OOF prediction dataset created successfully.")
 
