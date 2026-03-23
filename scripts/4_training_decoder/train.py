@@ -6,6 +6,7 @@ import argparse
 import pickle
 import shutil
 from pathlib import Path
+from typing import Optional
 
 import idr_torch  # type: ignore
 import nltk
@@ -48,7 +49,7 @@ def get_split_marker(
     else:
         raise ValueError(f"Unknown dataset_name: {dataset_name}")
 
-    return "}", nlp
+    return "}", nlp  # type: ignore
 
 
 def sentence_tokenize_safe(text, nlp):
@@ -326,6 +327,12 @@ def main(
     end_entity_token: str = "]",
     start_group_token: str = "{",
     end_group_token: str = "}",
+    train_source_path: Optional[str] = None,
+    train_target_path: Optional[str] = None,
+    validation_source_path: Optional[str] = None,
+    validation_target_path: Optional[str] = None,
+    run_name_suffix: str = "",
+    merge_validation_into_train: bool = True,
 ):
     # init distributed (if needed)
     if idr_torch.rank == 0:
@@ -428,18 +435,28 @@ def main(
     # ---------- Load validation dataset (same logic) ----------
     data_folder = Path("data/final_data")
 
-    validation_source_path = (
+    default_validation_source_path = (
         data_folder
         / dataset_name
         / f"validation_{selection_method}_source_{context_format}.pkl"
     )
-    validation_target_path = (
+    default_validation_target_path = (
         data_folder
         / dataset_name
         / f"validation_{selection_method}_target_{context_format}.pkl"
     )
-    validation_source_data = load_pickle(validation_source_path)
-    validation_target_data = load_pickle(validation_target_path)
+    validation_source_path_obj = (
+        Path(validation_source_path)
+        if validation_source_path
+        else default_validation_source_path
+    )
+    validation_target_path_obj = (
+        Path(validation_target_path)
+        if validation_target_path
+        else default_validation_target_path
+    )
+    validation_source_data = load_pickle(validation_source_path_obj)
+    validation_target_data = load_pickle(validation_target_path_obj)
 
     validation_data = {
         "source": validation_source_data,
@@ -447,37 +464,54 @@ def main(
     }
     dev_dataset = Dataset.from_dict(validation_data)
 
-    # Reduce validation dataset to 10%
     indexes = list(range(len(dev_dataset)))
     split = int(len(dev_dataset) * 0.9)
     split_val = indexes[split:]
-    validation_dataset = dev_dataset.select(split_val)
+    if validation_source_path is None and validation_target_path is None:
+        # Default behavior: reduce validation set to 10% and merge 90% into train.
+        validation_dataset = dev_dataset.select(split_val)
+    else:
+        # Fold/custom behavior: use the provided validation set as-is.
+        validation_dataset = dev_dataset
 
     # ---------- Load training datasets according to augmented_data ----------
     human_train_dataset = None
     synth_train_dataset = None
 
     if not augmented_data == "synth_only":
-        human_train_source_data = load_pickle(
+        default_train_source_path = (
             data_folder
             / dataset_name
             / f"train_{selection_method}_source_{context_format}.pkl"
         )
-        human_train_target_data = load_pickle(
+        default_train_target_path = (
             data_folder
             / dataset_name
             / f"train_{selection_method}_target_{context_format}.pkl"
         )
+        train_source_path_obj = (
+            Path(train_source_path) if train_source_path else default_train_source_path
+        )
+        train_target_path_obj = (
+            Path(train_target_path) if train_target_path else default_train_target_path
+        )
+        human_train_source_data = load_pickle(train_source_path_obj)
+        human_train_target_data = load_pickle(train_target_path_obj)
         human_train_dataset = Dataset.from_dict({
             "source": human_train_source_data,
             "target": human_train_target_data,
         })
-        # if validation present, add rest to training (same logic)
-        split_train = indexes[:split]
-        human_train_dataset = concatenate_datasets([
-            human_train_dataset,
-            dev_dataset.select(split_train),
-        ])
+        if (
+            merge_validation_into_train
+            and validation_source_path is None
+            and validation_target_path is None
+        ):
+            # Default behavior: add the first 90% of validation data back to training.
+            split_train = indexes[:split]
+            human_train_dataset = concatenate_datasets([
+                human_train_dataset,
+                dev_dataset.select(split_train),
+            ])
 
     if augmented_data not in ["human_only", "human_only_ft"]:
         if dataset_name == "MedMentions":
@@ -568,7 +602,7 @@ def main(
         add_headers=add_headers,
     )
 
-    num_proc = os.cpu_count() // 2
+    num_proc = os.cpu_count() // 2  # type: ignore
 
     # Compute longest training example
     train_lengths = train_dataset.map(
@@ -630,12 +664,12 @@ def main(
     output_dir = (
         Path("models")
         / "NED"
-        / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}{run_name_suffix}"
         / model_short_name
     )
     logging_dir = (
         Path("logs")
-        / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}"
+        / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}{run_name_suffix}"
         / model_short_name
     )
     model.gradient_checkpointing_enable()
@@ -811,6 +845,41 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to add headers to the prompts (e.g. '### Context', '### Prediction')",
     )
+    parser.add_argument(
+        "--train-source-path",
+        type=str,
+        default=None,
+        help="Optional path to a custom training source pickle file.",
+    )
+    parser.add_argument(
+        "--train-target-path",
+        type=str,
+        default=None,
+        help="Optional path to a custom training target pickle file.",
+    )
+    parser.add_argument(
+        "--validation-source-path",
+        type=str,
+        default=None,
+        help="Optional path to a custom validation source pickle file.",
+    )
+    parser.add_argument(
+        "--validation-target-path",
+        type=str,
+        default=None,
+        help="Optional path to a custom validation target pickle file.",
+    )
+    parser.add_argument(
+        "--run-name-suffix",
+        type=str,
+        default="",
+        help="Optional suffix appended to model/log output folder names (e.g. '_fold0').",
+    )
+    parser.add_argument(
+        "--disable-validation-merge",
+        action="store_true",
+        help="Do not merge the first 90% of default validation data into training.",
+    )
     args = parser.parse_args()
 
     main(
@@ -826,4 +895,10 @@ if __name__ == "__main__":
         end_entity_token=args.end_entity_token,
         start_group_token=args.start_group_token,
         end_group_token=args.end_group_token,
+        train_source_path=args.train_source_path,
+        train_target_path=args.train_target_path,
+        validation_source_path=args.validation_source_path,
+        validation_target_path=args.validation_target_path,
+        run_name_suffix=args.run_name_suffix,
+        merge_validation_into_train=not args.disable_validation_merge,
     )
