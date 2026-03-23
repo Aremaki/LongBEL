@@ -520,7 +520,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--context-format",
         type=str,
-        default="short",
+        default="long",
         choices=["short", "long", "hybrid_short", "hybrid_long", "hybrid_medium"],
         help="Context format used in train pickle filenames",
     )
