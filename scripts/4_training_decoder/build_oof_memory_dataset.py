@@ -307,7 +307,7 @@ def write_fold_training_commands(
 
     submit_lines = ["#!/bin/bash", "set -euo pipefail", ""]
     for fold_script_path in fold_script_paths:
-        submit_lines.append(f"sbatch {fold_script_path}")
+        submit_lines.append(f"sbatch -A ssq@h100 {fold_script_path}")
     submit_lines.append("")
 
     submit_script_path = scripts_dir / "submit_all_folds.sh"
