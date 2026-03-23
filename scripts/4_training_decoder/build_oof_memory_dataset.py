@@ -227,6 +227,8 @@ def write_fold_training_commands(
     command_path: Path,
     folds_root: Path,
     num_folds: int,
+    fixed_validation_source_path: Path,
+    fixed_validation_target_path: Path,
     model_name: str,
     lr: float,
     dataset_name: str,
@@ -263,9 +265,9 @@ def write_fold_training_commands(
             "--train-target-path",
             str(fold_dir / "train_target.pkl"),
             "--validation-source-path",
-            str(fold_dir / "heldout_source.pkl"),
+            str(fixed_validation_source_path),
             "--validation-target-path",
-            str(fold_dir / "heldout_target.pkl"),
+            str(fixed_validation_target_path),
             "--run-name-suffix",
             run_suffix,
             "--disable-validation-merge",
@@ -302,21 +304,62 @@ def main(
     max_new_tokens: int,
 ):
     data_root = Path("data/final_data") / dataset_name
-    source_path = data_root / f"train_{selection_method}_source_{context_format}.pkl"
-    target_path = data_root / f"train_{selection_method}_target_{context_format}.pkl"
+    train_source_path = (
+        data_root / f"train_{selection_method}_source_{context_format}.pkl"
+    )
+    train_target_path = (
+        data_root / f"train_{selection_method}_target_{context_format}.pkl"
+    )
+    validation_source_path = (
+        data_root / f"validation_{selection_method}_source_{context_format}.pkl"
+    )
+    validation_target_path = (
+        data_root / f"validation_{selection_method}_target_{context_format}.pkl"
+    )
 
-    if not source_path.exists() or not target_path.exists():
+    if (
+        not train_source_path.exists()
+        or not train_target_path.exists()
+        or not validation_source_path.exists()
+        or not validation_target_path.exists()
+    ):
         raise FileNotFoundError(
-            f"Missing train source/target files:\n- {source_path}\n- {target_path}"
+            "Missing required input files:\n"
+            f"- {train_source_path}\n"
+            f"- {train_target_path}\n"
+            f"- {validation_source_path}\n"
+            f"- {validation_target_path}"
         )
 
-    full_sources = load_pickle(source_path)
-    full_targets = load_pickle(target_path)
+    train_sources = load_pickle(train_source_path)
+    train_targets = load_pickle(train_target_path)
+    validation_sources = load_pickle(validation_source_path)
+    validation_targets = load_pickle(validation_target_path)
 
-    if len(full_sources) != len(full_targets):
+    if len(train_sources) != len(train_targets):
         raise ValueError(
-            f"Source/target length mismatch: {len(full_sources)} != {len(full_targets)}"
+            f"Train source/target length mismatch: {len(train_sources)} != {len(train_targets)}"
         )
+
+    if len(validation_sources) != len(validation_targets):
+        raise ValueError(
+            "Validation source/target length mismatch: "
+            f"{len(validation_sources)} != {len(validation_targets)}"
+        )
+
+    # Match train.py behavior: first 90% of validation is merged into train, last 10% is evaluation.
+    validation_indexes = list(range(len(validation_sources)))
+    validation_split = int(len(validation_sources) * 0.9)
+    validation_train_indexes = validation_indexes[:validation_split]
+    validation_eval_indexes = validation_indexes[validation_split:]
+
+    validation_train_sources = [validation_sources[i] for i in validation_train_indexes]
+    validation_train_targets = [validation_targets[i] for i in validation_train_indexes]
+    validation_eval_sources = [validation_sources[i] for i in validation_eval_indexes]
+    validation_eval_targets = [validation_targets[i] for i in validation_eval_indexes]
+
+    merged_sources = train_sources + validation_train_sources
+    merged_targets = train_targets + validation_train_targets
 
     folds_root = (
         data_root
@@ -325,19 +368,24 @@ def main(
     )
     folds_root.mkdir(parents=True, exist_ok=True)
 
-    folds = make_folds(len(full_sources), num_folds=num_folds, seed=seed)
+    fixed_validation_source_path = folds_root / "validation_10pct_source.pkl"
+    fixed_validation_target_path = folds_root / "validation_10pct_target.pkl"
+    dump_pickle(validation_eval_sources, fixed_validation_source_path)
+    dump_pickle(validation_eval_targets, fixed_validation_target_path)
 
-    all_indices = np.arange(len(full_sources))
+    folds = make_folds(len(merged_sources), num_folds=num_folds, seed=seed)
+
+    all_indices = np.arange(len(merged_sources))
     fold_sizes = []
 
     for fold_idx, heldout_idx in enumerate(folds):
         heldout_set = set(heldout_idx.tolist())
         train_idx = np.array([i for i in all_indices if i not in heldout_set])
 
-        train_source = [full_sources[i] for i in train_idx]
-        train_target = [full_targets[i] for i in train_idx]
-        heldout_source = [full_sources[i] for i in heldout_idx]
-        heldout_target = [full_targets[i] for i in heldout_idx]
+        train_source = [merged_sources[i] for i in train_idx]
+        train_target = [merged_targets[i] for i in train_idx]
+        heldout_source = [merged_sources[i] for i in heldout_idx]
+        heldout_target = [merged_targets[i] for i in heldout_idx]
 
         fold_dir = folds_root / f"fold_{fold_idx}"
         fold_dir.mkdir(parents=True, exist_ok=True)
@@ -359,6 +407,8 @@ def main(
         command_path=commands_path,
         folds_root=folds_root,
         num_folds=num_folds,
+        fixed_validation_source_path=fixed_validation_source_path,
+        fixed_validation_target_path=fixed_validation_target_path,
         model_name=model_name,
         lr=lr,
         dataset_name=dataset_name,
@@ -376,13 +426,20 @@ def main(
         "augmented_data": augmented_data,
         "num_folds": num_folds,
         "seed": seed,
+        "train_size": len(train_sources),
+        "validation_size": len(validation_sources),
+        "validation_merged_90pct_size": len(validation_train_sources),
+        "validation_fixed_10pct_size": len(validation_eval_sources),
+        "merged_pool_size": len(merged_sources),
+        "fixed_validation_source_path": str(fixed_validation_source_path),
+        "fixed_validation_target_path": str(fixed_validation_target_path),
         "fold_sizes": fold_sizes,
         "commands_file": str(commands_path),
     }
 
     if generate_oof_predictions:
         models_root_path = Path(models_root)
-        predicted_targets: list[Optional[str]] = [None] * len(full_sources)
+        predicted_targets: list[Optional[str]] = [None] * len(merged_sources)
         fold_reports = []
 
         for fold_idx in range(num_folds):
@@ -450,9 +507,9 @@ def main(
             / f"train_{selection_method}_target_{context_format}_oof{num_folds}_gold.pkl"
         )
 
-        dump_pickle(full_sources, oof_source_path)
+        dump_pickle(merged_sources, oof_source_path)
         dump_pickle(predicted_targets, oof_target_path)
-        dump_pickle(full_targets, oof_gold_target_path)
+        dump_pickle(merged_targets, oof_gold_target_path)
 
         tsv_path = (
             data_root
@@ -466,7 +523,7 @@ def main(
             )
             writer.writeheader()
             for idx, (src, gold, pred) in enumerate(
-                zip(full_sources, full_targets, predicted_targets)
+                zip(merged_sources, merged_targets, predicted_targets)
             ):
                 writer.writerow({
                     "index": idx,
