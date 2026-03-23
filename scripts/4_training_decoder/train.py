@@ -467,7 +467,7 @@ def main(
     indexes = list(range(len(dev_dataset)))
     split = int(len(dev_dataset) * 0.9)
     split_val = indexes[split:]
-    if validation_source_path is None and validation_target_path is None:
+    if merge_validation_into_train:
         # Default behavior: reduce validation set to 10% and merge 90% into train.
         validation_dataset = dev_dataset.select(split_val)
     else:
@@ -501,11 +501,7 @@ def main(
             "source": human_train_source_data,
             "target": human_train_target_data,
         })
-        if (
-            merge_validation_into_train
-            and validation_source_path is None
-            and validation_target_path is None
-        ):
+        if merge_validation_into_train:
             # Default behavior: add the first 90% of validation data back to training.
             split_train = indexes[:split]
             human_train_dataset = concatenate_datasets([

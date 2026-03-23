@@ -238,15 +238,34 @@ def write_fold_training_commands(
     complete_mode: bool,
     add_headers: bool,
 ):
-    lines = ["#!/usr/bin/env bash", "set -euo pipefail", ""]
+    lines = [
+        "#!/bin/bash",
+        "#SBATCH --job-name=training       # name of job",
+        "#SBATCH -C h100                     # uncomment for gpu_p6 partition (80GB H100 GPU)",
+        "#SBATCH --nodes=1                    # nombre de noeud",
+        "#SBATCH --ntasks-per-node=1          # nombre de tache MPI par noeud (= nombre de GPU par noeud)",
+        "#SBATCH --gres=gpu:1                 # nombre de GPU par noeud (max 8 avec gpu_p2, gpu_p5)",
+        "#SBATCH --cpus-per-task=24          # number of cores per task for gpu_p6 (1/4 of 4-GPUs H100 node)",
+        "#SBATCH --hint=nomultithread         # hyperthreading is deactivated",
+        "#SBATCH --time=20:00:00              # maximum execution time requested (HH:MM:SS)",
+        "#SBATCH --output=logs/log_out%j.out    # name of output file",
+        "#SBATCH --error=logs/log_err%j.out     # name of error file (here, in common with the output file)",
+        "",
+        "set -euo pipefail",
+        "",
+        "module load arch/h100",
+        "module load pytorch-gpu/py3/2.3.1",
+        "",
+        "export OMP_NUM_THREADS=1",
+        "",
+    ]
 
     for fold_idx in range(num_folds):
         fold_dir = folds_root / f"fold_{fold_idx}"
         run_suffix = f"_fold{fold_idx}"
 
         cmd = [
-            "uv",
-            "run",
+            "python",
             "scripts/4_training_decoder/train.py",
             "--model-name",
             f'"{model_name}"',
