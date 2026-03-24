@@ -557,6 +557,8 @@ def main(
         all_hybrid_short_sources = []
         all_hybrid_long_targets = []
         all_hybrid_short_targets = []
+        all_hybrid_long_target_preds = []
+        all_hybrid_short_target_preds = []
         all_hybrid_long_tsv_lines = []
         all_hybrid_short_tsv_lines = []
         fold_reports = []
@@ -614,10 +616,41 @@ def main(
             )
             all_constraint_dfs.append(fold_df)
 
+            # Compute recall metrics (top-1) to verify inference quality per fold.
+            top_fold_df = fold_df.filter(pl.col("rank") == 1)
+            true_overall = top_fold_df.filter(
+                pl.col("gold_concept_code") == pl.col("pred_concept_code")
+            ).height
+            total_overall = top_fold_df.height
+            recall_overall = true_overall / total_overall if total_overall > 0 else 0.0
+
+            recall_by_group: dict[str, str] = {}
+            for semantic_group in top_fold_df["semantic_group"].unique().to_list():
+                group_df = top_fold_df.filter(
+                    pl.col("semantic_group") == semantic_group
+                )
+                true_group = group_df.filter(
+                    pl.col("gold_concept_code") == pl.col("pred_concept_code")
+                ).height
+                total_group = group_df.height
+                recall_group = true_group / total_group if total_group > 0 else 0.0
+                recall_by_group[str(semantic_group)] = (
+                    f"{recall_group:.4f} ({true_group}/{total_group})"
+                )
+
+            fold_recall_metrics = {
+                "overall": f"{recall_overall:.4f} ({true_overall}/{total_overall})",
+                "by_semantic_group": recall_by_group,
+            }
+            with open(
+                fold_dir / "recall_heldout_constraint.json", "w", encoding="utf-8"
+            ) as f:
+                json.dump(fold_recall_metrics, f, indent=2, ensure_ascii=False)
+
             (
                 hybrid_long_source_fold,
                 hybrid_long_target_fold,
-                hybrid_short_target_pred_fold,
+                hybrid_long_target_pred_fold,
                 tsv_lines_fold,
             ) = build_hybrid_long_training_pairs_from_predictions(
                 heldout_pages=heldout_bigbio_with_pred,
@@ -632,8 +665,8 @@ def main(
                 fold_dir / "pred_hybrid_long_target.pkl",
             )
             dump_pickle(
-                hybrid_short_target_pred_fold,
-                fold_dir / "pred_hybrid_short_target_pred.pkl",
+                hybrid_long_target_pred_fold,
+                fold_dir / "pred_hybrid_long_target_pred.pkl",
             )
             # Save to csv tsv lines
             pl.DataFrame(tsv_lines_fold).write_csv(
@@ -670,9 +703,11 @@ def main(
             )
             all_hybrid_long_sources.extend(hybrid_long_source_fold)
             all_hybrid_long_targets.extend(hybrid_long_target_fold)
+            all_hybrid_long_target_preds.extend(hybrid_long_target_pred_fold)
             all_hybrid_long_tsv_lines.extend(tsv_lines_fold)
             all_hybrid_short_sources.extend(hybrid_short_source_fold)
             all_hybrid_short_targets.extend(hybrid_short_target_fold)
+            all_hybrid_short_target_preds.extend(hybrid_short_target_pred_fold)
             all_hybrid_short_tsv_lines.extend(tsv_lines_short_fold)
 
             fold_reports.append({
@@ -684,16 +719,21 @@ def main(
                 "heldout_bigbio_with_pred": str(heldout_bigbio_with_pred_path),
                 "hybrid_long_pairs": len(hybrid_long_source_fold),
                 "hybrid_short_pairs": len(hybrid_short_source_fold),
+                "recall": fold_recall_metrics,
             })
 
         hybrid_long_source_path = (
-            data_root / f"train_{selection_method}_source_hybrid_long_pred.pkl"
+            data_root / f"train_{selection_method}_source_hybrid_long_v2.pkl"
         )
         hybrid_long_target_path = (
-            data_root / f"train_{selection_method}_target_hybrid_long_pred.pkl"
+            data_root / f"train_{selection_method}_target_hybrid_long_v2.pkl"
+        )
+        hybrid_long_target_pred_path = (
+            data_root / f"train_{selection_method}_target_pred_hybrid_long_v2.pkl"
         )
         dump_pickle(all_hybrid_long_sources, hybrid_long_source_path)
         dump_pickle(all_hybrid_long_targets, hybrid_long_target_path)
+        dump_pickle(all_hybrid_long_target_preds, hybrid_long_target_pred_path)
         # Save to csv tsv lines
         pl.DataFrame(all_hybrid_long_tsv_lines).write_csv(
             file=data_root
@@ -702,13 +742,17 @@ def main(
             include_header=True,
         )
         hybrid_short_source_path = (
-            data_root / f"train_{selection_method}_source_hybrid_short_pred.pkl"
+            data_root / f"train_{selection_method}_source_hybrid_short_v2.pkl"
         )
         hybrid_short_target_path = (
-            data_root / f"train_{selection_method}_target_hybrid_short_pred.pkl"
+            data_root / f"train_{selection_method}_target_hybrid_short_v2.pkl"
+        )
+        hybrid_short_target_pred_path = (
+            data_root / f"train_{selection_method}_target_pred_hybrid_short_v2.pkl"
         )
         dump_pickle(all_hybrid_short_sources, hybrid_short_source_path)
         dump_pickle(all_hybrid_short_targets, hybrid_short_target_path)
+        dump_pickle(all_hybrid_short_target_preds, hybrid_short_target_pred_path)
         # Save to csv tsv lines
         pl.DataFrame(all_hybrid_short_tsv_lines).write_csv(
             file=data_root
@@ -725,8 +769,10 @@ def main(
             "fold_reports": fold_reports,
             "hybrid_long_source_path": str(hybrid_long_source_path),
             "hybrid_long_target_path": str(hybrid_long_target_path),
+            "hybrid_long_target_pred_path": str(hybrid_long_target_pred_path),
             "hybrid_short_source_path": str(hybrid_short_source_path),
             "hybrid_short_target_path": str(hybrid_short_target_path),
+            "hybrid_short_target_pred_path": str(hybrid_short_target_pred_path),
         }
 
     metadata_path = folds_root / "metadata.json"
@@ -786,13 +832,6 @@ if __name__ == "__main__":
         "--add-headers", action="store_true", help="Use header mode in path/commands"
     )
     parser.add_argument(
-        "--train-models-root",
-        type=str,
-        default="$SCRATCH/expe_longbel_fold_models",
-        help="Models root passed to fold training jobs (supports shell env vars in SLURM scripts).",
-    )
-
-    parser.add_argument(
         "--generate-oof-predictions",
         action="store_true",
         help="If set, load fold models and generate held-out predictions to build OOF dataset.",
@@ -807,7 +846,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--models-root",
         type=str,
-        default="models/NED",
+        default="$SCRATCH/expe_longbel_fold_models",
         help="Root folder containing fold model outputs.",
     )
     parser.add_argument(

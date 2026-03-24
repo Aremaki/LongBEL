@@ -26,5 +26,5 @@ echo "Job ID: $SLURM_JOB_ID"
 
 
 # Launch training
-python scripts/4_training_decoder/build_oof_memory_dataset.py --model-name Llama-3.1-8B-Instruct --dataset-name EMEA --num-folds 5 --seed 42 --add-headers
+python scripts/4_training_decoder/build_oof_memory_dataset.py --model-name Llama-3.1-8B-Instruct --dataset-name EMEA --add-headers --generate-oof-predictions
 echo "SCRIPT FINISHED"
