@@ -384,6 +384,7 @@ def main(
     generate_oof_predictions: bool,
     checkpoint_kind: str,
     models_root: str,
+    validation_predict_fold: int,
     batch_size: int,
     num_beams: int,
     max_new_tokens: int,
@@ -460,6 +461,15 @@ def main(
         raise TypeError("Expected a map-style Dataset for BigBio train split")
     bigbio_train_pages = bigbio_train_pages_raw
 
+    bigbio_validation_pages_raw = load_dataset(
+        str(bigbio_processed_root),
+        data_dir="processed_data",
+        split="validation",
+    )
+    if not isinstance(bigbio_validation_pages_raw, Dataset):
+        raise TypeError("Expected a map-style Dataset for BigBio validation split")
+    bigbio_validation_pages = bigbio_validation_pages_raw
+
     folds_root = (
         data_root
         / "oof"
@@ -471,6 +481,9 @@ def main(
     fixed_validation_target_path = folds_root / "validation_10pct_target.pkl"
     dump_pickle(validation_eval_sources, fixed_validation_source_path)
     dump_pickle(validation_eval_targets, fixed_validation_target_path)
+    validation_10pct_bigbio = bigbio_validation_pages.select(validation_eval_indexes)
+    validation_10pct_bigbio_path = folds_root / "validation_10pct_bigbio.parquet"
+    validation_10pct_bigbio.to_parquet(str(validation_10pct_bigbio_path))
 
     folds = make_folds(len(merged_sources), num_folds=num_folds, seed=seed)
     bigbio_folds = make_folds(len(bigbio_train_pages), num_folds=num_folds, seed=seed)
@@ -542,9 +555,11 @@ def main(
         "merged_pool_size": len(merged_sources),
         "fixed_validation_source_path": str(fixed_validation_source_path),
         "fixed_validation_target_path": str(fixed_validation_target_path),
+        "validation_10pct_bigbio_path": str(validation_10pct_bigbio_path),
         "models_root": models_root,
         "prediction_models_root": models_root,
         "bigbio_train_pages": len(bigbio_train_pages),
+        "bigbio_validation_pages": len(bigbio_validation_pages),
         "fold_sizes": fold_sizes,
         "fold_slurm_scripts": [str(path) for path in fold_script_paths],
         "submit_all_script": str(submit_script_path),
@@ -552,7 +567,6 @@ def main(
 
     if generate_oof_predictions:
         models_root_path = Path(models_root)
-        all_constraint_dfs = []
         all_hybrid_long_sources = []
         all_hybrid_short_sources = []
         all_hybrid_long_targets = []
@@ -597,25 +611,8 @@ def main(
                 num_beams=num_beams,
             )
 
-            heldout_bigbio_with_pred_path = (
-                fold_dir / "heldout_bigbio_with_pred.parquet"
-            )
-            heldout_bigbio_with_pred.to_parquet(str(heldout_bigbio_with_pred_path))
-
-            fold_df = pl.DataFrame(fold_predictions).with_columns(
-                pl.lit(fold_idx).alias("fold")
-            )
-            fold_df = fold_df.sort(["mention_id", "rank"])
-            fold_out_path = fold_dir / f"pred_heldout_constraint_{num_beams}_beams.tsv"
-            fold_df.write_csv(
-                file=fold_out_path,
-                separator="\t",
-                include_header=True,
-            )
-            all_constraint_dfs.append(fold_df)
-
             # Compute recall metrics (top-1) to verify inference quality per fold.
-            top_fold_df = fold_df.filter(pl.col("rank") == 1)
+            top_fold_df = pl.DataFrame(fold_predictions).filter(pl.col("rank") == 1)
             true_overall = top_fold_df.filter(
                 pl.col("gold_concept_code") == pl.col("pred_concept_code")
             ).height
@@ -635,14 +632,19 @@ def main(
                 recall_by_group[str(semantic_group)] = (
                     f"{recall_group:.4f} ({true_group}/{total_group})"
                 )
+                print(
+                    f"[Fold {fold_idx}] Semantic Group: {semantic_group} - "
+                    f"Recall: {recall_group:.4f} ({true_group}/{total_group})"
+                )
 
             fold_recall_metrics = {
                 "overall": f"{recall_overall:.4f} ({true_overall}/{total_overall})",
                 "by_semantic_group": recall_by_group,
             }
-            with open(
-                fold_dir / "recall_heldout_constraint.json", "w", encoding="utf-8"
-            ) as f:
+            print(
+                f"[Fold {fold_idx}] Overall Recall Metrics: {fold_recall_metrics['overall']}"
+            )
+            with open(fold_dir / "recall.json", "w", encoding="utf-8") as f:
                 json.dump(fold_recall_metrics, f, indent=2, ensure_ascii=False)
 
             (
@@ -655,15 +657,15 @@ def main(
             )
             dump_pickle(
                 hybrid_long_source_fold,
-                fold_dir / "pred_hybrid_long_source.pkl",
+                fold_dir / "train_hybrid_long_v2_source.pkl",
             )
             dump_pickle(
                 hybrid_long_target_fold,
-                fold_dir / "pred_hybrid_long_target.pkl",
+                fold_dir / "train_hybrid_long_v2_target.pkl",
             )
             # Save to csv tsv lines
             pl.DataFrame(tsv_lines_fold).write_csv(
-                file=fold_dir / "pred_hybrid_long.tsv",
+                file=fold_dir / "train_hybrid_long_v2.tsv",
                 separator="\t",
                 include_header=True,
             )
@@ -677,15 +679,15 @@ def main(
             )
             dump_pickle(
                 hybrid_short_source_fold,
-                fold_dir / "pred_hybrid_short_source.pkl",
+                fold_dir / "train_hybrid_short_v2_source.pkl",
             )
             dump_pickle(
                 hybrid_short_target_fold,
-                fold_dir / "pred_hybrid_short_target.pkl",
+                fold_dir / "train_hybrid_short_v2_target.pkl",
             )
             # Save to csv tsv lines
             pl.DataFrame(tsv_lines_short_fold).write_csv(
-                file=fold_dir / "pred_hybrid_short.tsv",
+                file=fold_dir / "train_hybrid_short_v2.tsv",
                 separator="\t",
                 include_header=True,
             )
@@ -701,8 +703,6 @@ def main(
                 "heldout_bigbio_pages": len(heldout_bigbio),
                 "predictions": len(fold_predictions),
                 "model_dir": str(model_dir),
-                "output_tsv": str(fold_out_path),
-                "heldout_bigbio_with_pred": str(heldout_bigbio_with_pred_path),
                 "hybrid_long_pairs": len(hybrid_long_source_fold),
                 "hybrid_short_pairs": len(hybrid_short_source_fold),
                 "recall": fold_recall_metrics,
@@ -738,6 +738,92 @@ def main(
             separator="\t",
             include_header=True,
         )
+
+        if validation_predict_fold < 0 or validation_predict_fold >= num_folds:
+            raise ValueError(
+                f"validation_predict_fold must be in [0, {num_folds - 1}], got {validation_predict_fold}"
+            )
+
+        validation_model_dir = resolve_model_dir(
+            model_name=model_name,
+            dataset_name=dataset_name,
+            augmented_data=augmented_data,
+            selection_method=selection_method,
+            context_format=context_format,
+            complete_mode=complete_mode,
+            add_headers=add_headers,
+            run_name_suffix=f"_fold{validation_predict_fold}",
+            checkpoint_kind=checkpoint_kind,
+            models_root=models_root_path,
+        )
+        print(
+            f"[Validation 10%] Loading model from fold {validation_predict_fold}: {validation_model_dir}"
+        )
+        val_preds, validation_10pct_bigbio_with_pred = generate_predictions_bigbio(
+            model_dir=validation_model_dir,
+            dataset_name=dataset_name,
+            heldout_pages=validation_10pct_bigbio,
+            context_format=context_format,
+            batch_size=batch_size,
+            num_beams=num_beams,
+        )
+        # Validation 10% recall metrics (top-1), same logic as fold recall.
+        val_top_df = pl.DataFrame(val_preds).filter(pl.col("rank") == 1)
+        val_true_overall = val_top_df.filter(
+            pl.col("gold_concept_code") == pl.col("pred_concept_code")
+        ).height
+        val_total_overall = val_top_df.height
+        val_recall_overall = (
+            val_true_overall / val_total_overall if val_total_overall > 0 else 0.0
+        )
+
+        val_recall_by_group: dict[str, str] = {}
+        for semantic_group in val_top_df["semantic_group"].unique().to_list():
+            group_df = val_top_df.filter(pl.col("semantic_group") == semantic_group)
+            true_group = group_df.filter(
+                pl.col("gold_concept_code") == pl.col("pred_concept_code")
+            ).height
+            total_group = group_df.height
+            recall_group = true_group / total_group if total_group > 0 else 0.0
+            val_recall_by_group[str(semantic_group)] = (
+                f"{recall_group:.4f} ({true_group}/{total_group})"
+            )
+
+        validation_recall = {
+            "overall": f"{val_recall_overall:.4f} ({val_true_overall}/{val_total_overall})",
+            "by_semantic_group": val_recall_by_group,
+        }
+        validation_recall_path = folds_root / "validation_10pct_recall.json"
+        with open(validation_recall_path, "w", encoding="utf-8") as f:
+            json.dump(validation_recall, f, indent=2, ensure_ascii=False)
+        print(f"[Validation 10%] Overall Recall: {validation_recall['overall']}")
+
+        (
+            validation_hybrid_long_source,
+            validation_hybrid_long_target,
+            validation_hybrid_long_tsv,
+        ) = build_hybrid_long_training_pairs_from_predictions(
+            heldout_pages=validation_10pct_bigbio_with_pred,
+            dataset_name=dataset_name,
+        )
+
+        validation_hybrid_long_source_path = (
+            data_root / f"validation_{selection_method}_source_hybrid_long_v2.pkl"
+        )
+        validation_hybrid_long_target_path = (
+            data_root / f"validation_{selection_method}_target_hybrid_long_v2.pkl"
+        )
+        validation_hybrid_long_tsv_path = (
+            data_root / f"validation_{selection_method}_annotations_hybrid_long_v2.tsv"
+        )
+        dump_pickle(validation_hybrid_long_source, validation_hybrid_long_source_path)
+        dump_pickle(validation_hybrid_long_target, validation_hybrid_long_target_path)
+        pl.DataFrame(validation_hybrid_long_tsv).write_csv(
+            file=validation_hybrid_long_tsv_path,
+            separator="\t",
+            include_header=True,
+        )
+
         metadata["oof_prediction"] = {
             "mode": "bigbio_longbel_sample_constrained",
             "checkpoint_kind": checkpoint_kind,
@@ -749,6 +835,16 @@ def main(
             "hybrid_long_target_path": str(hybrid_long_target_path),
             "hybrid_short_source_path": str(hybrid_short_source_path),
             "hybrid_short_target_path": str(hybrid_short_target_path),
+            "validation_predict_fold": validation_predict_fold,
+            "validation_10pct_recall": validation_recall,
+            "validation_10pct_recall_path": str(validation_recall_path),
+            "validation_hybrid_long_source_path": str(
+                validation_hybrid_long_source_path
+            ),
+            "validation_hybrid_long_target_path": str(
+                validation_hybrid_long_target_path
+            ),
+            "validation_hybrid_long_tsv_path": str(validation_hybrid_long_tsv_path),
         }
 
     metadata_path = folds_root / "metadata.json"
@@ -826,6 +922,12 @@ if __name__ == "__main__":
         help="Root folder containing fold model outputs.",
     )
     parser.add_argument(
+        "--validation-predict-fold",
+        type=int,
+        default=0,
+        help="Fold index of the trained model used to predict validation_10pct.",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=16,
@@ -857,6 +959,7 @@ if __name__ == "__main__":
         generate_oof_predictions=args.generate_oof_predictions,
         checkpoint_kind=args.checkpoint_kind,
         models_root=os.path.expandvars(args.models_root),
+        validation_predict_fold=args.validation_predict_fold,
         batch_size=args.batch_size,
         num_beams=args.num_beams,
         max_new_tokens=args.max_new_tokens,
