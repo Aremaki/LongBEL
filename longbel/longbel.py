@@ -215,7 +215,9 @@ def _score_to_rgb(score: float) -> tuple[int, int, int]:
     return red, channel, channel
 
 
-def _build_ansi_saliency_text(token_texts: list[str], saliency_scores: list[float]) -> str:
+def _build_ansi_saliency_text(
+    token_texts: list[str], saliency_scores: list[float]
+) -> str:
     chunks = []
     for token_text, score in zip(token_texts, saliency_scores):
         red, green, blue = _score_to_rgb(score)
@@ -223,7 +225,9 @@ def _build_ansi_saliency_text(token_texts: list[str], saliency_scores: list[floa
     return "".join(chunks)
 
 
-def _build_html_saliency_text(token_texts: list[str], saliency_scores: list[float]) -> str:
+def _build_html_saliency_text(
+    token_texts: list[str], saliency_scores: list[float]
+) -> str:
     chunks = []
     for token_text, score in zip(token_texts, saliency_scores):
         red, green, blue = _score_to_rgb(score)
@@ -251,14 +255,15 @@ class _LongBELHubInterface:
         if method == "integerated":
             method = "integrated"
         if method not in {"simple", "integrated"}:
-            raise ValueError(
-                "saliency_method must be one of: 'simple', 'integrated'."
-            )
+            raise ValueError("saliency_method must be one of: 'simple', 'integrated'.")
 
-        top_sequence_indices = torch.arange(
-            len(input_sentences),
-            device=generated_sequences.device,
-        ) * num_beams
+        top_sequence_indices = (
+            torch.arange(
+                len(input_sentences),
+                device=generated_sequences.device,
+            )
+            * num_beams
+        )
         top_sequences = generated_sequences.index_select(0, top_sequence_indices)
 
         attention_mask = (top_sequences != self.tokenizer.pad_token_id).long()  # type: ignore
@@ -293,7 +298,7 @@ class _LongBELHubInterface:
         if method == "simple":
             simple_embeddings = input_embeddings.detach()
             simple_embeddings.requires_grad_(True)
-            self.zero_grad(set_to_none=True)
+            self.zero_grad(set_to_none=True)  # type: ignore
             with torch.enable_grad():
                 objective = _objective_from_embeddings(simple_embeddings)
             gradients = torch.autograd.grad(
@@ -315,7 +320,9 @@ class _LongBELHubInterface:
             elif ig_baseline == "random":
                 baseline_embeddings = torch.randn_like(input_embeddings)
             elif ig_baseline == "avg":
-                baseline_embeddings = input_embeddings.mean(dim=1, keepdim=True).expand_as(input_embeddings)
+                baseline_embeddings = input_embeddings.mean(
+                    dim=1, keepdim=True
+                ).expand_as(input_embeddings)
             else:
                 raise ValueError(
                     f"Unsupported baseline type '{ig_baseline}'. Choose from 'pad', 'zero', 'random', 'avg'."
@@ -330,7 +337,7 @@ class _LongBELHubInterface:
                     baseline_embeddings + alpha * embedding_delta
                 ).detach()
                 interpolated_embeddings.requires_grad_(True)
-                self.zero_grad(set_to_none=True)
+                self.zero_grad(set_to_none=True)  # type: ignore
 
                 with torch.enable_grad():
                     objective = _objective_from_embeddings(interpolated_embeddings)
@@ -349,9 +356,9 @@ class _LongBELHubInterface:
         saliency_maps = []
         sequence_len = top_sequences.size(1)
         prompt_positions = torch.arange(sequence_len, device=top_sequences.device)
-        prompt_mask = (
-            prompt_positions.unsqueeze(0) < prefix_len
-        ) & (top_sequences != self.tokenizer.pad_token_id)  # type: ignore
+        prompt_mask = (prompt_positions.unsqueeze(0) < prefix_len) & (
+            top_sequences != self.tokenizer.pad_token_id  # type: ignore
+        )
 
         for sequence_ids, importance_scores, sentence, mask in zip(
             top_sequences,
@@ -445,10 +452,10 @@ class _LongBELHubInterface:
                 sem_groups=sem_groups,
                 multiple_answers=multiple_answers,
             )
-        if self.tokenizer.sep_token_id:
-            eos_token_id = self.tokenizer.sep_token_id
+        if self.tokenizer.sep_token_id:  # type: ignore
+            eos_token_id = self.tokenizer.sep_token_id  # type: ignore
         else:
-            eos_token_id = self.tokenizer.eos_token_id
+            eos_token_id = self.tokenizer.eos_token_id  # type: ignore
         outputs = self.generate(  # type: ignore
             **input_args,
             max_new_tokens=128,
@@ -632,7 +639,7 @@ class _LongBELHubInterface:
         all_entities_info = []
         for data in bigbio_pages:
             if context_format == "long":
-                sources, targets, entities_info = parse_text_long(
+                sources, targets, entities_info = parse_text_long(  # type: ignore
                     data=data,
                     start_entity=start_entity,
                     end_entity=end_entity,
@@ -651,7 +658,7 @@ class _LongBELHubInterface:
                     train_mode=False,
                 )
             elif context_format == "hybrid_long":
-                sources, targets, entities_info = parse_text_hybrid_long(
+                sources, targets, _, entities_info = parse_text_hybrid_long(  # type: ignore
                     data=data,
                     start_entity=start_entity,
                     end_entity=end_entity,
@@ -661,7 +668,7 @@ class _LongBELHubInterface:
                     train_mode=False,
                 )
             elif context_format == "hybrid_short":
-                sources, targets, entities_info = parse_text_hybrid_short(
+                sources, targets, _, entities_info = parse_text_hybrid_short(  # type: ignore
                     data=data,
                     start_entity=start_entity,
                     end_entity=end_entity,
@@ -774,7 +781,10 @@ class _LongBELHubInterface:
 
                 input_sentences.append(
                     add_headers_to_prompt(
-                        source, target, previous_targets, context_format
+                        source,
+                        target,
+                        previous_targets,  # type: ignore
+                        context_format,
                     )
                 )
                 sem_groups.append(entity["semantic_group"])
@@ -785,23 +795,25 @@ class _LongBELHubInterface:
                 end_spans.append(entity["end_span"])
                 gold_concept_codes.append(entity.get("gold_concept_code", None))  # type: ignore
                 gold_concept_names.append(entity.get("gold_concept_name", None))  # type: ignore
-            all_outputs, cleaned_output_sequences, batch_saliency_maps = self.predict_batch(
-                all_outputs=all_outputs,
-                batch_size=batch_size,
-                input_sentences=input_sentences,
-                sem_groups=sem_groups,
-                mentions=mentions,
-                mentions_id=mentions_id,
-                doc_ids=doc_ids,
-                start_spans=start_spans,
-                end_spans=end_spans,
-                gold_concept_codes=gold_concept_codes,
-                gold_concept_names=gold_concept_names,
-                constrained=constrained,
-                multiple_answers=multiple_answers,
-                num_beams=num_beams,
-                explicability_mode=explicability_mode,
-                **kwargs,
+            all_outputs, cleaned_output_sequences, batch_saliency_maps = (
+                self.predict_batch(
+                    all_outputs=all_outputs,
+                    batch_size=batch_size,
+                    input_sentences=input_sentences,
+                    sem_groups=sem_groups,
+                    mentions=mentions,
+                    mentions_id=mentions_id,
+                    doc_ids=doc_ids,
+                    start_spans=start_spans,
+                    end_spans=end_spans,
+                    gold_concept_codes=gold_concept_codes,
+                    gold_concept_names=gold_concept_names,
+                    constrained=constrained,
+                    multiple_answers=multiple_answers,
+                    num_beams=num_beams,
+                    explicability_mode=explicability_mode,
+                    **kwargs,
+                )
             )
             if explicability_mode:
                 all_saliency_maps.extend(batch_saliency_maps)

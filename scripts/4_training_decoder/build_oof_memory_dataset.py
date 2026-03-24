@@ -1,16 +1,21 @@
 import argparse
-import csv
+import copy
+import gc
 import json
+import os
 import pickle
-from collections.abc import Iterator
 from pathlib import Path
-from typing import Optional
 
+import nltk
 import numpy as np
+import polars as pl
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from datasets import Dataset, load_dataset
+from transformers import AutoTokenizer
 
-from longbel.utils import add_headers_to_prompt
+from longbel.longbel import LongBEL
+from longbel.parse_data import parse_text_hybrid_long, parse_text_hybrid_short
+from longbel.trie import Trie
 
 
 def load_pickle(file_path: Path):
@@ -29,88 +34,6 @@ def make_folds(num_examples: int, num_folds: int, seed: int) -> list[np.ndarray]
     indices = np.arange(num_examples)
     rng.shuffle(indices)
     return list(np.array_split(indices, num_folds))
-
-
-def iter_batches(items: list[str], batch_size: int) -> Iterator[list[str]]:
-    for i in range(0, len(items), batch_size):
-        yield items[i : i + batch_size]
-
-
-def split_prefix_and_target(target: str, context_format: str) -> tuple[str, str, str]:
-    if context_format in ["short", "hybrid_medium"]:
-        parts = target.split("}", 1)
-        if len(parts) != 2:
-            raise ValueError(f"Unexpected target format for {context_format}: {target}")
-        prefix = parts[0] + "}"
-        return "", prefix, parts[1]
-
-    if context_format in ["hybrid_short", "hybrid_long"]:
-        lines = [line for line in target.split("\n") if line.strip()]
-        if not lines:
-            raise ValueError(f"Unexpected empty target for {context_format}: {target}")
-        previous = "\n".join(lines[:-1])
-        if previous:
-            previous += "\n"
-        current = lines[-1]
-        parts = current.split("}", 1)
-        if len(parts) != 2:
-            raise ValueError(f"Unexpected hybrid target format: {target}")
-        prefix = parts[0] + "}"
-        return previous, prefix, parts[1]
-
-    # long context: model predicts the full target sequence
-    return "", "", target
-
-
-def normalize_generated_suffix(generated_suffix: str, context_format: str) -> str:
-    cleaned = generated_suffix.strip()
-    if context_format in ["short", "hybrid_medium", "hybrid_short", "hybrid_long"]:
-        if "<SEP>" in cleaned:
-            cleaned = cleaned.split("<SEP>", 1)[0] + "<SEP>"
-        else:
-            cleaned = cleaned.splitlines()[0] if cleaned else ""
-            if cleaned:
-                cleaned += "<SEP>"
-    return cleaned
-
-
-def build_prompt(
-    source: str, target: str, context_format: str, add_headers: bool
-) -> tuple[str, str, str]:
-    previous, prefix, _ = split_prefix_and_target(target, context_format)
-
-    if add_headers:
-        prompt, _ = add_headers_to_prompt(source, target, context_format)
-    else:
-        prompt = source
-
-    return prompt, previous, prefix
-
-
-def build_predicted_target(
-    source: str,
-    gold_target: str,
-    generated_suffix: str,
-    context_format: str,
-    add_headers: bool,
-) -> str:
-    if not add_headers:
-        # When headers are disabled, training used full target completion.
-        return generated_suffix.strip()
-
-    if context_format == "long":
-        return generated_suffix.strip()
-
-    previous, prefix, _ = split_prefix_and_target(gold_target, context_format)
-    suffix = normalize_generated_suffix(generated_suffix, context_format)
-
-    if context_format in ["short", "hybrid_medium"]:
-        return prefix + suffix
-
-    if context_format in ["hybrid_short", "hybrid_long"]:
-        return previous + prefix + suffix
-
-    raise ValueError(f"Unsupported context format: {context_format}")
 
 
 def resolve_model_dir(
@@ -138,89 +61,217 @@ def resolve_model_dir(
     return model_dir
 
 
-def generate_predictions(
+def get_dataset_short_and_lang(dataset_name: str) -> tuple[str, str]:
+    if dataset_name == "MedMentions":
+        return "MM", "en"
+    if dataset_name in ["EMEA", "MEDLINE"]:
+        return "QUAERO", "fr"
+    if "SPACCC" in dataset_name:
+        return "SPACCC", "es"
+    return dataset_name, "en"
+
+
+def ensure_inference_resources(dataset_name: str, model_name: str):
+    dataset_short, _ = get_dataset_short_and_lang(dataset_name)
+
+    candidate_tries_folder = Path("data/candidate_tries")
+    candidate_tries_folder.mkdir(parents=True, exist_ok=True)
+    candidate_trie_path = (
+        candidate_tries_folder / f"trie_{dataset_short}_{model_name}.pkl"
+    )
+
+    text_to_codes_folder = Path("data/text_to_codes")
+    text_to_codes_folder.mkdir(parents=True, exist_ok=True)
+    text_to_code_path = text_to_codes_folder / f"text_to_code_{dataset_short}.json"
+
+    if candidate_trie_path.exists() and text_to_code_path.exists():
+        return text_to_code_path, candidate_trie_path
+
+    umls_path = (
+        Path("data") / "termino_processed" / dataset_short / "all_disambiguated.parquet"
+    )
+    umls_df = pl.read_parquet(umls_path)
+    umls_df = umls_df.with_columns(
+        pl.col("Entity")
+        .str.replace_all("\xa0", " ", literal=True)
+        .str.replace_all(r"[\{\[]", "(", literal=False)
+        .str.replace_all(r"[\}\]]", ")", literal=False)
+    )
+
+    if not text_to_code_path.exists():
+        code_col = "SNOMED_code" if "SNOMED_code" in umls_df.columns else "CUI"
+        result = umls_df.group_by("GROUP").agg([
+            pl.col("Entity"),
+            pl.col(code_col),
+        ])
+
+        text_to_code = {
+            row["GROUP"]: dict(zip(row["Entity"], row[code_col]))
+            for row in result.to_dicts()
+        }
+        with open(text_to_code_path, "w", encoding="utf-8") as f:
+            json.dump(text_to_code, f, ensure_ascii=False, indent=2)
+
+    if not candidate_trie_path.exists():
+        tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+        start_idx = 1
+        prefix = "} "
+        candidate_trie = {}
+        for group in umls_df["GROUP"].unique().to_list():  # type: ignore
+            group_umls_df = umls_df.filter(pl.col("GROUP") == group)  # type: ignore
+            sequences = []
+            for entity in group_umls_df["Entity"].to_list():
+                sequence = tokenizer.encode(prefix + entity)[start_idx:]
+                if sequence[-1] != tokenizer.eos_token_id:
+                    sequence.append(tokenizer.eos_token_id)
+                sequences.append(sequence)
+            candidate_trie[group] = Trie(sequences)
+
+        with open(candidate_trie_path, "wb") as file:
+            pickle.dump(candidate_trie, file, protocol=-1)
+
+    return text_to_code_path, candidate_trie_path
+
+
+def generate_predictions_bigbio(
     model_dir: Path,
-    sources: list[str],
-    targets: list[str],
+    dataset_name: str,
+    heldout_pages,
     context_format: str,
-    add_headers: bool,
     batch_size: int,
     num_beams: int,
-    max_new_tokens: int,
-) -> list[str]:
+) -> tuple[list[dict[str, object]], Dataset]:
     if not model_dir.exists():
         raise FileNotFoundError(f"Model checkpoint not found: {model_dir}")
 
+    _, lang = get_dataset_short_and_lang(dataset_name)
+    text_to_code_path, candidate_trie_path = ensure_inference_resources(
+        dataset_name,
+        model_dir.parent.name,
+    )
+    multiple_answers = dataset_name == "SPACCC"
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = (
+        LongBEL.from_pretrained(
+            str(model_dir),
+            lang=lang,
+            text_to_code_path=text_to_code_path,
+            candidate_trie_path=candidate_trie_path,
+        )
+        .eval()
+        .to(device)  # type: ignore
+    )
 
-    tokenizer = AutoTokenizer.from_pretrained(str(model_dir), use_fast=True)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "left"
+    preds = model.sample(  # type: ignore
+        bigbio_pages=heldout_pages,
+        batch_size=batch_size,
+        num_beams=num_beams,
+        constrained=True,
+        multiple_answers=multiple_answers,
+        context_format=context_format,
+    )
 
-    model = AutoModelForCausalLM.from_pretrained(
-        str(model_dir),
-        attn_implementation="flash_attention_2" if device == "cuda" else "eager",
-        dtype=torch.bfloat16 if device == "cuda" else torch.float32,
-    ).to(device)  # type: ignore
-    model.eval()
+    del model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
 
-    predictions: list[str] = []
+    top1_by_mention: dict[str, str] = {}
+    for row in preds:
+        rank = row.get("rank", 0)  # type: ignore
+        if rank != 1:
+            continue
+        mention_id = str(row.get("mention_id", ""))  # type: ignore
+        pred_name = str(row.get("pred_concept_name", ""))  # type: ignore
+        if mention_id:
+            top1_by_mention[mention_id] = pred_name
 
-    prompts = [
-        build_prompt(src, tgt, context_format=context_format, add_headers=add_headers)[
-            0
-        ]
-        for src, tgt in zip(sources, targets)
-    ]
+    heldout_pages_with_pred = []
+    for page in heldout_pages:
+        page_copy = copy.deepcopy(page)
+        entities = page_copy.get("entities", [])
+        for entity in entities:
+            mention_id = entity["id"]
+            pred_name = top1_by_mention.get(mention_id, "")
+            normalized = entity.get("normalized") or [{}]
+            normalized[0]["db_pred"] = pred_name
+            entity["normalized"] = normalized
 
-    for batch_start, prompt_batch in enumerate(iter_batches(prompts, batch_size)):
-        batch_gold_targets = targets[
-            batch_start * batch_size : batch_start * batch_size + len(prompt_batch)
-        ]
-        batch_sources = sources[
-            batch_start * batch_size : batch_start * batch_size + len(prompt_batch)
-        ]
+        page_copy["entities"] = entities
+        heldout_pages_with_pred.append(page_copy)
 
-        encoded = tokenizer(
-            prompt_batch,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            add_special_tokens=False,
-        ).to(device)
+    return preds, Dataset.from_list(heldout_pages_with_pred)  # type: ignore
 
-        with torch.no_grad():
-            outputs = model.generate(
-                input_ids=encoded["input_ids"],
-                attention_mask=encoded["attention_mask"],
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                num_beams=num_beams,
-                early_stopping=True,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-            )
 
-        input_lens = encoded["attention_mask"].sum(dim=1).tolist()
+def build_hybrid_short_training_pairs_from_predictions(
+    heldout_pages: Dataset,
+    dataset_name: str,
+) -> tuple[list[str], list[str], list[str], list[dict[str, str]]]:
+    if dataset_name == "MedMentions":
+        nlp = nltk.data.load("tokenizers/punkt/english.pickle")
+    elif dataset_name == "SPACCC":
+        nlp = nltk.data.load("tokenizers/punkt/spanish.pickle")
+    elif dataset_name in ["EMEA", "MEDLINE"]:
+        nlp = nltk.data.load("tokenizers/punkt/french.pickle")
+    else:
+        nlp = nltk.data.load("tokenizers/punkt/english.pickle")
 
-        for i, input_len in enumerate(input_lens):
-            generated_ids = outputs[i][int(input_len) :]
-            generated_suffix = tokenizer.decode(
-                generated_ids,
-                skip_special_tokens=True,
-                clean_up_tokenization_spaces=True,
-            )
-            pred_target = build_predicted_target(
-                source=batch_sources[i],
-                gold_target=batch_gold_targets[i],
-                generated_suffix=generated_suffix,
-                context_format=context_format,
-                add_headers=add_headers,
-            )
-            predictions.append(pred_target)
+    target_data: list[str] = []
+    target_pred_data: list[str] = []
+    source_data: list[str] = []
+    tsv_data: list[dict[str, str]] = []
+    for page in heldout_pages:
+        sources, targets, targets_pred, tsv_lines = parse_text_hybrid_short(  # type: ignore
+            data=page,
+            start_entity="[",
+            end_entity="]",
+            start_group="{",
+            end_group="}",
+            nlp=nlp,
+            train_mode=False,
+        )
+        target_data.extend(targets)
+        target_pred_data.extend(targets_pred)  # type: ignore
+        source_data.extend(sources)
+        tsv_data.extend(tsv_lines)
 
-    return predictions
+    return source_data, target_data, target_pred_data, tsv_data
+
+
+def build_hybrid_long_training_pairs_from_predictions(
+    heldout_pages: Dataset,
+    dataset_name: str,
+) -> tuple[list[str], list[str], list[str], list[dict[str, str]]]:
+    if dataset_name == "MedMentions":
+        nlp = nltk.data.load("tokenizers/punkt/english.pickle")
+    elif dataset_name == "SPACCC":
+        nlp = nltk.data.load("tokenizers/punkt/spanish.pickle")
+    elif dataset_name in ["EMEA", "MEDLINE"]:
+        nlp = nltk.data.load("tokenizers/punkt/french.pickle")
+    else:
+        nlp = nltk.data.load("tokenizers/punkt/english.pickle")
+
+    target_data: list[str] = []
+    target_pred_data: list[str] = []
+    source_data: list[str] = []
+    tsv_data: list[dict[str, str]] = []
+    for page in heldout_pages:
+        sources, targets, targets_pred, tsv_lines = parse_text_hybrid_long(  # type: ignore
+            data=page,
+            start_entity="[",
+            end_entity="]",
+            start_group="{",
+            end_group="}",
+            nlp=nlp,
+            train_mode=False,
+        )
+        target_data.extend(targets)
+        target_pred_data.extend(targets_pred)  # type: ignore
+        source_data.extend(sources)
+        tsv_data.extend(tsv_lines)
+
+    return source_data, target_data, target_pred_data, tsv_data
 
 
 def write_fold_training_commands(
@@ -229,7 +280,7 @@ def write_fold_training_commands(
     num_folds: int,
     fixed_validation_source_path: Path,
     fixed_validation_target_path: Path,
-    train_models_root: str,
+    models_root: str,
     model_name: str,
     lr: float,
     dataset_name: str,
@@ -295,7 +346,7 @@ def write_fold_training_commands(
             run_suffix,
             "--disable-validation-merge",
             "--models-root",
-            train_models_root,
+            models_root,
         ]
 
         if complete_mode:
@@ -330,7 +381,6 @@ def main(
     seed: int,
     complete_mode: bool,
     add_headers: bool,
-    train_models_root: str,
     generate_oof_predictions: bool,
     checkpoint_kind: str,
     models_root: str,
@@ -396,6 +446,20 @@ def main(
     merged_sources = train_sources + validation_train_sources
     merged_targets = train_targets + validation_train_targets
 
+    bigbio_processed_root = data_root / "bigbio_dataset"
+    if not bigbio_processed_root.exists():
+        raise FileNotFoundError(
+            f"BigBio processed dataset not found at {bigbio_processed_root}"
+        )
+    bigbio_train_pages_raw = load_dataset(
+        str(bigbio_processed_root),
+        data_dir="processed_data",
+        split="train",
+    )
+    if not isinstance(bigbio_train_pages_raw, Dataset):
+        raise TypeError("Expected a map-style Dataset for BigBio train split")
+    bigbio_train_pages = bigbio_train_pages_raw
+
     folds_root = (
         data_root
         / "oof"
@@ -409,6 +473,7 @@ def main(
     dump_pickle(validation_eval_targets, fixed_validation_target_path)
 
     folds = make_folds(len(merged_sources), num_folds=num_folds, seed=seed)
+    bigbio_folds = make_folds(len(bigbio_train_pages), num_folds=num_folds, seed=seed)
 
     all_indices = np.arange(len(merged_sources))
     fold_sizes = []
@@ -431,6 +496,14 @@ def main(
         dump_pickle(heldout_target, fold_dir / "heldout_target.pkl")
         dump_pickle(heldout_idx.tolist(), fold_dir / "heldout_indices.pkl")
 
+        bigbio_heldout_idx = bigbio_folds[fold_idx]
+        heldout_bigbio = bigbio_train_pages.select(bigbio_heldout_idx.tolist())
+        heldout_bigbio_path = fold_dir / "heldout_bigbio.parquet"
+        heldout_bigbio.to_parquet(str(heldout_bigbio_path))
+        dump_pickle(
+            bigbio_heldout_idx.tolist(), fold_dir / "heldout_bigbio_indices.pkl"
+        )
+
         fold_sizes.append({
             "fold": fold_idx,
             "train_size": int(len(train_idx)),
@@ -444,7 +517,7 @@ def main(
         num_folds=num_folds,
         fixed_validation_source_path=fixed_validation_source_path,
         fixed_validation_target_path=fixed_validation_target_path,
-        train_models_root=train_models_root,
+        models_root=models_root,
         model_name=model_name,
         lr=lr,
         dataset_name=dataset_name,
@@ -469,7 +542,9 @@ def main(
         "merged_pool_size": len(merged_sources),
         "fixed_validation_source_path": str(fixed_validation_source_path),
         "fixed_validation_target_path": str(fixed_validation_target_path),
-        "train_models_root": train_models_root,
+        "models_root": models_root,
+        "prediction_models_root": models_root,
+        "bigbio_train_pages": len(bigbio_train_pages),
         "fold_sizes": fold_sizes,
         "fold_slurm_scripts": [str(path) for path in fold_script_paths],
         "submit_all_script": str(submit_script_path),
@@ -477,14 +552,26 @@ def main(
 
     if generate_oof_predictions:
         models_root_path = Path(models_root)
-        predicted_targets: list[Optional[str]] = [None] * len(merged_sources)
+        all_constraint_dfs = []
+        all_hybrid_long_sources = []
+        all_hybrid_short_sources = []
+        all_hybrid_long_targets = []
+        all_hybrid_short_targets = []
+        all_hybrid_long_tsv_lines = []
+        all_hybrid_short_tsv_lines = []
         fold_reports = []
 
         for fold_idx in range(num_folds):
             fold_dir = folds_root / f"fold_{fold_idx}"
-            heldout_source = load_pickle(fold_dir / "heldout_source.pkl")
-            heldout_target = load_pickle(fold_dir / "heldout_target.pkl")
-            heldout_indices = load_pickle(fold_dir / "heldout_indices.pkl")
+            heldout_bigbio_path = fold_dir / "heldout_bigbio.parquet"
+            heldout_bigbio_raw = load_dataset(
+                "parquet",
+                data_files=str(heldout_bigbio_path),
+                split="train",
+            )
+            if not isinstance(heldout_bigbio_raw, Dataset):
+                raise TypeError("Expected a map-style Dataset for heldout BigBio split")
+            heldout_bigbio = heldout_bigbio_raw
 
             run_name_suffix = f"_fold{fold_idx}"
             model_dir = resolve_model_dir(
@@ -501,86 +588,145 @@ def main(
             )
 
             print(f"[Fold {fold_idx}] Loading model from: {model_dir}")
-            fold_predictions = generate_predictions(
+            fold_predictions, heldout_bigbio_with_pred = generate_predictions_bigbio(
                 model_dir=model_dir,
-                sources=heldout_source,
-                targets=heldout_target,
+                dataset_name=dataset_name,
+                heldout_pages=heldout_bigbio,
                 context_format=context_format,
-                add_headers=add_headers,
                 batch_size=batch_size,
                 num_beams=num_beams,
-                max_new_tokens=max_new_tokens,
             )
 
-            if len(fold_predictions) != len(heldout_indices):
-                raise RuntimeError(
-                    f"Fold {fold_idx} prediction size mismatch: {len(fold_predictions)} vs {len(heldout_indices)}"
-                )
+            heldout_bigbio_with_pred_path = (
+                fold_dir / "heldout_bigbio_with_pred.parquet"
+            )
+            heldout_bigbio_with_pred.to_parquet(str(heldout_bigbio_with_pred_path))
 
-            dump_pickle(fold_predictions, fold_dir / "heldout_pred_target.pkl")
+            fold_df = pl.DataFrame(fold_predictions).with_columns(
+                pl.lit(fold_idx).alias("fold")
+            )
+            fold_df = fold_df.sort(["mention_id", "rank"])
+            fold_out_path = fold_dir / f"pred_heldout_constraint_{num_beams}_beams.tsv"
+            fold_df.write_csv(
+                file=fold_out_path,
+                separator="\t",
+                include_header=True,
+            )
+            all_constraint_dfs.append(fold_df)
 
-            for idx, pred_target in zip(heldout_indices, fold_predictions):
-                predicted_targets[idx] = pred_target
+            (
+                hybrid_long_source_fold,
+                hybrid_long_target_fold,
+                hybrid_short_target_pred_fold,
+                tsv_lines_fold,
+            ) = build_hybrid_long_training_pairs_from_predictions(
+                heldout_pages=heldout_bigbio_with_pred,
+                dataset_name=dataset_name,
+            )
+            dump_pickle(
+                hybrid_long_source_fold,
+                fold_dir / "pred_hybrid_long_source.pkl",
+            )
+            dump_pickle(
+                hybrid_long_target_fold,
+                fold_dir / "pred_hybrid_long_target.pkl",
+            )
+            dump_pickle(
+                hybrid_short_target_pred_fold,
+                fold_dir / "pred_hybrid_short_target_pred.pkl",
+            )
+            # Save to csv tsv lines
+            pl.DataFrame(tsv_lines_fold).write_csv(
+                file=fold_dir / "pred_hybrid_long.tsv",
+                separator="\t",
+                include_header=True,
+            )
+            (
+                hybrid_short_source_fold,
+                hybrid_short_target_fold,
+                hybrid_short_target_pred_fold,
+                tsv_lines_short_fold,
+            ) = build_hybrid_short_training_pairs_from_predictions(
+                heldout_pages=heldout_bigbio_with_pred,
+                dataset_name=dataset_name,
+            )
+            dump_pickle(
+                hybrid_short_source_fold,
+                fold_dir / "pred_hybrid_short_source.pkl",
+            )
+            dump_pickle(
+                hybrid_short_target_fold,
+                fold_dir / "pred_hybrid_short_target.pkl",
+            )
+            dump_pickle(
+                hybrid_short_target_pred_fold,
+                fold_dir / "pred_hybrid_short_target_pred.pkl",
+            )
+            # Save to csv tsv lines
+            pl.DataFrame(tsv_lines_short_fold).write_csv(
+                file=fold_dir / "pred_hybrid_short.tsv",
+                separator="\t",
+                include_header=True,
+            )
+            all_hybrid_long_sources.extend(hybrid_long_source_fold)
+            all_hybrid_long_targets.extend(hybrid_long_target_fold)
+            all_hybrid_long_tsv_lines.extend(tsv_lines_fold)
+            all_hybrid_short_sources.extend(hybrid_short_source_fold)
+            all_hybrid_short_targets.extend(hybrid_short_target_fold)
+            all_hybrid_short_tsv_lines.extend(tsv_lines_short_fold)
 
             fold_reports.append({
                 "fold": fold_idx,
-                "heldout_size": len(heldout_indices),
+                "heldout_bigbio_pages": len(heldout_bigbio),
+                "predictions": len(fold_predictions),
                 "model_dir": str(model_dir),
+                "output_tsv": str(fold_out_path),
+                "heldout_bigbio_with_pred": str(heldout_bigbio_with_pred_path),
+                "hybrid_long_pairs": len(hybrid_long_source_fold),
+                "hybrid_short_pairs": len(hybrid_short_source_fold),
             })
 
-        missing = [i for i, value in enumerate(predicted_targets) if value is None]
-        if missing:
-            raise RuntimeError(f"Missing OOF predictions for {len(missing)} indices")
-
-        oof_source_path = (
-            data_root
-            / f"train_{selection_method}_source_{context_format}_oof{num_folds}.pkl"
+        hybrid_long_source_path = (
+            data_root / f"train_{selection_method}_source_hybrid_long_pred.pkl"
         )
-        oof_target_path = (
-            data_root
-            / f"train_{selection_method}_target_{context_format}_oof{num_folds}_pred.pkl"
+        hybrid_long_target_path = (
+            data_root / f"train_{selection_method}_target_hybrid_long_pred.pkl"
         )
-        oof_gold_target_path = (
-            data_root
-            / f"train_{selection_method}_target_{context_format}_oof{num_folds}_gold.pkl"
+        dump_pickle(all_hybrid_long_sources, hybrid_long_source_path)
+        dump_pickle(all_hybrid_long_targets, hybrid_long_target_path)
+        # Save to csv tsv lines
+        pl.DataFrame(all_hybrid_long_tsv_lines).write_csv(
+            file=data_root
+            / f"train_{selection_method}_annotations_hybrid_long_pred.tsv",
+            separator="\t",
+            include_header=True,
         )
-
-        dump_pickle(merged_sources, oof_source_path)
-        dump_pickle(predicted_targets, oof_target_path)
-        dump_pickle(merged_targets, oof_gold_target_path)
-
-        tsv_path = (
-            data_root
-            / f"train_{selection_method}_{context_format}_oof{num_folds}_predictions.tsv"
+        hybrid_short_source_path = (
+            data_root / f"train_{selection_method}_source_hybrid_short_pred.pkl"
         )
-        with open(tsv_path, "w", encoding="utf-8", newline="") as file:
-            writer = csv.DictWriter(
-                file,
-                fieldnames=["index", "source", "gold_target", "pred_target"],
-                delimiter="\t",
-            )
-            writer.writeheader()
-            for idx, (src, gold, pred) in enumerate(
-                zip(merged_sources, merged_targets, predicted_targets)
-            ):
-                writer.writerow({
-                    "index": idx,
-                    "source": src,
-                    "gold_target": gold,
-                    "pred_target": pred,
-                })
-
+        hybrid_short_target_path = (
+            data_root / f"train_{selection_method}_target_hybrid_short_pred.pkl"
+        )
+        dump_pickle(all_hybrid_short_sources, hybrid_short_source_path)
+        dump_pickle(all_hybrid_short_targets, hybrid_short_target_path)
+        # Save to csv tsv lines
+        pl.DataFrame(all_hybrid_short_tsv_lines).write_csv(
+            file=data_root
+            / f"train_{selection_method}_annotations_hybrid_short_pred.tsv",
+            separator="\t",
+            include_header=True,
+        )
         metadata["oof_prediction"] = {
+            "mode": "bigbio_longbel_sample_constrained",
             "checkpoint_kind": checkpoint_kind,
             "batch_size": batch_size,
             "num_beams": num_beams,
-            "max_new_tokens": max_new_tokens,
             "models_root": str(models_root_path),
             "fold_reports": fold_reports,
-            "oof_source_path": str(oof_source_path),
-            "oof_target_path": str(oof_target_path),
-            "oof_gold_target_path": str(oof_gold_target_path),
-            "tsv_path": str(tsv_path),
+            "hybrid_long_source_path": str(hybrid_long_source_path),
+            "hybrid_long_target_path": str(hybrid_long_target_path),
+            "hybrid_short_source_path": str(hybrid_short_source_path),
+            "hybrid_short_target_path": str(hybrid_short_target_path),
         }
 
     metadata_path = folds_root / "metadata.json"
@@ -693,10 +839,9 @@ if __name__ == "__main__":
         seed=args.seed,
         complete_mode=args.complete_mode,
         add_headers=args.add_headers,
-        train_models_root=args.train_models_root,
         generate_oof_predictions=args.generate_oof_predictions,
         checkpoint_kind=args.checkpoint_kind,
-        models_root=args.models_root,
+        models_root=os.path.expandvars(args.models_root),
         batch_size=args.batch_size,
         num_beams=args.num_beams,
         max_new_tokens=args.max_new_tokens,

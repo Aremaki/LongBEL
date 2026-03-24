@@ -328,16 +328,16 @@ def parse_text(
 
                     # Define entity group
                     entity_type = entity.get("type")
-                    groups = code_to_group.get(normalized_id, [])
+                    groups = code_to_group.get(normalized_id, [])  # type: ignore
                     if len(groups) == 1:
                         group = groups[0]
                     else:
-                        if entity_type in cat_to_group.values():
+                        if entity_type in cat_to_group.values():  # type: ignore
                             group = entity_type
-                        elif entity_type in cat_to_group.keys():
-                            group = cat_to_group[entity_type]
-                        elif entity_type in sem_to_group.keys():
-                            group = sem_to_group[entity_type]
+                        elif entity_type in cat_to_group.keys():  # type: ignore
+                            group = cat_to_group[entity_type]  # type: ignore
+                        elif entity_type in sem_to_group.keys():  # type: ignore
+                            group = sem_to_group[entity_type]  # type: ignore
                         else:
                             group = "Unknown"
                             logging.info(
@@ -420,11 +420,11 @@ def parse_text(
                     "start_span": global_start,
                     "end_span": global_end,
                     "mention": entity_text,
-                    "gold_concept_code": "+".join(normalized_ids),
+                    "gold_concept_code": "+".join(normalized_ids),  # type: ignore
                     "semantic_rel": "EXACT"
-                    if len(normalized_ids) == 1
+                    if len(normalized_ids) == 1  # type: ignore
                     else "COMPOSITE",
-                    "gold_concept_name": annotation,
+                    "gold_concept_name": annotation,  # type: ignore
                     "sentence": marked_sent_text,
                 }
             else:
@@ -450,7 +450,7 @@ def parse_text(
             )
             if train_mode:
                 target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {annotation}"
+                    f"{target_entity_text} {annotation}"  # type: ignore
                 )
             else:
                 target_texts_dict[(global_start, global_end)] = target_entity_text
@@ -496,6 +496,7 @@ def parse_text_hybrid_long(
     target_text: str = ""
     tsv_lines: list[dict[str, str]] = []
     target_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
+    target_texts_dict_pred: dict[tuple[tuple[int, int], ...], str] = {}
     source_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
     tsv_lines_dict: dict[tuple[tuple[int, int], ...], dict[str, str]] = {}
     all_passages = {}
@@ -616,16 +617,16 @@ def parse_text_hybrid_long(
 
                     # Define entity group
                     entity_type = entity.get("type")
-                    groups = code_to_group.get(normalized_id, [])
+                    groups = code_to_group.get(normalized_id, [])  # type: ignore
                     if len(groups) == 1:
                         group = groups[0]
                     else:
-                        if entity_type in cat_to_group.values():
+                        if entity_type in cat_to_group.values():  # type: ignore
                             group = entity_type
-                        elif entity_type in cat_to_group.keys():
-                            group = cat_to_group[entity_type]
-                        elif entity_type in sem_to_group.keys():
-                            group = sem_to_group[entity_type]
+                        elif entity_type in cat_to_group.keys():  # type: ignore
+                            group = cat_to_group[entity_type]  # type: ignore
+                        elif entity_type in sem_to_group.keys():  # type: ignore
+                            group = sem_to_group[entity_type]  # type: ignore
                         else:
                             group = "Unknown"
                             logging.info(
@@ -656,6 +657,8 @@ def parse_text_hybrid_long(
             else:
                 # Define entity group
                 group_annotation = entity.get("type")
+                gold_annotation = entity.get("normalized", [{}])[0].get("db_match", "")
+                pred_annotation = entity.get("normalized", [{}])[0].get("db_pred", "")
 
             # Get all offsets, convert to relative, and filter for this sentence
             relative_entity_spans = []
@@ -693,11 +696,11 @@ def parse_text_hybrid_long(
                     "start_span": global_start,
                     "end_span": global_end,
                     "mention": entity_text,
-                    "gold_concept_code": "+".join(normalized_ids),
+                    "gold_concept_code": "+".join(normalized_ids),  # type: ignore
                     "semantic_rel": "EXACT"
-                    if len(normalized_ids) == 1
+                    if len(normalized_ids) == 1  # type: ignore
                     else "COMPOSITE",
-                    "gold_concept_name": annotation,
+                    "gold_concept_name": annotation,  # type: ignore
                 }
             else:
                 tsv_line = {
@@ -722,25 +725,36 @@ def parse_text_hybrid_long(
             )
             if train_mode:
                 target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {annotation}\n"
+                    f"{target_entity_text} {annotation}\n"  # type: ignore
                 )
             else:
-                target_texts_dict[(global_start, global_end)] = target_entity_text
+                if gold_annotation and pred_annotation:  # type: ignore
+                    target_texts_dict[(global_start, global_end)] = (
+                        f"{target_entity_text} {gold_annotation}\n"  # type: ignore
+                    )
+                    target_texts_dict_pred[(global_start, global_end)] = (
+                        f"{target_entity_text} {pred_annotation}\n"  # type: ignore
+                    )
+                else:
+                    target_texts_dict[(global_start, global_end)] = target_entity_text
     # Sort keys to have a deterministic order
     target_texts = []
+    target_pred_texts = []
     sorted_keys = sorted(tsv_lines_dict.keys(), key=lambda x: (x[0], x[1]))
     for entity_id, entity_span in enumerate(sorted_keys):
         tsv_line = tsv_lines_dict[entity_span]
         source_sentences.append(source_texts_dict[entity_span])
         target_text += target_texts_dict[entity_span]
         target_sentences.append(target_text)
+        if target_texts_dict_pred:
+            target_pred_texts.append(target_texts_dict_pred[entity_span])
         target_texts.append(target_texts_dict[entity_span])
         tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
     if train_mode:
         return source_sentences, target_sentences, tsv_lines
     else:
-        return source_sentences, target_texts, tsv_lines
+        return source_sentences, target_texts, target_pred_texts, tsv_lines  # type: ignore
 
 
 def parse_text_hybrid_short(
@@ -774,6 +788,7 @@ def parse_text_hybrid_short(
     target_text: str = ""
     tsv_lines: list[dict[str, str]] = []
     target_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
+    target_texts_dict_pred: dict[tuple[tuple[int, int], ...], str] = {}
     source_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
     tsv_lines_dict: dict[tuple[tuple[int, int], ...], dict[str, str]] = {}
     all_annotations = {}
@@ -912,16 +927,16 @@ def parse_text_hybrid_short(
 
                     # Define entity group
                     entity_type = entity.get("type")
-                    groups = code_to_group.get(normalized_id, [])
+                    groups = code_to_group.get(normalized_id, [])  # type: ignore
                     if len(groups) == 1:
                         group = groups[0]
                     else:
-                        if entity_type in cat_to_group.values():
+                        if entity_type in cat_to_group.values():  # type: ignore
                             group = entity_type
-                        elif entity_type in cat_to_group.keys():
-                            group = cat_to_group[entity_type]
-                        elif entity_type in sem_to_group.keys():
-                            group = sem_to_group[entity_type]
+                        elif entity_type in cat_to_group.keys():  # type: ignore
+                            group = cat_to_group[entity_type]  # type: ignore
+                        elif entity_type in sem_to_group.keys():  # type: ignore
+                            group = sem_to_group[entity_type]  # type: ignore
                         else:
                             group = "Unknown"
                             logging.info(
@@ -951,6 +966,8 @@ def parse_text_hybrid_short(
                 annotation = "<+>".join(annotations)
             else:
                 group_annotation = entity.get("type")
+                gold_annotation = entity.get("normalized", [{}])[0].get("db_match", "")
+                pred_annotation = entity.get("normalized", [{}])[0].get("db_pred", "")
 
             # Find the sentence that contains the entity start
             sent_text = passage_text
@@ -1001,11 +1018,11 @@ def parse_text_hybrid_short(
                     "start_span": global_start,
                     "end_span": global_end,
                     "mention": entity_text,
-                    "gold_concept_code": "+".join(normalized_ids),
+                    "gold_concept_code": "+".join(normalized_ids),  # type: ignore
                     "semantic_rel": "EXACT"
-                    if len(normalized_ids) == 1
+                    if len(normalized_ids) == 1  # type: ignore
                     else "COMPOSITE",
-                    "gold_concept_name": annotation,
+                    "gold_concept_name": annotation,  # type: ignore
                     "sentence": marked_sent_text,
                 }
             else:
@@ -1031,25 +1048,36 @@ def parse_text_hybrid_short(
             )
             if train_mode:
                 target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {annotation}\n"
+                    f"{target_entity_text} {annotation}\n"  # type: ignore
                 )
             else:
-                target_texts_dict[(global_start, global_end)] = target_entity_text
+                if gold_annotation and pred_annotation:  # type: ignore
+                    target_texts_dict[(global_start, global_end)] = (
+                        f"{target_entity_text} {gold_annotation}\n"  # type: ignore
+                    )
+                    target_texts_dict_pred[(global_start, global_end)] = (
+                        f"{target_entity_text} {pred_annotation}\n"  # type: ignore
+                    )
+                else:
+                    target_texts_dict[(global_start, global_end)] = target_entity_text
     # Sort keys to have a deterministic order
     target_texts = []
+    target_pred_texts = []
     sorted_keys = sorted(tsv_lines_dict.keys(), key=lambda x: (x[0], x[1]))
     for entity_id, entity_span in enumerate(sorted_keys):
         tsv_line = tsv_lines_dict[entity_span]
         source_sentences.append(source_texts_dict[entity_span])
         target_text += target_texts_dict[entity_span]
         target_sentences.append(target_text)
+        if target_texts_dict_pred:
+            target_pred_texts.append(target_texts_dict_pred[entity_span])
         target_texts.append(target_texts_dict[entity_span])
         tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
     if train_mode:
         return source_sentences, target_sentences, tsv_lines
     else:
-        return source_sentences, target_texts, tsv_lines
+        return source_sentences, target_texts, target_pred_texts, tsv_lines  # type: ignore
 
 
 def parse_text_hybrid_medium(
@@ -1202,16 +1230,16 @@ def parse_text_hybrid_medium(
 
                     # Define entity group
                     entity_type = entity.get("type")
-                    groups = code_to_group.get(normalized_id, [])
+                    groups = code_to_group.get(normalized_id, [])  # type: ignore
                     if len(groups) == 1:
                         group = groups[0]
                     else:
-                        if entity_type in cat_to_group.values():
+                        if entity_type in cat_to_group.values():  # type: ignore
                             group = entity_type
-                        elif entity_type in cat_to_group.keys():
-                            group = cat_to_group[entity_type]
-                        elif entity_type in sem_to_group.keys():
-                            group = sem_to_group[entity_type]
+                        elif entity_type in cat_to_group.keys():  # type: ignore
+                            group = cat_to_group[entity_type]  # type: ignore
+                        elif entity_type in sem_to_group.keys():  # type: ignore
+                            group = sem_to_group[entity_type]  # type: ignore
                         else:
                             group = "Unknown"
                             logging.info(
@@ -1279,11 +1307,11 @@ def parse_text_hybrid_medium(
                     "start_span": global_start,
                     "end_span": global_end,
                     "mention": entity_text,
-                    "gold_concept_code": "+".join(normalized_ids),
+                    "gold_concept_code": "+".join(normalized_ids),  # type: ignore
                     "semantic_rel": "EXACT"
-                    if len(normalized_ids) == 1
+                    if len(normalized_ids) == 1  # type: ignore
                     else "COMPOSITE",
-                    "gold_concept_name": annotation,
+                    "gold_concept_name": annotation,  # type: ignore
                 }
             else:
                 tsv_line = {
@@ -1308,7 +1336,7 @@ def parse_text_hybrid_medium(
             )
             if train_mode:
                 target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {annotation}"
+                    f"{target_entity_text} {annotation}"  # type: ignore
                 )
             else:
                 target_texts_dict[(global_start, global_end)] = target_entity_text
@@ -1475,16 +1503,16 @@ def parse_text_long(
 
                     # Define entity group
                     entity_type = entity.get("type")
-                    groups = code_to_group.get(normalized_id, [])
+                    groups = code_to_group.get(normalized_id, [])  # type: ignore
                     if len(groups) == 1:
                         group = groups[0]
                     else:
-                        if entity_type in cat_to_group.values():
+                        if entity_type in cat_to_group.values():  # type: ignore
                             group = entity_type
-                        elif entity_type in cat_to_group.keys():
-                            group = cat_to_group[entity_type]
-                        elif entity_type in sem_to_group.keys():
-                            group = sem_to_group[entity_type]
+                        elif entity_type in cat_to_group.keys():  # type: ignore
+                            group = cat_to_group[entity_type]  # type: ignore
+                        elif entity_type in sem_to_group.keys():  # type: ignore
+                            group = sem_to_group[entity_type]  # type: ignore
                         else:
                             group = "Unknown"
                             logging.info(
@@ -1530,11 +1558,11 @@ def parse_text_long(
                     "start_span": global_start,
                     "end_span": global_end,
                     "mention": entity_text,
-                    "gold_concept_code": "+".join(normalized_ids),
+                    "gold_concept_code": "+".join(normalized_ids),  # type: ignore
                     "semantic_rel": "EXACT"
-                    if len(normalized_ids) == 1
+                    if len(normalized_ids) == 1  # type: ignore
                     else "COMPOSITE",
-                    "gold_concept_name": annotation,
+                    "gold_concept_name": annotation,  # type: ignore
                 }
             else:
                 tsv_line = {
@@ -1558,7 +1586,7 @@ def parse_text_long(
             )
             if train_mode:
                 target_texts_dict[(global_start, global_end)] = (
-                    f"{target_entity_text} {annotation}<SEP>"
+                    f"{target_entity_text} {annotation}<SEP>"  # type: ignore
                 )
             else:
                 target_texts_dict[(global_start, global_end)] = target_entity_text
@@ -1585,7 +1613,7 @@ def parse_text_long(
     if train_mode:
         return source_text, target_text, tsv_lines, passages, db_name
     else:
-        return source_texts, target_texts, tsv_lines
+        return source_texts, target_texts, tsv_lines  # type: ignore
 
 
 def process_bigbio_dataset(

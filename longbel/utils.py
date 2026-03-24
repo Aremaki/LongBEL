@@ -46,9 +46,9 @@ def convert_tsv_as_bigbio(
         }
 
         entities = []
-        for i, record in enumerate(group.to_dicts()):
+        for record in group.to_dicts():
             entity = {
-                "id": f"{doc_id[0]}_T{i}",
+                "id": record["mention_id"],
                 "text": [record["mention"]],
                 "offsets": [[int(record["start_span"]), int(record["end_span"])]],
                 "type": record["semantic_group"],
