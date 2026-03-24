@@ -177,15 +177,16 @@ def generate_predictions_bigbio(
         torch.cuda.empty_cache()
     gc.collect()
 
-    top1_by_mention: dict[str, str] = {}
+    top1_by_mention: dict[str, tuple[str, str]] = {}
     for row in preds:
         rank = row.get("rank", 0)  # type: ignore
         if rank != 1:
             continue
         mention_id = str(row.get("mention_id", ""))  # type: ignore
         pred_name = str(row.get("pred_concept_name", ""))  # type: ignore
+        pred_code = str(row.get("pred_concept_code", ""))  # type: ignore
         if mention_id:
-            top1_by_mention[mention_id] = pred_name
+            top1_by_mention[mention_id] = (pred_name, pred_code)
 
     heldout_pages_with_pred = []
     for page in heldout_pages:
@@ -193,9 +194,10 @@ def generate_predictions_bigbio(
         entities = page_copy.get("entities", [])
         for entity in entities:
             mention_id = entity["id"]
-            pred_name = top1_by_mention.get(mention_id, "")
+            pred_name, pred_code = top1_by_mention.get(mention_id, ("", ""))
             normalized = entity.get("normalized") or [{}]
-            normalized[0]["db_pred"] = pred_name
+            normalized[0]["db_pred_match"] = pred_name
+            normalized[0]["db_pred_id"] = pred_code
             entity["normalized"] = normalized
 
         page_copy["entities"] = entities

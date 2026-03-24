@@ -664,7 +664,10 @@ def parse_text_hybrid_long(
                         "db_match", ""
                     )
                     pred_annotation = entity.get("normalized", [{}])[0].get(
-                        "db_pred", ""
+                        "db_pred_match", ""
+                    )
+                    pred_concept_code = entity.get("normalized", [{}])[0].get(
+                        "db_pred_id", ""
                     )
 
             # Get all offsets, convert to relative, and filter for this sentence
@@ -720,6 +723,10 @@ def parse_text_hybrid_long(
                 if entity.get("normalized"):
                     tsv_line["gold_concept_code"] = entity["normalized"][0]["db_id"]
                     tsv_line["gold_concept_name"] = entity["normalized"][0]["db_match"]
+                if train_mode_pred:
+                    tsv_line["pred_concept_code"] = pred_concept_code  # type: ignore
+                    tsv_line["pred_concept_name"] = pred_annotation  # type: ignore
+
             tsv_lines_dict[(global_start, global_end)] = tsv_line
             source_texts_dict[(global_start, global_end)] = marked_text
             target_entity_text = (
@@ -989,7 +996,10 @@ def parse_text_hybrid_short(
                         "db_match", ""
                     )
                     pred_annotation = entity.get("normalized", [{}])[0].get(
-                        "db_pred", ""
+                        "db_pred_match", ""
+                    )
+                    pred_concept_code = entity.get("normalized", [{}])[0].get(
+                        "db_pred_id", ""
                     )
 
             # Find the sentence that contains the entity start
@@ -1059,6 +1069,9 @@ def parse_text_hybrid_short(
                 if entity.get("normalized"):
                     tsv_line["gold_concept_code"] = entity["normalized"][0]["db_id"]
                     tsv_line["gold_concept_name"] = entity["normalized"][0]["db_match"]
+                if train_mode_pred:
+                    tsv_line["pred_concept_code"] = pred_concept_code  # type: ignore
+                    tsv_line["pred_concept_name"] = pred_annotation  # type: ignore
             tsv_lines_dict[(global_start, global_end)] = tsv_line
             source_texts_dict[(global_start, global_end)] = marked_sent_text
             target_entity_text = (
@@ -1075,13 +1088,12 @@ def parse_text_hybrid_short(
                 )
             else:
                 if train_mode_pred:
-                    if gold_annotation and pred_annotation:  # type: ignore
-                        target_texts_dict[(global_start, global_end)] = (
-                            f"{target_entity_text} {gold_annotation}\n"  # type: ignore
-                        )
-                        target_texts_dict_pred[(global_start, global_end)] = (
-                            f"{target_entity_text} {pred_annotation}\n"  # type: ignore
-                        )
+                    target_texts_dict[(global_start, global_end)] = (
+                        f"{target_entity_text} {gold_annotation}\n"  # type: ignore
+                    )
+                    target_texts_dict_pred[(global_start, global_end)] = (
+                        f"{target_entity_text} {pred_annotation}\n"  # type: ignore
+                    )
                 else:
                     target_texts_dict[(global_start, global_end)] = target_entity_text
     # Sort keys to have a deterministic order
