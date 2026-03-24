@@ -482,7 +482,8 @@ def parse_text_hybrid_long(
     encoder: Optional[TextEncoder] = None,
     tfidf_vectorizer=None,
     best_syn_map: Optional[dict[tuple[str, str], str]] = None,
-    train_mode: bool = False,
+    train_mode: bool = True,
+    train_mode_pred: bool = False,
 ) -> tuple[list[str], list[str], list[dict[str, str]]]:
     """Create simple (source, target) pairs per entity.
 
@@ -494,6 +495,7 @@ def parse_text_hybrid_long(
     source_sentences: list[str] = []
     target_sentences: list[str] = []
     target_text: str = ""
+    target_pred_text: str = ""
     tsv_lines: list[dict[str, str]] = []
     target_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
     target_texts_dict_pred: dict[tuple[tuple[int, int], ...], str] = {}
@@ -657,8 +659,13 @@ def parse_text_hybrid_long(
             else:
                 # Define entity group
                 group_annotation = entity.get("type")
-                gold_annotation = entity.get("normalized", [{}])[0].get("db_match", "")
-                pred_annotation = entity.get("normalized", [{}])[0].get("db_pred", "")
+                if train_mode_pred:
+                    gold_annotation = entity.get("normalized", [{}])[0].get(
+                        "db_match", ""
+                    )
+                    pred_annotation = entity.get("normalized", [{}])[0].get(
+                        "db_pred", ""
+                    )
 
             # Get all offsets, convert to relative, and filter for this sentence
             relative_entity_spans = []
@@ -728,7 +735,7 @@ def parse_text_hybrid_long(
                     f"{target_entity_text} {annotation}\n"  # type: ignore
                 )
             else:
-                if gold_annotation and pred_annotation:  # type: ignore
+                if train_mode_pred:  # type: ignore
                     target_texts_dict[(global_start, global_end)] = (
                         f"{target_entity_text} {gold_annotation}\n"  # type: ignore
                     )
@@ -739,22 +746,31 @@ def parse_text_hybrid_long(
                     target_texts_dict[(global_start, global_end)] = target_entity_text
     # Sort keys to have a deterministic order
     target_texts = []
-    target_pred_texts = []
     sorted_keys = sorted(tsv_lines_dict.keys(), key=lambda x: (x[0], x[1]))
     for entity_id, entity_span in enumerate(sorted_keys):
         tsv_line = tsv_lines_dict[entity_span]
-        source_sentences.append(source_texts_dict[entity_span])
-        target_text += target_texts_dict[entity_span]
-        target_sentences.append(target_text)
-        if target_texts_dict_pred:
-            target_pred_texts.append(target_texts_dict_pred[entity_span])
-        target_texts.append(target_texts_dict[entity_span])
         tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
+        source_sentences.append(source_texts_dict[entity_span])
+        if train_mode:
+            target_text += target_texts_dict[entity_span]
+            target_sentences.append(target_text)
+        else:
+            if train_mode_pred:
+                target_sentences.append(
+                    target_pred_text + target_texts_dict[entity_span]
+                )
+                target_pred_text += target_texts_dict_pred[entity_span]
+            else:
+                target_texts.append(target_texts_dict[entity_span])
+
     if train_mode:
         return source_sentences, target_sentences, tsv_lines
     else:
-        return source_sentences, target_texts, target_pred_texts, tsv_lines  # type: ignore
+        if train_mode_pred:
+            return source_sentences, target_sentences, tsv_lines  # type: ignore
+        else:
+            return source_sentences, target_texts, tsv_lines  # type: ignore
 
 
 def parse_text_hybrid_short(
@@ -775,6 +791,7 @@ def parse_text_hybrid_short(
     tfidf_vectorizer=None,
     best_syn_map: Optional[dict[tuple[str, str], str]] = None,
     train_mode: bool = True,
+    train_mode_pred: bool = False,
 ) -> tuple[list[str], list[str], list[dict[str, str]]]:
     """Create simple (source, target) pairs per entity.
 
@@ -786,6 +803,7 @@ def parse_text_hybrid_short(
     source_sentences: list[str] = []
     target_sentences: list[str] = []
     target_text: str = ""
+    target_pred_text: str = ""
     tsv_lines: list[dict[str, str]] = []
     target_texts_dict: dict[tuple[tuple[int, int], ...], str] = {}
     target_texts_dict_pred: dict[tuple[tuple[int, int], ...], str] = {}
@@ -966,8 +984,13 @@ def parse_text_hybrid_short(
                 annotation = "<+>".join(annotations)
             else:
                 group_annotation = entity.get("type")
-                gold_annotation = entity.get("normalized", [{}])[0].get("db_match", "")
-                pred_annotation = entity.get("normalized", [{}])[0].get("db_pred", "")
+                if train_mode_pred:
+                    gold_annotation = entity.get("normalized", [{}])[0].get(
+                        "db_match", ""
+                    )
+                    pred_annotation = entity.get("normalized", [{}])[0].get(
+                        "db_pred", ""
+                    )
 
             # Find the sentence that contains the entity start
             sent_text = passage_text
@@ -1051,33 +1074,43 @@ def parse_text_hybrid_short(
                     f"{target_entity_text} {annotation}\n"  # type: ignore
                 )
             else:
-                if gold_annotation and pred_annotation:  # type: ignore
-                    target_texts_dict[(global_start, global_end)] = (
-                        f"{target_entity_text} {gold_annotation}\n"  # type: ignore
-                    )
-                    target_texts_dict_pred[(global_start, global_end)] = (
-                        f"{target_entity_text} {pred_annotation}\n"  # type: ignore
-                    )
+                if train_mode_pred:
+                    if gold_annotation and pred_annotation:  # type: ignore
+                        target_texts_dict[(global_start, global_end)] = (
+                            f"{target_entity_text} {gold_annotation}\n"  # type: ignore
+                        )
+                        target_texts_dict_pred[(global_start, global_end)] = (
+                            f"{target_entity_text} {pred_annotation}\n"  # type: ignore
+                        )
                 else:
                     target_texts_dict[(global_start, global_end)] = target_entity_text
     # Sort keys to have a deterministic order
     target_texts = []
-    target_pred_texts = []
     sorted_keys = sorted(tsv_lines_dict.keys(), key=lambda x: (x[0], x[1]))
     for entity_id, entity_span in enumerate(sorted_keys):
         tsv_line = tsv_lines_dict[entity_span]
-        source_sentences.append(source_texts_dict[entity_span])
-        target_text += target_texts_dict[entity_span]
-        target_sentences.append(target_text)
-        if target_texts_dict_pred:
-            target_pred_texts.append(target_texts_dict_pred[entity_span])
-        target_texts.append(target_texts_dict[entity_span])
         tsv_line["mention_id"] = f"{data.get('id', '')}.{entity_id + 1}"
         tsv_lines.append(tsv_line)
+        source_sentences.append(source_texts_dict[entity_span])
+        if train_mode:
+            target_text += target_texts_dict[entity_span]
+            target_sentences.append(target_text)
+        else:
+            if train_mode_pred:
+                target_sentences.append(
+                    target_pred_text + target_texts_dict[entity_span]
+                )
+                target_pred_text += target_texts_dict_pred[entity_span]
+            else:
+                target_texts.append(target_texts_dict[entity_span])
+
     if train_mode:
         return source_sentences, target_sentences, tsv_lines
     else:
-        return source_sentences, target_texts, target_pred_texts, tsv_lines  # type: ignore
+        if train_mode_pred:
+            return source_sentences, target_sentences, tsv_lines
+        else:
+            return source_sentences, target_texts, tsv_lines
 
 
 def parse_text_hybrid_medium(
@@ -1097,7 +1130,7 @@ def parse_text_hybrid_medium(
     encoder: Optional[TextEncoder] = None,
     tfidf_vectorizer=None,
     best_syn_map: Optional[dict[tuple[str, str], str]] = None,
-    train_mode: bool = False,
+    train_mode: bool = True,
 ) -> tuple[list[str], list[str], list[dict[str, str]]]:
     """Create simple (source, target) pairs per entity.
 

@@ -207,7 +207,7 @@ def generate_predictions_bigbio(
 def build_hybrid_short_training_pairs_from_predictions(
     heldout_pages: Dataset,
     dataset_name: str,
-) -> tuple[list[str], list[str], list[str], list[dict[str, str]]]:
+) -> tuple[list[str], list[str], list[dict[str, str]]]:
     if dataset_name == "MedMentions":
         nlp = nltk.data.load("tokenizers/punkt/english.pickle")
     elif dataset_name == "SPACCC":
@@ -218,11 +218,10 @@ def build_hybrid_short_training_pairs_from_predictions(
         nlp = nltk.data.load("tokenizers/punkt/english.pickle")
 
     target_data: list[str] = []
-    target_pred_data: list[str] = []
     source_data: list[str] = []
     tsv_data: list[dict[str, str]] = []
     for page in heldout_pages:
-        sources, targets, targets_pred, tsv_lines = parse_text_hybrid_short(  # type: ignore
+        sources, targets, tsv_lines = parse_text_hybrid_short(  # type: ignore
             data=page,
             start_entity="[",
             end_entity="]",
@@ -230,19 +229,19 @@ def build_hybrid_short_training_pairs_from_predictions(
             end_group="}",
             nlp=nlp,
             train_mode=False,
+            train_mode_pred=True,
         )
         target_data.extend(targets)
-        target_pred_data.extend(targets_pred)  # type: ignore
         source_data.extend(sources)
         tsv_data.extend(tsv_lines)
 
-    return source_data, target_data, target_pred_data, tsv_data
+    return source_data, target_data, tsv_data
 
 
 def build_hybrid_long_training_pairs_from_predictions(
     heldout_pages: Dataset,
     dataset_name: str,
-) -> tuple[list[str], list[str], list[str], list[dict[str, str]]]:
+) -> tuple[list[str], list[str], list[dict[str, str]]]:
     if dataset_name == "MedMentions":
         nlp = nltk.data.load("tokenizers/punkt/english.pickle")
     elif dataset_name == "SPACCC":
@@ -253,11 +252,10 @@ def build_hybrid_long_training_pairs_from_predictions(
         nlp = nltk.data.load("tokenizers/punkt/english.pickle")
 
     target_data: list[str] = []
-    target_pred_data: list[str] = []
     source_data: list[str] = []
     tsv_data: list[dict[str, str]] = []
     for page in heldout_pages:
-        sources, targets, targets_pred, tsv_lines = parse_text_hybrid_long(  # type: ignore
+        sources, targets, tsv_lines = parse_text_hybrid_long(  # type: ignore
             data=page,
             start_entity="[",
             end_entity="]",
@@ -265,13 +263,13 @@ def build_hybrid_long_training_pairs_from_predictions(
             end_group="}",
             nlp=nlp,
             train_mode=False,
+            train_mode_pred=True,
         )
         target_data.extend(targets)
-        target_pred_data.extend(targets_pred)  # type: ignore
         source_data.extend(sources)
         tsv_data.extend(tsv_lines)
 
-    return source_data, target_data, target_pred_data, tsv_data
+    return source_data, target_data, tsv_data
 
 
 def write_fold_training_commands(
@@ -557,8 +555,6 @@ def main(
         all_hybrid_short_sources = []
         all_hybrid_long_targets = []
         all_hybrid_short_targets = []
-        all_hybrid_long_target_preds = []
-        all_hybrid_short_target_preds = []
         all_hybrid_long_tsv_lines = []
         all_hybrid_short_tsv_lines = []
         fold_reports = []
@@ -650,7 +646,6 @@ def main(
             (
                 hybrid_long_source_fold,
                 hybrid_long_target_fold,
-                hybrid_long_target_pred_fold,
                 tsv_lines_fold,
             ) = build_hybrid_long_training_pairs_from_predictions(
                 heldout_pages=heldout_bigbio_with_pred,
@@ -664,10 +659,6 @@ def main(
                 hybrid_long_target_fold,
                 fold_dir / "pred_hybrid_long_target.pkl",
             )
-            dump_pickle(
-                hybrid_long_target_pred_fold,
-                fold_dir / "pred_hybrid_long_target_pred.pkl",
-            )
             # Save to csv tsv lines
             pl.DataFrame(tsv_lines_fold).write_csv(
                 file=fold_dir / "pred_hybrid_long.tsv",
@@ -677,7 +668,6 @@ def main(
             (
                 hybrid_short_source_fold,
                 hybrid_short_target_fold,
-                hybrid_short_target_pred_fold,
                 tsv_lines_short_fold,
             ) = build_hybrid_short_training_pairs_from_predictions(
                 heldout_pages=heldout_bigbio_with_pred,
@@ -691,10 +681,6 @@ def main(
                 hybrid_short_target_fold,
                 fold_dir / "pred_hybrid_short_target.pkl",
             )
-            dump_pickle(
-                hybrid_short_target_pred_fold,
-                fold_dir / "pred_hybrid_short_target_pred.pkl",
-            )
             # Save to csv tsv lines
             pl.DataFrame(tsv_lines_short_fold).write_csv(
                 file=fold_dir / "pred_hybrid_short.tsv",
@@ -703,11 +689,9 @@ def main(
             )
             all_hybrid_long_sources.extend(hybrid_long_source_fold)
             all_hybrid_long_targets.extend(hybrid_long_target_fold)
-            all_hybrid_long_target_preds.extend(hybrid_long_target_pred_fold)
             all_hybrid_long_tsv_lines.extend(tsv_lines_fold)
             all_hybrid_short_sources.extend(hybrid_short_source_fold)
             all_hybrid_short_targets.extend(hybrid_short_target_fold)
-            all_hybrid_short_target_preds.extend(hybrid_short_target_pred_fold)
             all_hybrid_short_tsv_lines.extend(tsv_lines_short_fold)
 
             fold_reports.append({
@@ -728,12 +712,8 @@ def main(
         hybrid_long_target_path = (
             data_root / f"train_{selection_method}_target_hybrid_long_v2.pkl"
         )
-        hybrid_long_target_pred_path = (
-            data_root / f"train_{selection_method}_target_pred_hybrid_long_v2.pkl"
-        )
         dump_pickle(all_hybrid_long_sources, hybrid_long_source_path)
         dump_pickle(all_hybrid_long_targets, hybrid_long_target_path)
-        dump_pickle(all_hybrid_long_target_preds, hybrid_long_target_pred_path)
         # Save to csv tsv lines
         pl.DataFrame(all_hybrid_long_tsv_lines).write_csv(
             file=data_root
@@ -747,12 +727,8 @@ def main(
         hybrid_short_target_path = (
             data_root / f"train_{selection_method}_target_hybrid_short_v2.pkl"
         )
-        hybrid_short_target_pred_path = (
-            data_root / f"train_{selection_method}_target_pred_hybrid_short_v2.pkl"
-        )
         dump_pickle(all_hybrid_short_sources, hybrid_short_source_path)
         dump_pickle(all_hybrid_short_targets, hybrid_short_target_path)
-        dump_pickle(all_hybrid_short_target_preds, hybrid_short_target_pred_path)
         # Save to csv tsv lines
         pl.DataFrame(all_hybrid_short_tsv_lines).write_csv(
             file=data_root
@@ -769,10 +745,8 @@ def main(
             "fold_reports": fold_reports,
             "hybrid_long_source_path": str(hybrid_long_source_path),
             "hybrid_long_target_path": str(hybrid_long_target_path),
-            "hybrid_long_target_pred_path": str(hybrid_long_target_pred_path),
             "hybrid_short_source_path": str(hybrid_short_source_path),
             "hybrid_short_target_path": str(hybrid_short_target_path),
-            "hybrid_short_target_pred_path": str(hybrid_short_target_pred_path),
         }
 
     metadata_path = folds_root / "metadata.json"

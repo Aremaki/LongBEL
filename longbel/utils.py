@@ -103,7 +103,12 @@ def add_headers_to_prompt(source: str, target: str, context_format: str):
             raise ValueError(f"Unexpected target format: {target}")
         # Add Instruction prefix to source
         prompt = f"### Context\n{source.rstrip()}\n\n### Prediction\n{prefix}"
-    elif context_format in ["hybrid_short", "hybrid_long"]:
+    elif context_format in [
+        "hybrid_short",
+        "hybrid_short_v2",
+        "hybrid_long",
+        "hybrid_long_v2",
+    ]:
         split_target = target.split("\n")
         # remove empty string
         split_target = [s for s in split_target if s]

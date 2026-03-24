@@ -102,7 +102,12 @@ def add_headers_to_prompt(
         input_sentence = (
             f"### Context\n{source.rstrip()}\n\n### Prediction\n{target.rstrip()}"
         )
-    elif context_format in ["hybrid_short", "hybrid_long"]:
+    elif context_format in [
+        "hybrid_short",
+        "hybrid_long",
+        "hybrid_short_v2",
+        "hybrid_long_v2",
+    ]:
         if not previous_targets:
             previous_targets = "None"
         input_sentence = f"### Context\n{source.rstrip()}\n\n### Previous Normalizations\n{previous_targets.rstrip()}\n\n### Prediction\n{target.rstrip()}"
@@ -657,8 +662,8 @@ class _LongBELHubInterface:
                     nlp=nlp,  # type: ignore
                     train_mode=False,
                 )
-            elif context_format == "hybrid_long":
-                sources, targets, _, entities_info = parse_text_hybrid_long(  # type: ignore
+            elif context_format in ["hybrid_long", "hybrid_long_v2"]:
+                sources, targets, entities_info = parse_text_hybrid_long(
                     data=data,
                     start_entity=start_entity,
                     end_entity=end_entity,
@@ -667,8 +672,8 @@ class _LongBELHubInterface:
                     nlp=nlp,  # type: ignore
                     train_mode=False,
                 )
-            elif context_format == "hybrid_short":
-                sources, targets, _, entities_info = parse_text_hybrid_short(  # type: ignore
+            elif context_format in ["hybrid_short", "hybrid_short_v2"]:
+                sources, targets, entities_info = parse_text_hybrid_short(
                     data=data,
                     start_entity=start_entity,
                     end_entity=end_entity,
@@ -820,7 +825,12 @@ class _LongBELHubInterface:
             for i, doc_id in enumerate(doc_ids):
                 clean_sentence = cleaned_output_sequences[num_beams * i]
                 clean_sentence = start_entity + clean_sentence.split(start_entity)[-1]
-                if context_format in ["hybrid_short", "hybrid_long"]:
+                if context_format in [
+                    "hybrid_short",
+                    "hybrid_long",
+                    "hybrid_short_v2",
+                    "hybrid_long_v2",
+                ]:
                     clean_sentence = clean_sentence.rstrip() + "\n"
                 elif context_format == "long":
                     clean_sentence = clean_sentence.rstrip("<SEP>") + "<SEP>"

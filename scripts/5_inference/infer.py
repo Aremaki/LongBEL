@@ -294,7 +294,9 @@ def main(
         ).shape[0]
         total_label = label_df.shape[0]
         recall_label = true_label / total_label if total_label > 0 else 0.0
-        metadata["recall_results_no_constraint"][label] = f"{recall_label:.4f} ({true_label}/{total_label})"
+        metadata["recall_results_no_constraint"][label] = (
+            f"{recall_label:.4f} ({true_label}/{total_label})"
+        )
         print(
             f"Semantic Group: {label} - No Constraint Inference Recall: {recall_label:.4f} ({true_label}/{total_label})"
         )
@@ -304,7 +306,9 @@ def main(
     ).shape[0]
     total_overall = top_no_constraint_df.shape[0]
     recall_overall = true_overall / total_overall if total_overall > 0 else 0.0
-    metadata["recall_results_no_constraint"]["overall"] = f"{recall_overall:.4f} ({true_overall}/{total_overall})"
+    metadata["recall_results_no_constraint"]["overall"] = (
+        f"{recall_overall:.4f} ({true_overall}/{total_overall})"
+    )
     print(
         f"Overall - No Constraint Inference Recall: {recall_overall:.4f} ({true_overall}/{total_overall})"
     )
@@ -364,7 +368,9 @@ def main(
         ).shape[0]
         total_label = label_df.shape[0]
         recall_label = true_label / total_label if total_label > 0 else 0.0
-        metadata["recall_results_constraint"][semantic_group] = f"{recall_label:.4f} ({true_label}/{total_label})"
+        metadata["recall_results_constraint"][semantic_group] = (
+            f"{recall_label:.4f} ({true_label}/{total_label})"
+        )
         print(
             f"Semantic Group: {semantic_group} - Constraint Inference Recall: {recall_label:.4f} ({true_label}/{total_label})"
         )
@@ -374,7 +380,9 @@ def main(
     ).shape[0]
     total_overall = top_constraint_df.shape[0]
     recall_overall = true_overall / total_overall if total_overall > 0 else 0.0
-    metadata["recall_results_constraint"]["overall"] = f"{recall_overall:.4f} ({true_overall}/{total_overall})"
+    metadata["recall_results_constraint"]["overall"] = (
+        f"{recall_overall:.4f} ({true_overall}/{total_overall})"
+    )
     print(
         f"Overall - Constraint Inference Recall: {recall_overall:.4f} ({true_overall}/{total_overall})"
     )
@@ -444,7 +452,15 @@ if __name__ == "__main__":
         "--context-format",
         type=str,
         default="short",
-        choices=["short", "long", "hybrid_long", "hybrid_short", "hybrid_medium"],
+        choices=[
+            "short",
+            "long",
+            "hybrid_long",
+            "hybrid_short",
+            "hybrid_short_v2",
+            "hybrid_long_v2",
+            "hybrid_medium",
+        ],
         help="The context format for training",
     )
     parser.add_argument(

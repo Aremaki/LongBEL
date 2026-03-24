@@ -796,6 +796,8 @@ if __name__ == "__main__":
             "long",
             "hybrid_short",
             "hybrid_long",
+            "hybrid_short_v2",
+            "hybrid_long_v2",
             "hybrid_medium",
         ],
         help="Whether to use augmented data for training",
