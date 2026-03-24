@@ -788,6 +788,10 @@ def main(
             val_recall_by_group[str(semantic_group)] = (
                 f"{recall_group:.4f} ({true_group}/{total_group})"
             )
+            print(
+                f"[Validation 10%] Semantic Group: {semantic_group} - "
+                f"Recall: {recall_group:.4f} ({true_group}/{total_group})"
+            )
 
         validation_recall = {
             "overall": f"{val_recall_overall:.4f} ({val_true_overall}/{val_total_overall})",
