@@ -10,7 +10,7 @@ import nltk
 import numpy as np
 import polars as pl
 import torch
-from datasets import Dataset, load_dataset
+from datasets import Dataset, concatenate_datasets, load_dataset
 from transformers import AutoTokenizer
 
 from longbel.longbel import LongBEL
@@ -390,6 +390,11 @@ def main(
     max_new_tokens: int,
 ):
     data_root = Path("data/final_data") / dataset_name
+    bigbio_processed_root = data_root / "bigbio_dataset"
+    if not bigbio_processed_root.exists():
+        raise FileNotFoundError(
+            f"BigBio processed dataset not found at {bigbio_processed_root}"
+        )
     train_source_path = (
         data_root / f"train_{selection_method}_source_{context_format}.pkl"
     )
@@ -421,6 +426,16 @@ def main(
     train_targets = load_pickle(train_target_path)
     validation_sources = load_pickle(validation_source_path)
     validation_targets = load_pickle(validation_target_path)
+    bigbio_train_pages = load_dataset(
+        str(bigbio_processed_root),
+        data_dir="processed_data",
+        split="train",
+    )
+    bigbio_validation_pages = load_dataset(
+        str(bigbio_processed_root),
+        data_dir="processed_data",
+        split="validation",
+    )
 
     if len(train_sources) != len(train_targets):
         raise ValueError(
@@ -443,32 +458,12 @@ def main(
     validation_train_targets = [validation_targets[i] for i in validation_train_indexes]
     validation_eval_sources = [validation_sources[i] for i in validation_eval_indexes]
     validation_eval_targets = [validation_targets[i] for i in validation_eval_indexes]
+    bigbio_validation_train = bigbio_validation_pages.select(validation_train_indexes)
+    bigbio_validation_eval = bigbio_validation_pages.select(validation_eval_indexes)
 
     merged_sources = train_sources + validation_train_sources
     merged_targets = train_targets + validation_train_targets
-
-    bigbio_processed_root = data_root / "bigbio_dataset"
-    if not bigbio_processed_root.exists():
-        raise FileNotFoundError(
-            f"BigBio processed dataset not found at {bigbio_processed_root}"
-        )
-    bigbio_train_pages_raw = load_dataset(
-        str(bigbio_processed_root),
-        data_dir="processed_data",
-        split="train",
-    )
-    if not isinstance(bigbio_train_pages_raw, Dataset):
-        raise TypeError("Expected a map-style Dataset for BigBio train split")
-    bigbio_train_pages = bigbio_train_pages_raw
-
-    bigbio_validation_pages_raw = load_dataset(
-        str(bigbio_processed_root),
-        data_dir="processed_data",
-        split="validation",
-    )
-    if not isinstance(bigbio_validation_pages_raw, Dataset):
-        raise TypeError("Expected a map-style Dataset for BigBio validation split")
-    bigbio_validation_pages = bigbio_validation_pages_raw
+    merged_bigbio = concatenate_datasets([bigbio_train_pages, bigbio_validation_train])
 
     folds_root = (
         data_root
@@ -479,14 +474,12 @@ def main(
 
     fixed_validation_source_path = folds_root / "validation_10pct_source.pkl"
     fixed_validation_target_path = folds_root / "validation_10pct_target.pkl"
+    validation_10pct_bigbio_path = folds_root / "validation_10pct_bigbio.parquet"
     dump_pickle(validation_eval_sources, fixed_validation_source_path)
     dump_pickle(validation_eval_targets, fixed_validation_target_path)
-    validation_10pct_bigbio = bigbio_validation_pages.select(validation_eval_indexes)
-    validation_10pct_bigbio_path = folds_root / "validation_10pct_bigbio.parquet"
-    validation_10pct_bigbio.to_parquet(str(validation_10pct_bigbio_path))
+    bigbio_validation_eval.to_parquet(str(validation_10pct_bigbio_path))
 
     folds = make_folds(len(merged_sources), num_folds=num_folds, seed=seed)
-    bigbio_folds = make_folds(len(bigbio_train_pages), num_folds=num_folds, seed=seed)
 
     all_indices = np.arange(len(merged_sources))
     fold_sizes = []
@@ -499,6 +492,7 @@ def main(
         train_target = [merged_targets[i] for i in train_idx]
         heldout_source = [merged_sources[i] for i in heldout_idx]
         heldout_target = [merged_targets[i] for i in heldout_idx]
+        heldout_bigbio = merged_bigbio.select(heldout_idx)
 
         fold_dir = folds_root / f"fold_{fold_idx}"
         fold_dir.mkdir(parents=True, exist_ok=True)
@@ -508,14 +502,8 @@ def main(
         dump_pickle(heldout_source, fold_dir / "heldout_source.pkl")
         dump_pickle(heldout_target, fold_dir / "heldout_target.pkl")
         dump_pickle(heldout_idx.tolist(), fold_dir / "heldout_indices.pkl")
-
-        bigbio_heldout_idx = bigbio_folds[fold_idx]
-        heldout_bigbio = bigbio_train_pages.select(bigbio_heldout_idx.tolist())
         heldout_bigbio_path = fold_dir / "heldout_bigbio.parquet"
         heldout_bigbio.to_parquet(str(heldout_bigbio_path))
-        dump_pickle(
-            bigbio_heldout_idx.tolist(), fold_dir / "heldout_bigbio_indices.pkl"
-        )
 
         fold_sizes.append({
             "fold": fold_idx,
@@ -762,7 +750,7 @@ def main(
         val_preds, validation_10pct_bigbio_with_pred = generate_predictions_bigbio(
             model_dir=validation_model_dir,
             dataset_name=dataset_name,
-            heldout_pages=validation_10pct_bigbio,
+            heldout_pages=bigbio_validation_eval,
             context_format=context_format,
             batch_size=batch_size,
             num_beams=num_beams,
@@ -828,6 +816,31 @@ def main(
             include_header=True,
         )
 
+        (
+            validation_hybrid_short_source,
+            validation_hybrid_short_target,
+            validation_hybrid_short_tsv,
+        ) = build_hybrid_short_training_pairs_from_predictions(
+            heldout_pages=validation_10pct_bigbio_with_pred,
+            dataset_name=dataset_name,
+        )
+        validation_hybrid_short_source_path = (
+            data_root / f"validation_{selection_method}_source_hybrid_short_v2.pkl"
+        )
+        validation_hybrid_short_target_path = (
+            data_root / f"validation_{selection_method}_target_hybrid_short_v2.pkl"
+        )
+        validation_hybrid_short_tsv_path = (
+            data_root / f"validation_{selection_method}_annotations_hybrid_short_v2.tsv"
+        )
+        dump_pickle(validation_hybrid_short_source, validation_hybrid_short_source_path)
+        dump_pickle(validation_hybrid_short_target, validation_hybrid_short_target_path)
+        pl.DataFrame(validation_hybrid_short_tsv).write_csv(
+            file=validation_hybrid_short_tsv_path,
+            separator="\t",
+            include_header=True,
+        )
+
         metadata["oof_prediction"] = {
             "mode": "bigbio_longbel_sample_constrained",
             "checkpoint_kind": checkpoint_kind,
@@ -849,6 +862,13 @@ def main(
                 validation_hybrid_long_target_path
             ),
             "validation_hybrid_long_tsv_path": str(validation_hybrid_long_tsv_path),
+            "validation_hybrid_short_source_path": str(
+                validation_hybrid_short_source_path
+            ),
+            "validation_hybrid_short_target_path": str(
+                validation_hybrid_short_target_path
+            ),
+            "validation_hybrid_short_tsv_path": str(validation_hybrid_short_tsv_path),
         }
 
     metadata_path = folds_root / "metadata.json"
