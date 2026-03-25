@@ -202,11 +202,9 @@ def skip_undesired_tokens(outputs, tokenizer):
         for token in tokens_to_remove:
             sequence = sequence.replace(token, "")
 
-        # Remove spaces *immediately* after the sep_token (e.g. "<sep>  text" → "<sep>text")
-        if sep_token:
-            sequence = re.sub(rf"({re.escape(sep_token)})\s+", r"\1", sequence)
-        if plus_token:
-            sequence = re.sub(rf"({re.escape(plus_token)})\s+", r"\1", sequence)
+        # Remove spaces *immediately* after the sep_token adn plus_token (e.g. "<sep>  text" → "<sep>text")
+        sequence = re.sub(rf"({re.escape(plus_token)})\s+", r"\1", sequence)
+        sequence = re.sub(rf"({re.escape(sep_token)})\s+", r"\1", sequence)
 
         cleaned_outputs.append(sequence.strip())
 

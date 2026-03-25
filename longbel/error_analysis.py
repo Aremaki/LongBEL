@@ -1331,6 +1331,14 @@ def compute_metrics(
             "not_repeated",
             pred_df_with_repeat_rank.filter(pl.col("repeat_rank") == 1),
         ),
+        (
+            "simple_concepts",
+            pred_df.filter(~pl.col("gold_concept_code").str.contains(r"\+")),
+        ),
+        (
+            "composite_concepts",
+            pred_df.filter(pl.col("gold_concept_code").str.contains(r"\+")),
+        ),
     ]
 
     # -------------------------
