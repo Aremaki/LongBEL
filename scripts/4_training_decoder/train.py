@@ -36,6 +36,14 @@ def load_pickle(file_path):
         return pickle.load(file)
 
 
+# Detect number of GPUs automatically
+def get_num_gpus():
+    """Returns the number of available GPUs"""
+    if torch.cuda.is_available():
+        return torch.cuda.device_count()
+    return 1  # Default to CPU
+
+
 def get_split_marker(
     dataset_name: str,
 ) -> tuple[str, nltk.tokenize.PunktSentenceTokenizer]:
@@ -668,7 +676,12 @@ def main(
         / model_short_name
     )
     model.gradient_checkpointing_enable()
-    bacth_size = max(16_384 // max_length, 1)
+    bacth_size = (
+        max(16_384 // max_length, 1) // get_num_gpus()
+    )  # scale batch size inversely with sequence length and number of GPUs
+    print(
+        f"Using batch size {bacth_size} per device (total {bacth_size * get_num_gpus()})"
+    )
     sft_args = SFTConfig(
         output_dir=str(output_dir),
         logging_dir=str(logging_dir),
