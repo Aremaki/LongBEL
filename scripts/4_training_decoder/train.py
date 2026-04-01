@@ -509,7 +509,7 @@ def main(
                 dev_dataset.select(split_train),
             ])
 
-    if augmented_data not in ["human_only", "human_only_mixed", "human_only_ft"]:
+    if augmented_data not in ["human_only", "human_only_ft"]:
         if dataset_name == "MedMentions":
             synth_train_source_data = load_pickle(
                 data_folder / "SynthMM" / f"train_{selection_method}_source.pkl"
@@ -578,34 +578,8 @@ def main(
         logging_steps = 0
         train_dataset = human_train_dataset
         num_train_epochs = 50
-        if augmented_data == "human_only_ft":
+        if augmented_data == "human_only_fr":
             lr = lr / 3.0
-        elif augmented_data == "human_only_mixed":
-            num_train_epochs = 25
-            # In this mode we train on both hybrid and hybrid_v2
-            if context_format in ["hybrid_short", "hybrid_long"]:
-                alt_context_format = context_format + "_v2"
-                alt_train_source_path = (
-                    data_folder
-                    / dataset_name
-                    / f"train_{selection_method}_source_{alt_context_format}.pkl"
-                )
-                alt_train_target_path = (
-                    data_folder
-                    / dataset_name
-                    / f"train_{selection_method}_target_{alt_context_format}.pkl"
-                )
-                alt_train_source_data = load_pickle(alt_train_source_path)
-                alt_train_target_data = load_pickle(alt_train_target_path)
-                alt_train_dataset = Dataset.from_dict({
-                    "source": alt_train_source_data,
-                    "target": alt_train_target_data,
-                })
-                human_train_dataset = interleave_datasets(
-                    [human_train_dataset, alt_train_dataset],  # type: ignore
-                    stopping_strategy="all_exhausted",
-                    seed=42,
-                )
     split_marker, nlp = get_split_marker(dataset_name)
 
     # Format datasets into prompt/completion format
@@ -799,7 +773,6 @@ if __name__ == "__main__":
         default="human_only",
         choices=[
             "human_only",
-            "human_only_mixed",
             "human_only_ft",
             "synth_only",
             "full",
