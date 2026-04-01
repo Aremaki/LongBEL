@@ -18,7 +18,13 @@ def main(datasets: list[str]):
     ]
     for dataset in tqdm(datasets, desc="Evaluation"):
         data_split = "test"
-        for context_format in ["short", "long", "hybrid_short", "hybrid_medium", "hybrid_long"]:
+        for context_format in [
+            "short",
+            "long",
+            "hybrid_short",
+            "hybrid_medium",
+            "hybrid_long",
+        ]:
             # Load train data for seen/unseen evaluation
             train_path = (
                 Path("data")
@@ -37,27 +43,28 @@ def main(datasets: list[str]):
                     "doc_id": str,  # force as string
                 },  # type: ignore
             )
-            validation_path = (
-                Path("data")
-                / "final_data"
-                / dataset
-                / f"validation_{selection_method}_annotations_{context_format}.tsv"
-            )
-            if validation_path.exists():
-                val_df = pl.read_csv(
-                    validation_path,
-                    separator="\t",
-                    has_header=True,
-                    schema_overrides={
-                        "gold_concept_code": str,
-                        "mention_id": str,
-                        "doc_id": str,  # force as string
-                    },  # type: ignore
+            if context_format not in ["hybrid_short_v2", "hybrid_long_v2"]:
+                validation_path = (
+                    Path("data")
+                    / "final_data"
+                    / dataset
+                    / f"validation_{selection_method}_annotations_{context_format}.tsv"
                 )
-                # Reduce validation dataset to 10% as before
-                split = int(len(val_df) * 0.9)
-                val_df = val_df[:split]
-                train_df = pl.concat([train_df, val_df])
+                if validation_path.exists():
+                    val_df = pl.read_csv(
+                        validation_path,
+                        separator="\t",
+                        has_header=True,
+                        schema_overrides={
+                            "gold_concept_code": str,
+                            "mention_id": str,
+                            "doc_id": str,  # force as string
+                        },  # type: ignore
+                    )
+                    # Reduce validation dataset to 10% as before
+                    split = int(len(val_df) * 0.9)
+                    val_df = val_df[:split]
+                    train_df = pl.concat([train_df, val_df])
             train_cuis = set(train_df["gold_concept_code"].drop_nulls())
             train_mentions = set(train_df["mention"].drop_nulls())
             unique_pairs = (
@@ -99,7 +106,9 @@ def main(datasets: list[str]):
                                     pred_df = load_predictions(
                                         preditction_path,
                                     )
-                                    compute_all_recalls = "LLM_Evaluation" in pred_df.columns
+                                    compute_all_recalls = (
+                                        "LLM_Evaluation" in pred_df.columns
+                                    )
                                     scores = compute_metrics(
                                         pred_df=pred_df,
                                         train_mentions=train_mentions,
@@ -125,11 +134,15 @@ def main(datasets: list[str]):
                                                 if compute_all_recalls:
                                                     model_name_str_label = f"{model_name_str}_{recall_score.replace('recall_', '')}"
                                                 else:
-                                                    model_name_str_label = model_name_str
+                                                    model_name_str_label = (
+                                                        model_name_str
+                                                    )
                                                 all_scores[label][dataset][
                                                     model_name_str_label
                                                 ] = scores[label][recall_score]
-                                        all_ratios[label][dataset] = scores[label]["ratios"]
+                                        all_ratios[label][dataset] = scores[label][
+                                            "ratios"
+                                        ]
     # Write results
     for label in all_scores.keys():
         for dataset in datasets:
