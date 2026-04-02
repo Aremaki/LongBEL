@@ -505,7 +505,7 @@ def parse_text_hybrid_long(
     all_annotations = {}
     for i, passage in enumerate(data.get("passages", [])):
         all_passages[i] = clean_natural(passage["text"][0])
-    for i, passage in enumerate(data.get("passages", [])):
+    for passage_id, passage in enumerate(data.get("passages", [])):
         passage_text = passage["text"][0]
         start_offset_passage = passage["offsets"][0][0]
         end_offset_passage = passage["offsets"][0][1]
@@ -693,9 +693,9 @@ def parse_text_hybrid_long(
                 )
 
             for other_passage_id, other_passage_text in all_passages.items():
-                if other_passage_id < i:
+                if other_passage_id < passage_id:
                     marked_text = other_passage_text + "\n" + marked_text
-                elif other_passage_id > i:
+                elif other_passage_id > passage_id:
                     marked_text = marked_text + "\n" + other_passage_text
             # Emit the pair
             doc_id = data.get("id", "")
@@ -1161,7 +1161,7 @@ def parse_text_hybrid_medium(
     all_annotations = {}
     for i, passage in enumerate(data.get("passages", [])):
         all_passages[i] = clean_natural(passage["text"][0])
-    for i, passage in enumerate(data.get("passages", [])):
+    for passage_id, passage in enumerate(data.get("passages", [])):
         passage_text = passage["text"][0]
         start_offset_passage = passage["offsets"][0][0]
         end_offset_passage = passage["offsets"][0][1]
@@ -1339,9 +1339,9 @@ def parse_text_hybrid_medium(
                 )
 
             for other_passage_id, other_passage_text in all_passages.items():
-                if other_passage_id < i:
+                if other_passage_id < passage_id:
                     marked_text = other_passage_text + "\n" + marked_text
-                elif other_passage_id > i:
+                elif other_passage_id > passage_id:
                     marked_text = marked_text + "\n" + other_passage_text
             # Emit the pair
             doc_id = data.get("id", "")
