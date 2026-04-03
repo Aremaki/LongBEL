@@ -676,9 +676,7 @@ def main(
         / model_short_name
     )
     model.gradient_checkpointing_enable()
-    bacth_size = (
-        max(16_384 // max_length, 1) // get_num_gpus()
-    )  # scale batch size inversely with sequence length and number of GPUs
+    bacth_size = max(16_384 // max_length, 1)
     print(
         f"Using batch size {bacth_size} per device (total {bacth_size * get_num_gpus()})"
     )
