@@ -92,6 +92,7 @@ def main(datasets: list[str]):
                             continue
                         pred_df = load_predictions(
                             preditction_path,
+                            top_k=5,
                         )
                         scores = compute_metrics(
                             pred_df=pred_df,

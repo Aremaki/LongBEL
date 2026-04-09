@@ -104,6 +104,7 @@ def main(datasets: list[str]):
                             continue
                         pred_df = load_predictions(
                             preditction_path,
+                            top_k=5,
                         )
                         pred_df = pred_df.filter(
                             ~pl.col("gold_concept_code").is_in(list(train_cuis))

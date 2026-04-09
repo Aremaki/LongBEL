@@ -142,6 +142,7 @@ def normalize_codes(col: pl.Expr) -> pl.Expr:
 
 def load_predictions(
     prediction_path: Path,
+    top_k: int = 1,
 ) -> pl.DataFrame:
     """
     Add semantic relation column to the dataframe using KeyCare's RelationExtractor.
@@ -158,12 +159,12 @@ def load_predictions(
                 "doc_id": str,  # force as string
             },  # type: ignore
         )
+        .filter(pl.col("rank") <= top_k)  # keep up to top_k predictions
         .unique(
             subset=[
                 "doc_id",
-                "semantic_group",
-                "start_span",
-                "end_span",
+                "mention_id",
+                "rank",
             ],
         )
         .sort(["mention_id", "rank"])  # ensure deterministic order after deduplication
@@ -1180,15 +1181,34 @@ def compute_metrics(
 
     # Pre-calculate full counts and unique labels once
     # This avoids re-calculating them for every partition
+    pred_df_rank1 = pred_df.filter(pl.col("rank") == 1)
+
+    pred_df_at_5 = (
+        pred_df.group_by(["doc_id", "mention_id"])
+        .agg([
+            pl.all().first(),
+            (pl.col("gold_concept_code") == pl.col("pred_concept_code"))
+            .any()
+            .alias("correct_at_5"),
+        ])
+        .with_columns(
+            pl.when(pl.col("correct_at_5"))
+            .then(pl.col("gold_concept_code"))
+            .otherwise(pl.col("pred_concept_code"))
+            .alias("pred_concept_code")
+        )
+        .drop("correct_at_5")
+    )
+
     full_counts = (
-        pred_df.group_by("semantic_group")
+        pred_df_rank1.group_by("semantic_group")
         .len()
         .select(["semantic_group", "len"])
         .to_dict(as_series=False)
     )
     full_counts_map = dict(zip(full_counts["semantic_group"], full_counts["len"]))
-    unique_labels = sorted(pred_df["semantic_group"].unique().to_list())
-    total_full_count = pred_df.height
+    unique_labels = sorted(pred_df_rank1["semantic_group"].unique().to_list())
+    total_full_count = pred_df_rank1.height
 
     # We'll call compute_partition_metrics for each partition and then aggregate
     # Helper to call and return a consistent tuple for easier aggregation
@@ -1196,7 +1216,7 @@ def compute_metrics(
     def _call_partition(df_partition: pl.DataFrame, index_name: str):
         return compute_partition_metrics(
             df_partition,
-            pred_df,  # df_full
+            pred_df_rank1,  # df_full
             full_counts_map,
             unique_labels,
             total_full_count,
@@ -1222,7 +1242,7 @@ def compute_metrics(
     )
 
     pred_df_with_repeat_rank = (
-        pred_df.with_columns(
+        pred_df_rank1.with_columns(
             pl.col("mention_id")
             .str.split(".")
             .list.get(1)
@@ -1240,72 +1260,93 @@ def compute_metrics(
     repeated_df = pred_df_with_repeat_rank.filter(pl.col("repeat_rank") >= 2)
 
     partition_specs = [
-        ("All", pred_df),
+        ("All", pred_df_rank1),
+        ("All@5", pred_df_at_5),
         (
             "seen_cuis",
-            pred_df.filter(pl.col("gold_concept_code").is_in(list(train_cuis))),
+            pred_df_rank1.filter(pl.col("gold_concept_code").is_in(list(train_cuis))),
         ),
         (
             "unseen_cuis",
-            pred_df.filter(~pl.col("gold_concept_code").is_in(list(train_cuis))),
+            pred_df_rank1.filter(~pl.col("gold_concept_code").is_in(list(train_cuis))),
         ),
         (
             "seen_mentions",
-            pred_df.filter(pl.col("mention").is_in(list(train_mentions))),
+            pred_df_rank1.filter(pl.col("mention").is_in(list(train_mentions))),
         ),
         (
             "unseen_mentions",
-            pred_df.filter(~pl.col("mention").is_in(list(train_mentions))),
+            pred_df_rank1.filter(~pl.col("mention").is_in(list(train_mentions))),
         ),
         (
             "in_top_100_cuis",
-            pred_df.filter(pl.col("gold_concept_code").is_in(list(top_100_cuis))),
+            pred_df_rank1.filter(pl.col("gold_concept_code").is_in(list(top_100_cuis))),
         ),
         (
             "not_in_top_100_cuis",
-            pred_df.filter(~pl.col("gold_concept_code").is_in(list(top_100_cuis))),
+            pred_df_rank1.filter(
+                ~pl.col("gold_concept_code").is_in(list(top_100_cuis))
+            ),
         ),
         (
             "in_top_100_mentions",
-            pred_df.filter(pl.col("mention").is_in(list(top_100_mentions))),
+            pred_df_rank1.filter(pl.col("mention").is_in(list(top_100_mentions))),
         ),
         (
             "not_in_top_100_mentions",
-            pred_df.filter(~pl.col("mention").is_in(list(top_100_mentions))),
+            pred_df_rank1.filter(~pl.col("mention").is_in(list(top_100_mentions))),
         ),
         (
             "seen_unique_pairs",
-            pred_df.join(unique_df, on=["mention", "gold_concept_code"], how="inner"),
+            pred_df_rank1.join(
+                unique_df, on=["mention", "gold_concept_code"], how="inner"
+            ),
         ),
         (
             "unseen_unique_pairs",
-            pred_df.join(unique_df, on=["mention", "gold_concept_code"], how="anti"),
+            pred_df_rank1.join(
+                unique_df, on=["mention", "gold_concept_code"], how="anti"
+            ),
         ),
-        ("identical", pred_df.filter(pl.col("mention") == pl.col("gold_concept_name"))),
+        (
+            "identical",
+            pred_df_rank1.filter(pl.col("mention") == pl.col("gold_concept_name")),
+        ),
         (
             "not_identical",
-            pred_df.filter(pl.col("mention") != pl.col("gold_concept_name")),
+            pred_df_rank1.filter(pl.col("mention") != pl.col("gold_concept_name")),
         ),
-        ("one_word", pred_df.filter(pl.col("mention").str.count_matches(" ") == 0)),
-        ("two_words", pred_df.filter(pl.col("mention").str.count_matches(" ") == 1)),
-        ("three_words", pred_df.filter(pl.col("mention").str.count_matches(" ") == 2)),
+        (
+            "one_word",
+            pred_df_rank1.filter(pl.col("mention").str.count_matches(" ") == 0),
+        ),
+        (
+            "two_words",
+            pred_df_rank1.filter(pl.col("mention").str.count_matches(" ") == 1),
+        ),
+        (
+            "three_words",
+            pred_df_rank1.filter(pl.col("mention").str.count_matches(" ") == 2),
+        ),
         (
             "more_than_three_words",
-            pred_df.filter(pl.col("mention").str.count_matches(" ") >= 3),
+            pred_df_rank1.filter(pl.col("mention").str.count_matches(" ") >= 3),
         ),
         (
             "abbrev_only",
-            pred_df.filter(
+            pred_df_rank1.filter(
                 pl.col("mention").str.strip_chars().str.contains(r"^[A-Z0-9\-]{2,}$")
             ),
         ),
         (
             "abbrev_or_contains",
-            pred_df.filter(pl.col("mention").str.contains(r"\b[A-Z0-9\-]{2,}\b")),
+            pred_df_rank1.filter(pl.col("mention").str.contains(r"\b[A-Z0-9\-]{2,}\b")),
         ),
         (
             "not_abbrev",
-            pred_df.filter(~pl.col("mention").str.contains(r"\b[A-Z0-9\-]{2,}\b")),
+            pred_df_rank1.filter(
+                ~pl.col("mention").str.contains(r"\b[A-Z0-9\-]{2,}\b")
+            ),
         ),
         (
             "repeated",
@@ -1333,11 +1374,11 @@ def compute_metrics(
         ),
         (
             "simple_concepts",
-            pred_df.filter(~pl.col("gold_concept_code").str.contains(r"\+")),
+            pred_df_rank1.filter(~pl.col("gold_concept_code").str.contains(r"\+")),
         ),
         (
             "composite_concepts",
-            pred_df.filter(pl.col("gold_concept_code").str.contains(r"\+")),
+            pred_df_rank1.filter(pl.col("gold_concept_code").str.contains(r"\+")),
         ),
     ]
 
