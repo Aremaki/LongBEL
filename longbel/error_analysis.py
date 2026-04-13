@@ -57,12 +57,12 @@ def _run_vectorized_bootstrap(
 
     # Add indices to doc_agg
     label_map_df = pl.DataFrame({
-        "label": unique_labels,
+        "semantic_group": unique_labels,
         "label_idx": np.arange(len(unique_labels), dtype=np.int32),
     })
 
     # Filter doc_agg to only labels we care about (in unique_labels)
-    doc_agg_idx = doc_agg.join(label_map_df, on="label", how="inner")
+    doc_agg_idx = doc_agg.join(label_map_df, on="semantic_group", how="inner")
 
     # Add doc indices
     doc_map_df = pl.DataFrame({
