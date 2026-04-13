@@ -343,6 +343,11 @@ def main(
     merge_validation_into_train: bool = True,
     models_root: str = "models/NED",
 ):
+
+    # merge validation argument
+    if "v2" in context_format:
+        merge_validation_into_train = True
+    print(f"merge_validation_into_train is set to {merge_validation_into_train}")
     # init distributed (if needed)
     if idr_torch.rank == 0:
         print(
