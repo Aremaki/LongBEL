@@ -591,7 +591,7 @@ def main(
         logging_steps = 0
         train_dataset = human_train_dataset
         num_train_epochs = 50
-        if augmented_data == "human_only_fr":
+        if augmented_data == "human_only_ft":
             lr = lr / 3.0
     split_marker, nlp = get_split_marker(dataset_name)
 
@@ -680,7 +680,7 @@ def main(
         / f"{dataset_name}_{augmented_data}_{selection_method}_{context_format}{complete_mode_str}{add_headers_str}{run_name_suffix}"
         / model_short_name
     )
-    model.gradient_checkpointing_enable()
+    # model.gradient_checkpointing_enable()
     bacth_size = max(16_384 // max_length, 1)
     print(
         f"Using batch size {bacth_size} per device (total {bacth_size * get_num_gpus()})"
