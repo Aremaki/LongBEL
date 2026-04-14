@@ -14,6 +14,7 @@ NUM_BEAMS=(5)
 MODELS=("Llama-3.2-1B-Instruct" "Llama-3.2-3B-Instruct" "Llama-3.1-8B-Instruct")
 BEST_OPTIONS=(true false)
 BATCH_SIZE=16
+CONSTRAINED_ONLY=true
 
 for dataset in "${DATASETS[@]}"; do
     for selection in "${SELECTION_METHODS[@]}"; do
@@ -90,6 +91,10 @@ for dataset in "${DATASETS[@]}"; do
 
                                         if [[ "${add_headers}" == true ]]; then
                                             ARGS="${ARGS} --add-headers"
+                                        fi
+
+                                        if [[ "${constrained_only}" == true ]]; then
+                                            ARGS="${ARGS} --constrained-only"
                                         fi
 
                                         # Submit job

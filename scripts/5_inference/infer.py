@@ -62,6 +62,7 @@ def main(
     add_headers: bool = False,
     batch_size: int = 64,
     output_folder: str = "results/inference_outputs",
+    constrained_only: bool = False,
 ):
     # Set device
     torch.cuda.empty_cache()
@@ -80,6 +81,7 @@ def main(
     print(f"Number of Beams: {num_beams}")
     print(f"Batch Size: {batch_size}")
     print(f"device: {device}")
+    print(f"Constrained Only: {constrained_only}")
 
     # Load model
     complete_mode_str = "_complete" if complete_mode else ""
@@ -250,76 +252,78 @@ def main(
     print(f"Text_to_code object size (deep): {text_to_code_size:.2f} MB")
 
     # Perform inference without constraint
-    metadata["timing_results"] = {}
-    tic = time.time()
-    no_constraint_pred = model.sample(
-        bigbio_pages=test_data,  # type: ignore
-        batch_size=batch_size,
-        num_beams=num_beams,
-        constrained=False,
-        multiple_answers=multiple_answers,
-        context_format=context_format,
-    )  # type: ignore
-    tac = time.time()
-    elapsed_time = tac - tic
+    if not constrained_only:
+        metadata["timing_results"] = {}
+        tic = time.time()
+        no_constraint_pred = model.sample(
+            bigbio_pages=test_data,  # type: ignore
+            batch_size=batch_size,
+            num_beams=num_beams,
+            constrained=False,
+            multiple_answers=multiple_answers,
+            context_format=context_format,
+        )  # type: ignore
+        tac = time.time()
+        elapsed_time = tac - tic
 
-    # Compute speed metrics
-    num_batches = (len(test_data) + batch_size - 1) // batch_size  # type: ignore
-    num_entities = sum(len(entities) for entities in test_data["entities"])  # type: ignore
-    mean_time_per_batch = elapsed_time / num_batches
-    mean_time_of_page = elapsed_time / len(test_data)  # type: ignore
-    num_entities_per_second = num_entities / elapsed_time
+        # Compute speed metrics
+        num_batches = (len(test_data) + batch_size - 1) // batch_size  # type: ignore
+        num_entities = sum(len(entities) for entities in test_data["entities"])  # type: ignore
+        mean_time_per_batch = elapsed_time / num_batches
+        mean_time_of_page = elapsed_time / len(test_data)  # type: ignore
+        num_entities_per_second = num_entities / elapsed_time
 
-    print("\n=== Speed Metrics ===")
-    print(f"Total time elapsed: {elapsed_time:.2f} seconds")
-    print(f"Mean time per batch: {mean_time_per_batch:.2f} seconds")
-    print(f"Mean time of page: {mean_time_of_page:.2f} seconds")
-    print(f"Number of entities per second: {num_entities_per_second:.2f}\n")
-    metadata["timing_results"]["no_constraint"] = {
-        "total_time_seconds": elapsed_time,
-        "mean_time_per_batch": mean_time_per_batch,
-        "mean_time_of_page": mean_time_of_page,
-        "num_entities_per_second": num_entities_per_second,
-    }
+        print("\n=== Speed Metrics ===")
+        print(f"Total time elapsed: {elapsed_time:.2f} seconds")
+        print(f"Mean time per batch: {mean_time_per_batch:.2f} seconds")
+        print(f"Mean time of page: {mean_time_of_page:.2f} seconds")
+        print(f"Number of entities per second: {num_entities_per_second:.2f}\n")
+        metadata["timing_results"]["no_constraint"] = {
+            "total_time_seconds": elapsed_time,
+            "mean_time_per_batch": mean_time_per_batch,
+            "mean_time_of_page": mean_time_of_page,
+            "num_entities_per_second": num_entities_per_second,
+        }
 
-    no_constraint_df = pl.DataFrame(no_constraint_pred)
-    no_constraint_df = no_constraint_df.sort(["mention_id", "rank"])
-    # Compute recall per label
-    metadata["recall_results_no_constraint"] = {}
-    top_no_constraint_df = no_constraint_df.filter(pl.col("rank") == 1)
-    for label in top_no_constraint_df["semantic_group"].unique().to_list():
-        label_df = top_no_constraint_df.filter(pl.col("semantic_group") == label)
-        true_label = label_df.filter(
+        no_constraint_df = pl.DataFrame(no_constraint_pred)
+        no_constraint_df = no_constraint_df.sort(["mention_id", "rank"])
+        # Compute recall per label
+        metadata["recall_results_no_constraint"] = {}
+        top_no_constraint_df = no_constraint_df.filter(pl.col("rank") == 1)
+        for label in top_no_constraint_df["semantic_group"].unique().to_list():
+            label_df = top_no_constraint_df.filter(pl.col("semantic_group") == label)
+            true_label = label_df.filter(
+                pl.col("gold_concept_code") == pl.col("pred_concept_code")
+            ).shape[0]
+            total_label = label_df.shape[0]
+            recall_label = true_label / total_label if total_label > 0 else 0.0
+            metadata["recall_results_no_constraint"][label] = (
+                f"{recall_label:.4f} ({true_label}/{total_label})"
+            )
+            print(
+                f"Semantic Group: {label} - No Constraint Inference Recall: {recall_label:.4f} ({true_label}/{total_label})"
+            )
+        # Compute recall overall
+        true_overall = top_no_constraint_df.filter(
             pl.col("gold_concept_code") == pl.col("pred_concept_code")
         ).shape[0]
-        total_label = label_df.shape[0]
-        recall_label = true_label / total_label if total_label > 0 else 0.0
-        metadata["recall_results_no_constraint"][label] = (
-            f"{recall_label:.4f} ({true_label}/{total_label})"
+        total_overall = top_no_constraint_df.shape[0]
+        recall_overall = true_overall / total_overall if total_overall > 0 else 0.0
+        metadata["recall_results_no_constraint"]["overall"] = (
+            f"{recall_overall:.4f} ({true_overall}/{total_overall})"
         )
         print(
-            f"Semantic Group: {label} - No Constraint Inference Recall: {recall_label:.4f} ({true_label}/{total_label})"
+            f"Overall - No Constraint Inference Recall: {recall_overall:.4f} ({true_overall}/{total_overall})"
         )
-    # Compute recall overall
-    true_overall = top_no_constraint_df.filter(
-        pl.col("gold_concept_code") == pl.col("pred_concept_code")
-    ).shape[0]
-    total_overall = top_no_constraint_df.shape[0]
-    recall_overall = true_overall / total_overall if total_overall > 0 else 0.0
-    metadata["recall_results_no_constraint"]["overall"] = (
-        f"{recall_overall:.4f} ({true_overall}/{total_overall})"
-    )
-    print(
-        f"Overall - No Constraint Inference Recall: {recall_overall:.4f} ({true_overall}/{total_overall})"
-    )
-    print(f"Generated {len(no_constraint_df)} sentences without constraint.")
+        print(f"Generated {len(no_constraint_df)} sentences without constraint.")
 
-    # Save results
-    no_constraint_df.write_csv(
-        file=result_folder / f"pred_{split_name}_no_constraint_{num_beams}_beams.tsv",
-        separator="\t",
-        include_header=True,
-    )
+        # Save results
+        no_constraint_df.write_csv(
+            file=result_folder
+            / f"pred_{split_name}_no_constraint_{num_beams}_beams.tsv",
+            separator="\t",
+            include_header=True,
+        )
 
     # Perform inference with constraint
     if "timing_results" not in metadata:
@@ -487,6 +491,13 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to add headers to the output",
     )
+    parser.add_argument(
+        "--constrained-only",
+        default=False,
+        action="store_true",
+        help="Whether to only perform constrained inference",
+    )
+
     # Parse the command-line arguments
     args = parser.parse_args()
 
@@ -504,4 +515,5 @@ if __name__ == "__main__":
         add_headers=args.add_headers,
         batch_size=args.batch_size,
         output_folder=args.output_folder,
+        constrained_only=args.constrained_only,
     )
