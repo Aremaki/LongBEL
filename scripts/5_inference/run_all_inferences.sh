@@ -69,9 +69,9 @@ for dataset in "${DATASETS[@]}"; do
                                             MODEL_DIR="${MODEL_DIR}_addheaders"
                                         fi
                                         if [ "$best" = true ]; then
-                                            MODEL_FOLDER="${MODEL_FOLDER}/${model}/model_best"
+                                            MODEL_DIR="${MODEL_DIR}/${model}/model_best"
                                         else
-                                            MODEL_FOLDER="${MODEL_FOLDER}/${model}/model_last"
+                                            MODEL_DIR="${MODEL_DIR}/${model}/model_last"
                                         fi
                                         if [ ! -d "$MODEL_DIR" ]; then
                                             echo "Skipping: Model doesn't exist → ${MODEL_DIR}"
