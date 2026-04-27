@@ -1,6 +1,6 @@
-# LongBEL in progress...
-
-<!-- <div align="center">
+<div align="center">
+    <img src="figures/overview.svg" alt="LongBEL">
+    <p align="center">
 <a href="https://doi.org/10.48550/arXiv.2601.19667"><img src="https://zenodo.org/badge/DOI/paper.svg" alt="DOI"></a>
 <a href="https://github.com/astral-sh/uv" target="_blank">
     <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json"
@@ -383,4 +383,4 @@ month = jan,
 year = {2026},
 note = {arXiv:2601.19667 [cs]},
 }
-``` -->
+```
