@@ -3,156 +3,158 @@
     <p align="center">
 <a href="https://doi.org/10.48550/arXiv.2601.19667"><img src="https://zenodo.org/badge/DOI/paper.svg" alt="DOI"></a>
 <a href="https://github.com/astral-sh/uv" target="_blank">
-    <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json"
-    alt="UV">
+    <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json" alt="UV">
 </a>
 <a href="https://github.com/astral-sh/ruff" target="_blank">
-    <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v2.json"
-    alt="Ruff">
+    <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v2.json" alt="Ruff">
 </a>
 <a href="https://github.com/Aremaki/LongBEL/blob/main/LICENSE">
    <img alt="GitHub" src="https://img.shields.io/badge/license-MIT-blue">
 </a>
 <h3>
-    <a href="https://huggingface.co/collections/Aremaki/syncabel">🤗 LongBEL HuggingFace Collection</a>
+    <a href="https://huggingface.co/collections/Aremaki/longbel">🤗 LongBEL Hugging Face Collection</a>
 </h3>
 </div>
 
 ## Introduction
 
-**LongBEL** is a novel framework designed to enhance generative biomedical entity linking (BEL) by leveraging Large Language Models (LLMs) to generate synthetic, contextualized training data for all candidate concepts in a target knowledge base (KB).
+**LongBEL** is a document-level framework for biomedical entity linking (BEL). Instead of normalizing each mention independently, LongBEL conditions each prediction on the document context and on previous normalizations produced in the same document.
 
-This repository contains a complete pipeline for:
-- **Synthetic Data Generation**: Scripts and prompts to build custom synthetic datasets covering your entire KB.
-- **Data Preprocessing**: Tools to convert BigBio datasets and select optimal concept synonyms using TF-IDF.
-- **Fine-tuning**: Training scripts for decoder-only and seq2seq models.
-- **Advanced Evaluation**: A novel **LLM-as-a-judge** protocol that assesses semantic relationships (equivalent, broader, narrower) between predictions and gold concepts, going beyond simple exact code matching.
+This design helps the model enforce document-level consistency, especially for recurring biomedical concepts, abbreviations, and underspecified mentions whose correct normalization can be inferred from earlier mentions.
+
+This repository contains the complete pipeline for:
+
+- **Knowledge base preprocessing**: preparing UMLS and SNOMED CT candidate dictionaries.
+- **Dataset construction**: converting biomedical entity linking datasets into LongBEL inputs with document context and prediction memory.
+- **Robust memory training**: constructing realistic prediction memory using cross-validated predictions.
+- **Fine-tuning**: training decoder-only and sequence-to-sequence generative BEL models.
+- **Constrained decoding**: restricting generation to valid concepts from the target knowledge base.
+- **Evaluation and analysis**: computing Recall@1, consistency metrics, cascading-error analysis, and qualitative examples.
+
+## LongBEL Input Format
+
+LongBEL represents each example using three sections:
+
+```text
+### Context
+Document context containing the target [mention].
+
+### Previous Normalizations
+[previous mention]{semantic group} previous predicted concept
+...
+
+### Prediction
+[target mention]{semantic group}
+````
+
+For example:
+
+```text
+### Context
+Remitting seronegative symmetrical synovitis with pitting edema ([RS3PE]) is a rare condition...
+The patient was diagnosed with [RS3PE].
+
+### Previous Normalizations
+[Remitting seronegative symmetrical synovitis with pitting edema]{Disorders} Remitting seronegative symmetrical synovitis with pitting edema
+
+### Prediction
+[RS3PE]{Disorders}
+```
+
+Expected output:
+
+```text
+Remitting seronegative symmetrical synovitis with pitting edema
+```
 
 ## Direct Use
 
-### Generated Synthetic Datasets
-
-We constructed synthetic datasets for three corpora: MedMentions-ST21pv (English), QUAERO (French) and SPACCC (Spanish).
-
-🤗 [Aremaki/LongBEL](https://huggingface.co/datasets/Aremaki/LongBEL)
-
-| Dataset | Language | # Generated Examples | # Concepts in KB | KB Source |
-| :--- | :---: | :---: | :---: | :--- |
-| **SynthMM** | English | ~461k | ~153k | UMLS 2017AA |
-| **SynthQUAERO** | French | ~397k | ~132k | UMLS 2014AB |
-| **SynthSPACCC** | Spanish | ~1810k | ~362k | SNOMED CT 2021 |
-
-### Human-Annotated Datasets
-
-We evaluate LongBEL using established **human-annotated biomedical entity linking benchmarks**, all obtained from publicly available sources and used under their original licenses.
-
-* **MedMentions ST21pv (English)**
-  UMLS-annotated corpus restricted to the ST21pv semantic types.
-  🤗 HuggingFace: [`bigbio/medmentions`](https://huggingface.co/datasets/bigbio/medmentions)
-
-* **QUAERO (French)**
-  UMLS-annotated biomedical corpus derived from MEDLINE abstracts and EMEA documents.
-  🤗 HuggingFace: [`bigbio/quaero`](https://huggingface.co/datasets/bigbio/quaero) (QUAERO-MEDLINE, QUAERO-EMEA)
-
-* **SPACCC (Spanish)**
-  SNOMED CT–based clinical entity linking corpus. The merged dataset is provided in this repository and was sourced from:
-  - SympTEMIST ([https://zenodo.org/records/8223654](https://zenodo.org/records/8223654)),
-  - DisTEMIST ([https://zenodo.org/records/7614764](https://zenodo.org/records/7614764)),
-  - MedProcNER ([https://zenodo.org/records/8224056](https://zenodo.org/records/8224056))
-  **Note**: The dataset is included in this repository and is also available at 🤗 https://huggingface.co/datasets/Aremaki/SPACCC
-
 ### Fine-tuned Models
 
-Checkpoints are available of our best performing model: **Llama-3-8B** fine-tuned on MM-ST21pv, QUAERO-EMEA, QUAERO-MEDLINE, SPACCC:
+We release fine-tuned LongBEL checkpoints for the main benchmarks used in the paper:
 
-🤗 [Aremaki/LongBEL_MedMentions_st21pv](https://huggingface.co/Aremaki/LongBEL_MedMentions_st21pv) \
-🤗 [Aremaki/LongBEL_SPACCC](https://huggingface.co/Aremaki/LongBEL_SPACCC) \
-🤗 [Aremaki/LongBEL_QUAERO_EMEA](https://huggingface.co/Aremaki/LongBEL_QUAERO_EMEA) \
-🤗 [Aremaki/LongBEL_QUAERO_MEDLINE](https://huggingface.co/Aremaki/LongBEL_QUAERO_MEDLINE)
+🤗 [Aremaki/LongBEL_MedMentions_st21pv](https://huggingface.co/Aremaki/LongBEL_MedMentions_st21pv)  
+🤗 [Aremaki/LongBEL_QUAERO_EMEA](https://huggingface.co/Aremaki/LongBEL_QUAERO_EMEA)  
+🤗 [Aremaki/LongBEL_SPACCC](https://huggingface.co/Aremaki/LongBEL_SPACCC)  
 
-#### Loading
+
+Each checkpoint includes the model and the resources required for constrained biomedical entity linking.
+
+### Loading
+
 ```python
 import torch
-from transformers import AutoModelForCausalLM
+from longbel.models import LongBEL
 
-# Load the model (requires trust_remote_code for custom architecture)
-model = AutoModelForCausalLM.from_pretrained(
-    "Aremaki/LongBEL_MedMentions_st21pv",
-    trust_remote_code=True,
-    device_map="auto"
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+model = (
+    LongBEL.from_pretrained("Aremaki/LongBEL_MedMentions_st21pv")
+    .eval()
+    .to(device)
 )
 ```
 
-#### Inference
+### Inference
+
+LongBEL expects inputs in the [BigBio KB format](https://huggingface.co/datasets/bigbio), the schema used by biomedical entity-linking datasets such as MedMentions and QUAERO on Hugging Face.
+
 ```python
-# The input must follow this format
-sentences = [
-    "[TCA]{Chemicals & Drugs} was prescribed for depression",
-    "Patient diagnosed with [AS]{Disorders}"
-]
+from datasets import load_dataset
+
+dataset = load_dataset(
+    "bigbio/medmentions",
+    "medmentions_st21pv_bigbio_kb",
+    split="test",
+)
+
+examples = [dataset[i] for i in range(4)]
 
 results = model.sample(
-    sentences=sentences,
+    data=examples,
     constrained=True,
     num_beams=2,
 )
 
-for i, beam_results in enumerate(results):
-    print(f"Input: {sentences[i]}")
+for example, beam_results in zip(examples, results):
+    print(f"Document ID: {example['document_id']}")
 
-    mention = beam_results[0]["mention"]
-    print(f"Mention: {mention}")
-
-    for j, result in enumerate(beam_results):
+    for result in beam_results:
         print(
-            f"Beam {j+1}:\n"
-            f"Predicted concept name:{result['pred_concept_name']}\n"
+            f"Predicted concept name: {result['pred_concept_name']}\n"
             f"Predicted code: {result['pred_concept_code']}\n"
             f"Beam score: {result['beam_score']:.3f}\n"
         )
 ```
 
-**Output:**
-```
-Input: [TCA]{Chemicals & Drugs} was prescribed for depression
-Mention: TCA
-Beam 1:
-Predicted concept name:Tricyclic antidepressant
-Predicted code: C0003290
-Beam score: 0.566
+### Datasets
 
-Beam 2:
-Predicted concept name:Tricyclic Antidepressants
-Predicted code: C0003290
-Beam score: 0.287
+We provide the processed BigBio-style datasets used with LongBEL on Hugging Face:
 
-Input: Patient diagnosed with [AS]{Disorders}
-Mention: AS
-Beam 1:
-Predicted concept name:AS - Ankylosing spondylitis
-Predicted code: C0038013
-Beam score: 0.968
+- 🤗 [Aremaki/MedMentions](https://huggingface.co/datasets/Aremaki/MedMentions)
+- 🤗 [Aremaki/EMEA](https://huggingface.co/datasets/Aremaki/EMEA)
+- 🤗 [Aremaki/SPACCC](https://huggingface.co/datasets/Aremaki/SPACCC)
 
-Beam 2:
-Predicted concept name:AS - Aortic stenosis
-Predicted code: C0003507
-Beam score: 0.851
-```
+These datasets are formatted for direct use with LongBEL inference and evaluation. The original benchmark sources are MedMentions, QUAERO-EMEA, and the Spanish SPACCC datasets.
 
-## Customize your own
+## Customize Your Own LongBEL Model
 
 ### Requirements
 
-1. **Install uv package manager**:
+Install `uv`:
+
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
-2. **Clone the repository**:
+
+Clone the repository:
+
 ```bash
 git clone https://github.com/Aremaki/LongBEL.git
 cd LongBEL
 ```
-3. **Create virtual environment and install dependencies**:
+
+Create the environment:
 
 ```bash
 uv venv --python 3.9
@@ -160,227 +162,209 @@ source .venv/bin/activate
 uv sync
 ```
 
-### Step-by-Step Pipeline
+## Pipeline
 
-This framework is modular. You can start from raw data (Step 1) or jump to training if you have processed data.
+### Step 1: Preprocess the Knowledge Base
 
-#### Step 1: Preprocess Knowledge Base & Data
-Prepare the entity gazetteer (dictionaries) and the training corpora. Choose the script corresponding to your data source:
+Prepare the terminology resources used for candidate generation and constrained decoding.
 
-**Option A: UMLS-based Datasets (MedMentions, QUAERO)**
-If your target Knowledge Base is the UMLS (e.g. for MedMentions or QUAERO), use the extraction script to process the RRF files:
+#### UMLS-based datasets
+
+For MedMentions and QUAERO:
+
 ```bash
-# Extracts UMLS RRF files, filters by language/source, creates synonym parquets
 uv run python scripts/1_preprocess_termino/run_extract_and_prepare_umls.py
 ```
 
-**Option B: Dedicated Gazetteers in tsv format (SPACCC)**
-If your dataset uses a specific gazetteer in tsv format like SPACCC:
+#### SNOMED CT / SPACCC
+
+For SPACCC-style gazetteers:
+
 ```bash
-# Resolves terminology ambiguities and creates CUI mapping for SNOMED
 uv run bash scripts/1b_preprocess_SPACCC/run.sh
 ```
 
-#### Step 2: Generate Synthetic Data (LongBEL)
-Augment your training data by generating synthetic examples using an LLM.
+### Step 2: Prepare LongBEL Data
 
-1.  **Prepare Concept Prompts**: Select concepts from your KB and create prompts.
-    ```bash
-    uv run python scripts/2_generate_synthetic_data/prepare_concepts.py
-    ```
-2.  **Generate Data**: Run the LLM inference (supports slurm or local run).
-    ```bash
-    uv run bash scripts/2_generate_synthetic_data/run_generate.sh
-    ```
+Convert the original entity linking datasets into LongBEL inputs. This step builds the context, previous normalization memory, and target concept strings.
 
-#### Step 3: Prepare Final Training Data
-Format the processed data into the final inputs required by the generative model.
-
-Prepares source/target sequences (e.g., for T5, BART, Llama).
 ```bash
-# default: prepares MedMentions, EMEA, MEDLINE, SPACCC
-uv run python scripts/3_prepare_data/run.py 
+uv run python scripts/3_prepare_data/run.py
 ```
 
-#### Step 4: Train Model
-Fine-tune your model on the prepared data. Choose between a standard Seq2Seq model (Encoder-Decoder) or a Decoder-only model.
+The resulting examples follow this structure:
 
-**Option A: Encoder-Decoder (Seq2Seq)**
-Suitable for models like BART, T5, mBART.
+```text
+### Context
+...
+
+### Previous Normalizations
+...
+
+### Prediction
+...
+```
+
+### Step 3: Construct Robust Memory
+
+LongBEL uses previous predictions as memory. To avoid training only with perfect gold memory, we construct realistic memory using cross-validation: models trained on several folds generate predictions for held-out folds, and these predictions are used as memory during final training.
+
+```bash
+uv run python scripts/3_prepare_data/build_robust_memory.py
+```
+
+### Step 4: Train LongBEL
+
+#### Decoder-only models
+
+```bash
+uv run python scripts/4b_training_decoder/train.py \
+    --model-name meta-llama/Llama-3.1-8B-Instruct \
+    --dataset-name MedMentions \
+    --context-format hybrid_long
+```
+
+#### Encoder-decoder models
+
 ```bash
 uv run python scripts/4a_training_seq2seq/train.py \
     --model-name facebook/mbart-large-50 \
     --dataset-name MedMentions \
-    --augmented-data
+    --context-format hybrid_long
 ```
 
-**Option B: Decoder-Only**
-Suitable for models like Llama.
-```bash
-# Train on MedMentions with augmented data
-uv run python scripts/4b_training_decoder/train.py \
-    --model-name meta-llama/Meta-Llama-3-8B-Instruct \
-    --dataset-name MedMentions \
-    --augmented-data \
-```
-*(See `scripts/4b_training_decoder/README.md` for full training options)*
-
-#### Step 5: Run Inference
-Generate predictions on the test set.
+### Step 5: Run Inference
 
 ```bash
 uv run python scripts/5_inference/infer.py \
     --model-name <path_to_checkpoint> \
     --dataset-name MedMentions \
-    --constrained  # Use Trie-based constrained decoding
+    --context-format hybrid_long \
+    --constrained
 ```
 
-#### Step 6: Evaluation & Analysis
-Evaluate performance using standard metrics or advanced semantic analysis.
+### Step 6: Evaluate
 
-**Option A: Standard Metrics (Exact Match)**
-Computes Recall@1 and stratified performance (Seen/Unseen).
+Compute standard entity linking metrics:
+
 ```bash
 uv run python scripts/6_evaluate/error_analysis.py
 ```
 
-**Option B: LLM-as-a-judge (Semantic Analysis)**
-Uses an LLM to assess the semantic validity of predictions (`Correct`, `Broader`, `Narrower`).
+Run document-level consistency and cascading-error analyses:
+
 ```bash
-uv run python scripts/6_evaluate/evaluate_llm.py \
-    --datasets SPACCC \
-    --model-name Meta-Llama-3-8B-Instruct
+uv run python scripts/6_evaluate/consistency_analysis.py
+uv run python scripts/6_evaluate/copy_wrong_memory_error.py
 ```
-
-### Computing Resources
-
-**Note on GPU Requirements**: Several steps in this pipeline require GPU resources. The provided slurm scripts (`*.sbatch`) are configured for our specific cluster setup. You will need to:
-
-1. **Adapt slurm scripts**: Modify the slurm configuration (partition, GPU type, memory, etc.) in all `.sbatch` files to match your cluster environment
-2. **Alternative execution**: For local execution without slurm, modify the scripts to use direct Python commands instead of `sbatch`
 
 ## Project Structure
 
-```
+```text
 LongBEL/
-├── scripts/                        # Pipeline stages (numbered)
-│   ├── 1_preprocess_termino/         # Extract & prepare UMLS based datasets
-│   ├── 1b_preprocess_SPACCC/       # Prepare SPACCC (SNOMED)
-│   ├── 2_generate_synthetic_data/  # LLM augmentation pipeline
-│   ├── 3_prepare_data/             # Data prep for Generative models
-│   ├── 4a_training_seq2seq/        # Train Encoder-Decoder (e.g. mBART)
-│   ├── 4b_training_decoder/        # Train Decoder-Only (e.g. Llama)
-│   ├── 5_inference/                # Run inference & constrained decoding
-│   └── 6_evaluate/                 # Evaluation (Exact match, LLM-Judge, Ontology)
-├── syncabel/                       # Core library
-│   ├── error_analysis.py           # Metric computation & bootstrapping
-│   ├── guided_inference.py         # Constrained decoding logic
-│   ├── llm_as_a_judge.py           # Semantic evaluation (LLM-Judge)
-│   ├── models.py                   # Encoder-Decoder model wrappers
-│   ├── parse_data.py               # Data parsing & processing
-│   ├── trie.py                     # Prefix tree for constraints
+├── scripts/
+│   ├── 1_preprocess_termino/       # UMLS preprocessing
+│   ├── 1b_preprocess_SPACCC/       # SPACCC / SNOMED preprocessing
+│   ├── 3_prepare_data/             # LongBEL data and memory construction
+│   ├── 4a_training_seq2seq/        # Encoder-decoder training
+│   ├── 4b_training_decoder/        # Decoder-only training
+│   ├── 5_inference/                # Inference and constrained decoding
+│   └── 6_evaluate/                 # Evaluation and analysis
+├── longbel/
+│   ├── guided_inference.py         # Trie-based constrained decoding
+│   ├── models.py                   # Model wrappers
+│   ├── parse_data.py               # LongBEL input formatting
+│   ├── trie.py                     # Prefix trie for constrained decoding
 │   └── utils.py                    # General utilities
-├── arboEL/                         # Submodule (Baseline)
-├── data/                           # Data directory
-├── pyproject.toml                  # Dependencies (uv/pip)
+├── data/
+├── figures/
+├── pyproject.toml
+└── README.md
 ```
 
-## Hyperparmeters
+## Training Hyperparameters
 
-Hyperparameters for decoder-only model (llama-3-8B) were selected empirically and are summarized below:
+The main decoder-only LongBEL models are trained with the following setup.
 
-| **Hyperparameter**              | **Value**                          |
-|---------------------------------|------------------------------------|
-| **Epochs**                      | 5				       |
-| **Warmup steps**                | 500				       |
-| **Learning Rate**               | 3e-5  	                       |
-| **Learning Scheduler**          | Linear                             |
-| **Batch Size**                  | 1 				       |
-| **Packing**	                  | True(concatenate multiple examples)|
-| **Optimizer**                   | AdamW                              |
-| **Adam $\epsilon$**             | 1e-8                               |
-| **Adam $\beta$**                | (0.9, 0.999)                       |
-| **Attention Dropout**           | 0.1                                |
-| **Max Length**                  | 2048 			       |
-| **Evaluation Strategy**         | "steps" (with `eval_steps=2000`)   |
-| **Save Strategy**               | "steps" (with `save_steps=2000`)   |
-| **Logging Strategy**            | "steps" (with `logging_steps=2000`)|
-| **Warmup Ratio**                | 0.03                               |
-| **Seed**                        | 42                                 |
-| **Mixed Precision Training**    | bf16 			       |
+| Hyperparameter           |                                         Value |
+| ------------------------ | --------------------------------------------: |
+| Base model               |                         Llama-3.1-8B-Instruct |
+| Epochs                   |                                            50 |
+| Learning rate            |                                          3e-5 |
+| Scheduler                |                                        Linear |
+| Warmup ratio             |                                          0.03 |
+| Precision                |                                          BF16 |
+| Attention implementation |                             Flash Attention 2 |
+| Optimizer                |                                         AdamW |
+| Maximum sequence length  | Longest tokenized input in the training split |
+| Batch size               |                `16384 // max_sequence_length` |
+| Gradient accumulation    |                                             1 |
 
-*Training hyperparameters used for fine-tuning our BEL models.*
+At inference time, we use beam search with 5 beams and BF16 precision.
 
 ## Scores
 
-Entity linking performance (Recall@1) on biomedical benchmarks. The best results are shown in **bold**, the second-best results are <u>underlined</u>, and the "Average" column reports the mean score across the four benchmarks.
+Entity linking performance is reported using Recall@1 with bootstrap confidence intervals. The best result is shown in **bold**, and the second-best result is <u>underlined</u>.
 
-| Model | MM-ST21PV<br>(english) | QUAERO-MEDLINE<br>(french) | QUAERO-EMEA<br>(french) | SPACCC<br>(spanish) | Avg. |
+| Model | MM-ST21pv<br>(English) | QUAERO-EMEA<br>(French) | SympTEMIST<br>(Spanish) | DisTEMIST<br>(Spanish) | MedProcNER<br>(Spanish) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| SciSpacy | 53.8 | 40.5 | 37.1 | 13.2 | 36.2 |
-| SapBERT | 51.1 | 50.6 | 49.8 | 33.9 | 46.4 |
-| CODER-all | 56.6 | 58.7 | 58.1 | 43.7 | 54.3 |
-| SapBERT-all | 64.6 | 74.7 | 67.9 | 47.9 | 63.8 |
-| ArboEL | <u>74.5</u> | 70.9 | 62.8 | 49.0 | 64.2 |
-| mBART-large | 65.5 | 61.5 | 58.6 | 57.7 | 60.8 |
-| + Guided inference | 70.0 | 72.8 | 71.1 | 61.8 | 68.9 |
-| **+ LongBEL (Our method)** | 71.5 | 77.1 | <u>75.3</u> | 64.0 | 72.0 |
-| Llama-3-8B | 69.0 | 66.4 | 65.5 | 59.9 | 65.2 |
-| + Guided inference | 74.4 | <u>77.5</u> | 72.9 | <u>64.2</u> | <u>72.3</u> |
-| **+ LongBEL (Our method)** | **75.4** | **79.7** | **79.0** | **67.0** | **75.3** |
-
-Here, we provide the source repositories for the baselines:
-- [**SciSpacy**](https://github.com/allenai/scispacy)
-- [**SapBERT**](https://hf.co/cambridgeltl/SapBERT-from-PubMedBERT-fulltext)
-- [**SapBERT-all**](https://hf.co/cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR)
-- [**CODER-all**](https://hf.co/GanjinZero/coder_all)
-- [**ArboEL**](https://github.com/dhdhagar/arboEL)
-- [**mBART-large**](https://hf.co/facebook/mbart-large-50)
-- [**LLaMA-3-8B**](https://hf.co/meta-llama/Meta-Llama-3-8B-Instruct).
+| **Context-Free BEL** ||||| |
+| SciSpacy | 53.8 ± 1.0 | 37.1 ± 4.3 | 9.8 ± 1.3 | 21.1 ± 1.9 | 10.3 ± 1.2 |
+| SapBERT | 65.6 ± 1.0 | 59.7 ± 3.8 | 34.2 ± 2.0 | 38.6 ± 2.6 | 30.4 ± 2.1 |
+| CODER-all | 62.9 ± 1.1 | 66.9 ± 4.0 | 42.2 ± 2.2 | 47.0 ± 2.6 | 42.7 ± 2.1 |
+| SapBERT-all | 64.6 ± 1.1 | 67.9 ± 3.9 | 49.8 ± 2.4 | 49.6 ± 2.6 | 45.1 ± 2.2 |
+| BERGAMOT | 60.9 ± 1.1 | 63.8 ± 4.9 | 48.0 ± 2.7 | 48.9 ± 2.4 | 42.3 ± 2.2 |
+| **Local-Context BEL** ||||| |
+| ArboEL | 76.9 ± 0.9 | 63.0 ± 3.9 | 55.4 ± 2.5 | 54.7 ± 2.6 | 59.7 ± 2.6 |
+| GENRE / mBART-large | 69.6 ± 1.0 | 69.3 ± 5.4 | 59.8 ± 2.7 | 58.7 ± 2.7 | 66.0 ± 2.3 |
+| GENRE / Llama-1B | 73.1 ± 1.0 | 75.1 ± 3.6 | 60.5 ± 2.4 | 62.5 ± 2.3 | 67.4 ± 2.1 |
+| GENRE / Llama-8B | 75.0 ± 0.9 | 73.8 ± 4.0 | 61.7 ± 2.5 | 63.2 ± 2.5 | 68.3 ± 2.2 |
+| **Global-Context BEL (LongBEL)** ||||| |
+| LongBEL-1B | 77.6 ± 0.9 | 74.5 ± 3.7 | 59.8 ± 2.5 | 61.9 ± 2.4 | 66.6 ± 2.1 |
+| LongBEL-1B + Ensemble | 78.6 ± 0.8 | <u>77.2 ± 3.0</u> | 61.8 ± 2.5 | <u>64.3 ± 2.2</u> | 69.0 ± 2.0 |
+| LongBEL-8B | <u>79.3 ± 0.8</u> | 74.9 ± 4.0 | <u>62.0 ± 2.6</u> | 63.6 ± 2.1 | <u>69.0 ± 2.1</u> |
+| LongBEL-8B + Ensemble | **80.0 ± 0.8** | **77.6 ± 3.0** | **63.3 ± 2.5** | **65.8 ± 2.2** | **71.0 ± 2.0** |
 
 
-## Contributing
+## Computing Resources
 
-Issues and pull requests welcome!
+Several steps require GPU resources. The provided Slurm scripts are configured for our cluster setup and may need to be adapted to your environment.
+
+You may need to change:
+
+* partition name,
+* GPU type,
+* number of GPUs,
+* memory,
+* wall time,
+* paths to UMLS / SNOMED resources.
+
+## Ethical Considerations
+
+LongBEL is trained and evaluated on biomedical entity linking datasets and knowledge bases used under their respective licenses. No new patient data are collected by this repository.
+
+The model is intended for research in biomedical entity linking. It should not be used as a standalone clinical decision-making system. Predictions should be validated before any downstream biomedical or clinical use.
 
 ## Acknowledgments
 
-- **Guided inference**: While its design was originally inspired by ideas from the [GENRE](https://github.com/facebookresearch/GENRE) repository, the guided inference script has been fully refactored for BEL.
-- **Computing Resources**: Experiments were conducted using HPC resources from GENCI–IDRIS.
-- **Collaboration**: This work was supported by the LIMICS research laboratory, with significant contributions from the Barcelona Supercomputing Center (BSC), particularly regarding the Spanish datasets, annotations, and valuable methodological insights.
-
-## Ethical considerations
-
-This work relies exclusively on synthetic data, mitigating privacy risks associated with the use of real patient records. No identifiable clinical data were used in any stage of training or evaluation.
-
-Generating large-scale synthetic data with language models, however, has a notable environmental cost due to GPU energy consumption. We encourage future research to carefully evaluate the trade-off between data volume, model performance, and environmental impact.
-
-All existing artifacts were used in accordance with their licenses and access conditions. QUAERO was used under GFDL for research purposes, MedMentions under CC0, and the UMLS Metathesaurus under its License Agreement, which permits research use with acknowledgment of the National Library of Medicine. Our synthetic datasets were derived solely for research in biomedical entity linking, and their intended use is clearly specified for research purposes. They are released under an Apache 2.0 license, ensuring compatibility with the original access conditions and enabling other researchers to build upon our work.
-
-The data we collected, used, or released should not contain any personally identifying information or harmful content. The synthetic data was generated by an LLM that has been fine-tuned to minimize the risk of producing identifying, harmful, or offensive content. Nevertheless, as with any generative model, unintended outputs cannot be completely ruled out.
-
-The authors used GitHub Copilot for code completion. All code was reviewed and is the authors' responsibility.
-
-## Computational cost and environmental impact
-
-Synthetic MedMentions generation required **4.23 s per CUI**. For **153,374 CUIs**, this corresponds to approximately **180 GPU hours** on the Jean Zay HPC cluster. Using the cluster’s official estimate of **259 Wh per GPU·hour**, total energy consumption was **46.6 kWh**, resulting in an estimated carbon footprint of **~1.0–1.4 kg CO₂e** given the French electricity mix which is comparable to driving a typical thermic car for approximately 5–8 km.
+* **Constrained decoding**: inspired by autoregressive entity retrieval and adapted for biomedical entity linking.
+* **Computing resources**: experiments were conducted using HPC resources from GENCI–IDRIS.
+* **Collaborations**: this work was supported by LIMICS and collaborators from the Barcelona Supercomputing Center.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE) for details.
 
 ## Citation
-```
-@misc{remaki_syncabel_2026,
-author = {Remaki, Adam and Gérardin, Christel and Farré-Maduell, Eulàlia and Krallinger, Martin and Tannier, Xavier},
-title = {{LongBEL}: {Synthetic} {Contextualized} {Augmentation} for {Biomedical} {Entity} {Linking}},
-shorttitle = {{LongBEL}},
-url = {http://arxiv.org/abs/2601.19667},
-doi = {10.48550/arXiv.2601.19667},
-urldate = {2026-01-28},
-publisher = {arXiv},
-month = jan,
-year = {2026},
-note = {arXiv:2601.19667 [cs]},
+
+```bibtex
+@misc{remaki_longbel_2026,
+  author = {Remaki, Adam and Gérardin, Christel and Tannier, Xavier},
+  title = {{LongBEL}: Long-Context and Document-Consistent Biomedical Entity Linking},
+  url = {http://arxiv.org/abs/2601.19667},
+  doi = {10.48550/arXiv.2601.19667},
+  publisher = {arXiv},
+  year = {2026},
+  note = {arXiv:2601.19667 [cs]}
 }
 ```
