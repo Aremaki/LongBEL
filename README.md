@@ -72,8 +72,8 @@ Remitting seronegative symmetrical synovitis with pitting edema
 
 We release fine-tuned LongBEL checkpoints for the main benchmarks used in the paper:
 
-🤗 [AnonymousARR42/LongBEL_8B_MedMentions_st21pv](https://huggingface.co/AnonymousARR42/LongBEL_8B_MedMentions_st21pv) 
-🤗 [AnonymousARR42/LongBEL_1B_MedMentions_st21pv](https://huggingface.co/AnonymousARR42/LongBEL_1B_MedMentions_st21pv)   
+🤗 [AnonymousARR42/LongBEL_8B_MedMentions_st21pv](https://huggingface.co/AnonymousARR42/LongBEL_8B_MedMentions_st21pv)  
+🤗 [AnonymousARR42/LongBEL_1B_MedMentions_st21pv](https://huggingface.co/AnonymousARR42/LongBEL_1B_MedMentions_st21pv)  
 🤗 [AnonymousARR42/LongBEL_8B_QUAERO_EMEA](https://huggingface.co/AnonymousARR42/LongBEL_8B_QUAERO_EMEA)  
 🤗 [AnonymousARR42/LongBEL_1B_QUAERO_EMEA](https://huggingface.co/AnonymousARR42/LongBEL_1B_QUAERO_EMEA)  
 🤗 [AnonymousARR42/LongBEL_8B_SPACCC](https://huggingface.co/AnonymousARR42/LongBEL_SPACCC)  
