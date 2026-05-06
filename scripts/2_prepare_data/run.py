@@ -405,7 +405,7 @@ def run(
         )
         _process_hf_dataset(
             "MedMentions",
-            "Aremaki/MedMentions",
+            "AnonymousARR42/MedMentions",
             lang,
             code_to_title_mm,
             code_to_syn_mm,
@@ -451,7 +451,7 @@ def run(
             if "EMEA" in datasets:
                 _process_hf_dataset(
                     "EMEA",
-                    "Aremaki/EMEA",
+                    "AnonymousARR42/EMEA",
                     lang,
                     code_to_title_quaero,
                     code_to_syn_quaero,
@@ -473,7 +473,7 @@ def run(
             if "MEDLINE" in datasets:
                 _process_hf_dataset(
                     "MEDLINE",
-                    "Aremaki/MEDLINE",
+                    "AnonymousARR42/MEDLINE",
                     lang,
                     code_to_title_quaero,
                     code_to_syn_quaero,
@@ -521,7 +521,7 @@ def run(
         )
         _process_hf_dataset(
             "SPACCC",
-            "Aremaki/SPACCC",
+            "AnonymousARR42/SPACCC",
             lang,
             code_to_title_spaccc,
             code_to_syn_spaccc,

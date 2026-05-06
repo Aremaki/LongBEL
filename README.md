@@ -8,11 +8,11 @@
 <a href="https://github.com/astral-sh/ruff" target="_blank">
     <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v2.json" alt="Ruff">
 </a>
-<a href="https://github.com/Aremaki/LongBEL/blob/main/LICENSE">
+<a href="https://anonymous.4open.science/r/LongBEL-31AD/LICENSE">
    <img alt="GitHub" src="https://img.shields.io/badge/license-MIT-blue">
 </a>
 <h3>
-    <a href="https://huggingface.co/collections/Aremaki/longbel">🤗 LongBEL Hugging Face Collection</a>
+    <a href="https://huggingface.co/collections/AnonymousARR42/longbel">🤗 LongBEL Hugging Face Collection</a>
 </h3>
 </div>
 
@@ -73,10 +73,12 @@ Remitting seronegative symmetrical synovitis with pitting edema
 
 We release fine-tuned LongBEL checkpoints for the main benchmarks used in the paper:
 
-🤗 [Aremaki/LongBEL_MedMentions_st21pv](https://huggingface.co/Aremaki/LongBEL_MedMentions_st21pv)  
-🤗 [Aremaki/LongBEL_QUAERO_EMEA](https://huggingface.co/Aremaki/LongBEL_QUAERO_EMEA)  
-🤗 [Aremaki/LongBEL_SPACCC](https://huggingface.co/Aremaki/LongBEL_SPACCC)  
-
+🤗 [AnonymousARR42/LongBEL_8B_MedMentions_st21pv](https://huggingface.co/AnonymousARR42/LongBEL_8B_MedMentions_st21pv) 
+🤗 [AnonymousARR42/LongBEL_1B_MedMentions_st21pv](https://huggingface.co/AnonymousARR42/LongBEL_1B_MedMentions_st21pv)   
+🤗 [AnonymousARR42/LongBEL_8B_QUAERO_EMEA](https://huggingface.co/AnonymousARR42/LongBEL_8B_QUAERO_EMEA)  
+🤗 [AnonymousARR42/LongBEL_1B_QUAERO_EMEA](https://huggingface.co/AnonymousARR42/LongBEL_1B_QUAERO_EMEA)  
+🤗 [AnonymousARR42/LongBEL_8B_SPACCC](https://huggingface.co/AnonymousARR42/LongBEL_SPACCC)  
+🤗 [AnonymousARR42/LongBEL_1B_SPACCC](https://huggingface.co/AnonymousARR42/LongBEL_1B_SPACCC)  
 
 Each checkpoint includes the model and the resources required for constrained biomedical entity linking.
 
@@ -89,7 +91,7 @@ from longbel.models import LongBEL
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 model = (
-    LongBEL.from_pretrained("Aremaki/LongBEL_MedMentions_st21pv")
+    LongBEL.from_pretrained("AnonymousARR42/LongBEL_8B_MedMentions_st21pv")
     .eval()
     .to(device)
 )
@@ -131,9 +133,9 @@ for example, beam_results in zip(examples, results):
 
 We provide the processed BigBio-style datasets used with LongBEL on Hugging Face:
 
-- 🤗 [Aremaki/MedMentions](https://huggingface.co/datasets/Aremaki/MedMentions)
-- 🤗 [Aremaki/EMEA](https://huggingface.co/datasets/Aremaki/EMEA)
-- 🤗 [Aremaki/SPACCC](https://huggingface.co/datasets/Aremaki/SPACCC)
+- 🤗 [AnonymousARR42/MedMentions](https://huggingface.co/datasets/AnonymousARR42/MedMentions)
+- 🤗 [AnonymousARR42/EMEA](https://huggingface.co/datasets/AnonymousARR42/EMEA)
+- 🤗 [AnonymousARR42/SPACCC](https://huggingface.co/datasets/AnonymousARR42/SPACCC)
 
 These datasets are formatted for direct use with LongBEL inference and evaluation. The original benchmark sources are MedMentions, QUAERO-EMEA, and the Spanish SPACCC datasets.
 
@@ -150,7 +152,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 Clone the repository:
 
 ```bash
-git clone https://github.com/Aremaki/LongBEL.git
+git clone https://anonymous.4open.science/r/LongBEL-31AD
 cd LongBEL
 ```
 
@@ -189,7 +191,7 @@ uv run bash scripts/1b_preprocess_SPACCC/run.sh
 Convert the original entity linking datasets into LongBEL inputs. This step builds the context, previous normalization memory, and target concept strings.
 
 ```bash
-uv run python scripts/3_prepare_data/run.py
+uv run python scripts/2_prepare_data/run.py
 ```
 
 The resulting examples follow this structure:
@@ -210,25 +212,14 @@ The resulting examples follow this structure:
 LongBEL uses previous predictions as memory. To avoid training only with perfect gold memory, we construct realistic memory using cross-validation: models trained on several folds generate predictions for held-out folds, and these predictions are used as memory during final training.
 
 ```bash
-uv run python scripts/3_prepare_data/build_robust_memory.py
+uv run python scripts/2_prepare_data/build_robust_memory.py
 ```
 
 ### Step 4: Train LongBEL
 
-#### Decoder-only models
-
 ```bash
-uv run python scripts/4b_training_decoder/train.py \
+uv run python scripts/3_training_decoder/train.py \
     --model-name meta-llama/Llama-3.1-8B-Instruct \
-    --dataset-name MedMentions \
-    --context-format hybrid_long
-```
-
-#### Encoder-decoder models
-
-```bash
-uv run python scripts/4a_training_seq2seq/train.py \
-    --model-name facebook/mbart-large-50 \
     --dataset-name MedMentions \
     --context-format hybrid_long
 ```
@@ -236,7 +227,7 @@ uv run python scripts/4a_training_seq2seq/train.py \
 ### Step 5: Run Inference
 
 ```bash
-uv run python scripts/5_inference/infer.py \
+uv run python scripts/4_inference/infer.py \
     --model-name <path_to_checkpoint> \
     --dataset-name MedMentions \
     --context-format hybrid_long \
@@ -248,14 +239,14 @@ uv run python scripts/5_inference/infer.py \
 Compute standard entity linking metrics:
 
 ```bash
-uv run python scripts/6_evaluate/error_analysis.py
+uv run python scripts/5_evaluate/error_analysis.py
 ```
 
 Run document-level consistency and cascading-error analyses:
 
 ```bash
-uv run python scripts/6_evaluate/consistency_analysis.py
-uv run python scripts/6_evaluate/copy_wrong_memory_error.py
+uv run python scripts/5_evaluate/consistency_analysis.py
+uv run python scripts/5_evaluate/copy_wrong_memory_error.py
 ```
 
 ## Project Structure
@@ -264,12 +255,10 @@ uv run python scripts/6_evaluate/copy_wrong_memory_error.py
 LongBEL/
 ├── scripts/
 │   ├── 1_preprocess_termino/       # UMLS preprocessing
-│   ├── 1b_preprocess_SPACCC/       # SPACCC / SNOMED preprocessing
-│   ├── 3_prepare_data/             # LongBEL data and memory construction
-│   ├── 4a_training_seq2seq/        # Encoder-decoder training
-│   ├── 4b_training_decoder/        # Decoder-only training
-│   ├── 5_inference/                # Inference and constrained decoding
-│   └── 6_evaluate/                 # Evaluation and analysis
+│   ├── 2_prepare_data/             # LongBEL data and memory construction
+│   ├── 3_training_decoder/        # Decoder-only training
+│   ├── 4_inference/                # Inference and constrained decoding
+│   └── 5_evaluate/                 # Evaluation and analysis
 ├── longbel/
 │   ├── guided_inference.py         # Trie-based constrained decoding
 │   ├── models.py                   # Model wrappers
@@ -354,17 +343,3 @@ The model is intended for research in biomedical entity linking. It should not b
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
-
-## Citation
-
-```bibtex
-@misc{remaki_longbel_2026,
-  author = {Remaki, Adam and Gérardin, Christel and Tannier, Xavier},
-  title = {{LongBEL}: Long-Context and Document-Consistent Biomedical Entity Linking},
-  url = {http://arxiv.org/abs/2601.19667},
-  doi = {10.48550/arXiv.2601.19667},
-  publisher = {arXiv},
-  year = {2026},
-  note = {arXiv:2601.19667 [cs]}
-}
-```

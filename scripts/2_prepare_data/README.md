@@ -29,10 +29,9 @@ python scripts/3_prepare_data/run.py --context-format hybrid_long
 Then upload them to the HuggingFace Repository:
 ```bash
 huggingface-cli login
-huggingface-cli upload Aremaki/MedMentions data/final_data/MedMentions/bigbio_dataset --repo-type dataset
-huggingface-cli upload Aremaki/SPACCC data/final_data/SPACCC/bigbio_dataset --repo-type dataset
-huggingface-cli upload Aremaki/EMEA data/final_data/EMEA/bigbio_dataset --repo-type dataset
-huggingface-cli upload Aremaki/MEDLINE data/final_data/MEDLINE/bigbio_dataset --repo-type dataset
+huggingface-cli upload AnonymousARR42/MedMentions data/final_data/MedMentions/bigbio_dataset --repo-type dataset
+huggingface-cli upload AnonymousARR42/SPACCC data/final_data/SPACCC/bigbio_dataset --repo-type dataset
+huggingface-cli upload AnonymousARR42/EMEA data/final_data/EMEA/bigbio_dataset --repo-type dataset
 ```
 
 
