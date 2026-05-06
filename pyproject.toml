@@ -81,7 +81,7 @@ ignore = [
 line-length = 88
 
 [tool.ruff.isort]
-known-first-party = ["syncabel"]
+known-first-party = ["longbel"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
