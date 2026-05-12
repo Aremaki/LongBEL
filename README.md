@@ -76,7 +76,7 @@ We release fine-tuned LongBEL checkpoints for the main benchmarks used in the pa
 🤗 [AnonymousARR42/LongBEL_1B_MedMentions_st21pv](https://huggingface.co/AnonymousARR42/LongBEL_1B_MedMentions_st21pv)  
 🤗 [AnonymousARR42/LongBEL_8B_QUAERO_EMEA](https://huggingface.co/AnonymousARR42/LongBEL_8B_QUAERO_EMEA)  
 🤗 [AnonymousARR42/LongBEL_1B_QUAERO_EMEA](https://huggingface.co/AnonymousARR42/LongBEL_1B_QUAERO_EMEA)  
-🤗 [AnonymousARR42/LongBEL_8B_SPACCC](https://huggingface.co/AnonymousARR42/LongBEL_SPACCC)  
+🤗 [AnonymousARR42/LongBEL_8B_SPACCC](https://huggingface.co/AnonymousARR42/LongBEL_8B_SPACCC)  
 🤗 [AnonymousARR42/LongBEL_1B_SPACCC](https://huggingface.co/AnonymousARR42/LongBEL_1B_SPACCC)  
 
 Each checkpoint includes the model and the resources required for constrained biomedical entity linking.
@@ -113,7 +113,6 @@ examples = [dataset[i] for i in range(4)]
 
 results = model.sample(
     data=examples,
-    constrained=True,
     num_beams=2,
 )
 
@@ -174,7 +173,7 @@ Prepare the terminology resources used for candidate generation and constrained 
 For MedMentions and QUAERO:
 
 ```bash
-uv run python scripts/1_preprocess_termino/run_extract_and_prepare_umls.py
+uv run python scripts/1_preprocess_termino/run_extract_and_prepare_termino.py
 ```
 
 #### SNOMED CT / SPACCC
@@ -182,7 +181,7 @@ uv run python scripts/1_preprocess_termino/run_extract_and_prepare_umls.py
 For SPACCC-style gazetteers:
 
 ```bash
-uv run bash scripts/1b_preprocess_SPACCC/run.sh
+uv run python scripts/1_preprocess_termino/prepare_snomed.py
 ```
 
 ### Step 2: Prepare LongBEL Data
@@ -208,10 +207,10 @@ The resulting examples follow this structure:
 
 ### Step 3: Construct Robust Memory
 
-LongBEL uses previous predictions as memory. To avoid training only with perfect gold memory, we construct realistic memory using cross-validation: models trained on several folds generate predictions for held-out folds, and these predictions are used as memory during final training.
+LongBEL uses previous predictions as memory. To avoid training only with perfect gold memory, we construct realistic memory using cross-validation (Out-of-Fold or OOF predictions): models trained on several folds generate predictions for held-out folds, and these predictions are used as memory during final training.
 
 ```bash
-uv run python scripts/2_prepare_data/build_robust_memory.py
+uv run python scripts/3_training_decoder/build_oof_memory_dataset.py
 ```
 
 ### Step 4: Train LongBEL
@@ -225,12 +224,19 @@ uv run python scripts/3_training_decoder/train.py \
 
 ### Step 5: Run Inference
 
+You can run inference using a local checkpoint or one of the Hugging Face models (e.g., `AnonymousARR42/LongBEL_8B_MedMentions_st21pv`):
+
 ```bash
 uv run python scripts/4_inference/infer.py \
-    --model-name <path_to_checkpoint> \
+    --model-name <path_to_checkpoint_or_hf_id> \
     --dataset-name MedMentions \
     --context-format hybrid_long \
     --constrained
+```
+
+You can also use the wrapper provided for running all inferences via:
+```bash
+./scripts/4_inference/run_all_inferences.sh
 ```
 
 ### Step 6: Evaluate
@@ -241,31 +247,29 @@ Compute standard entity linking metrics:
 uv run python scripts/5_evaluate/error_analysis.py
 ```
 
-Run document-level consistency and cascading-error analyses:
-
-```bash
-uv run python scripts/5_evaluate/consistency_analysis.py
-uv run python scripts/5_evaluate/copy_wrong_memory_error.py
-```
-
 ## Project Structure
 
 ```text
 LongBEL/
 ├── scripts/
-│   ├── 1_preprocess_termino/       # UMLS preprocessing
-│   ├── 2_prepare_data/             # LongBEL data and memory construction
-│   ├── 3_training_decoder/        # Decoder-only training
+│   ├── 1_preprocess_termino/       # UMLS and SNOMED preprocessing
+│   ├── 2_prepare_data/             # LongBEL data preparation
+│   ├── 3_training_decoder/         # Decoder-only training
 │   ├── 4_inference/                # Inference and constrained decoding
-│   └── 5_evaluate/                 # Evaluation and analysis
+│   └── 5_evaluate/                 # Evaluation and error analysis
 ├── longbel/
+│   ├── embeddings.py               # Embedding utilities
 │   ├── guided_inference.py         # Trie-based constrained decoding
-│   ├── models.py                   # Model wrappers
+│   ├── longbel.py                  # Model wrappers and main classes
+│   ├── longbel_all_in_one.py       # Pipeline execution wrapper
 │   ├── parse_data.py               # LongBEL input formatting
 │   ├── trie.py                     # Prefix trie for constrained decoding
 │   └── utils.py                    # General utilities
+├── models/                         # Saved TF-IDF tools and models
 ├── data/
 ├── figures/
+├── logs/
+├── results/
 ├── pyproject.toml
 └── README.md
 ```
