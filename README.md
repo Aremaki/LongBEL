@@ -7,11 +7,11 @@
 <a href="https://github.com/astral-sh/ruff" target="_blank">
     <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v2.json" alt="Ruff">
 </a>
-<a href="https://anonymous.4open.science/r/LongBEL-31AD/LICENSE">
+<a href="https://github.com/Aremaki/LongBEL/blob/main/LICENSE">
    <img alt="GitHub" src="https://img.shields.io/badge/license-MIT-blue">
 </a>
 <h3>
-    <a href="https://huggingface.co/collections/AnonymousARR42/longbel">🤗 LongBEL Hugging Face Collection</a>
+    <a href="https://huggingface.co/collections/Aremaki/longbel">🤗 LongBEL Hugging Face Collection</a>
 </h3>
 </div>
 
@@ -72,12 +72,12 @@ Remitting seronegative symmetrical synovitis with pitting edema
 
 We release fine-tuned LongBEL checkpoints for the main benchmarks used in the paper:
 
-🤗 [AnonymousARR42/LongBEL_8B_MedMentions_st21pv](https://huggingface.co/AnonymousARR42/LongBEL_8B_MedMentions_st21pv)  
-🤗 [AnonymousARR42/LongBEL_1B_MedMentions_st21pv](https://huggingface.co/AnonymousARR42/LongBEL_1B_MedMentions_st21pv)  
-🤗 [AnonymousARR42/LongBEL_8B_QUAERO_EMEA](https://huggingface.co/AnonymousARR42/LongBEL_8B_QUAERO_EMEA)  
-🤗 [AnonymousARR42/LongBEL_1B_QUAERO_EMEA](https://huggingface.co/AnonymousARR42/LongBEL_1B_QUAERO_EMEA)  
-🤗 [AnonymousARR42/LongBEL_8B_SPACCC](https://huggingface.co/AnonymousARR42/LongBEL_8B_SPACCC)  
-🤗 [AnonymousARR42/LongBEL_1B_SPACCC](https://huggingface.co/AnonymousARR42/LongBEL_1B_SPACCC)  
+🤗 [Aremaki/LongBEL_8B_MedMentions_st21pv](https://huggingface.co/Aremaki/LongBEL_8B_MedMentions_st21pv)  
+🤗 [Aremaki/LongBEL_1B_MedMentions_st21pv](https://huggingface.co/Aremaki/LongBEL_1B_MedMentions_st21pv)  
+🤗 [Aremaki/LongBEL_8B_QUAERO_EMEA](https://huggingface.co/Aremaki/LongBEL_8B_QUAERO_EMEA)  
+🤗 [Aremaki/LongBEL_1B_QUAERO_EMEA](https://huggingface.co/Aremaki/LongBEL_1B_QUAERO_EMEA)  
+🤗 [Aremaki/LongBEL_8B_SPACCC](https://huggingface.co/Aremaki/LongBEL_8B_SPACCC)  
+🤗 [Aremaki/LongBEL_1B_SPACCC](https://huggingface.co/Aremaki/LongBEL_1B_SPACCC)  
 
 Each checkpoint includes the model and the resources required for constrained biomedical entity linking.
 
@@ -90,7 +90,7 @@ from longbel.models import LongBEL
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 model = (
-    LongBEL.from_pretrained("AnonymousARR42/LongBEL_8B_MedMentions_st21pv")
+    LongBEL.from_pretrained("Aremaki/LongBEL_8B_MedMentions_st21pv")
     .eval()
     .to(device)
 )
@@ -131,9 +131,9 @@ for example, beam_results in zip(examples, results):
 
 We provide the processed BigBio-style datasets used with LongBEL on Hugging Face:
 
-- 🤗 [AnonymousARR42/MedMentions](https://huggingface.co/datasets/AnonymousARR42/MedMentions)
-- 🤗 [AnonymousARR42/EMEA](https://huggingface.co/datasets/AnonymousARR42/EMEA)
-- 🤗 [AnonymousARR42/SPACCC](https://huggingface.co/datasets/AnonymousARR42/SPACCC)
+- 🤗 [Aremaki/MedMentions](https://huggingface.co/datasets/Aremaki/MedMentions)
+- 🤗 [Aremaki/EMEA](https://huggingface.co/datasets/Aremaki/EMEA)
+- 🤗 [Aremaki/SPACCC](https://huggingface.co/datasets/Aremaki/SPACCC)
 
 These datasets are formatted for direct use with LongBEL inference and evaluation. The original benchmark sources are MedMentions, QUAERO-EMEA, and the Spanish SPACCC datasets.
 
@@ -150,7 +150,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 Clone the repository:
 
 ```bash
-git clone https://anonymous.4open.science/r/LongBEL-31AD
+git clone https://github.com/Aremaki/LongBEL
 cd LongBEL
 ```
 
@@ -224,7 +224,7 @@ uv run python scripts/3_training_decoder/train.py \
 
 ### Step 5: Run Inference
 
-You can run inference using a local checkpoint or one of the Hugging Face models (e.g., `AnonymousARR42/LongBEL_8B_MedMentions_st21pv`):
+You can run inference using a local checkpoint or one of the Hugging Face models (e.g., `Aremaki/LongBEL_8B_MedMentions_st21pv`):
 
 ```bash
 uv run python scripts/4_inference/infer.py \

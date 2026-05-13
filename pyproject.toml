@@ -9,7 +9,7 @@ description = "LongBEL: A Biomedical Entity Linking Framework using long context
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
-    {name = "XXXXXX", email = "anonymousarr42@gmail.com"},
+    {name = "Adam Remaki", email = "ad.remaki@gmail.com"},
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -58,7 +58,7 @@ scipacy = [
 ]
 
 [project.urls]
-Repository = "https://anonymous.4open.science/r/LongBEL-31AD"
+Repository = "https://github.com/Aremaki/LongBEL"
 
 [tool.ruff]
 # Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.

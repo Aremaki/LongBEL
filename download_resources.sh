@@ -20,7 +20,7 @@ else
 fi
 
 if command -v huggingface-cli >/dev/null 2>&1; then
-  huggingface-cli download AnonymousARR42/BEL_resources \
+  huggingface-cli download Aremaki/BEL_resources \
     --repo-type dataset \
     --local-dir "$OUT_DIR" \
     --include "termino_raw/**"
