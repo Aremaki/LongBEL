@@ -32,6 +32,7 @@ import random
 import re
 from collections import defaultdict
 from collections.abc import Iterable, Sized
+from copy import deepcopy
 from itertools import chain, repeat
 from pathlib import Path
 from typing import Any
@@ -323,6 +324,41 @@ def normalize_scores(scores: dict[str, Any]) -> dict[str, Any]:
     if "ner" in scores:
         return scores
     return {"ner": {"exact_ner": scores}}
+
+
+def score_docs(
+    nlp: Pipeline,  # type: ignore
+    docs: list[Doc],
+    scorer: Any,
+    pipe_names: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Score the model on gold docs.
+
+    EDS-NLP scorers expect:
+        scorer(gold_docs, predicted_docs)
+
+    not:
+        scorer(nlp, docs)
+    """
+
+    # Make prediction copies so we do not overwrite gold annotations
+    pred_docs = deepcopy(docs)
+
+    # Remove gold annotations from the prediction copies
+    for doc in pred_docs:
+        doc.ents = []
+        if "gold_spans" in doc.spans:
+            doc.spans["gold_spans"] = []
+
+    # Run only the requested pipe if provided
+    if pipe_names is None:
+        pred_docs = list(nlp.pipe(pred_docs))
+    else:
+        with nlp.select_pipes(enable=pipe_names):
+            pred_docs = list(nlp.pipe(pred_docs))
+
+    return normalize_scores(scorer(docs, pred_docs))
 
 
 def clean_model_name(model_name: str) -> str:
@@ -725,7 +761,12 @@ def train(
                 if step % validation_interval == 0:
                     nlp.train(False)
                     with torch.no_grad():
-                        scores = normalize_scores(scorer(nlp, val_docs))
+                        scores = score_docs(
+                            nlp=nlp,
+                            docs=val_docs,
+                            scorer=scorer,
+                            pipe_names=pipe_names,
+                        )
                     nlp.train(True)
 
                     metrics = {
@@ -844,7 +885,12 @@ def evaluate(
 
     nlp.train(False)
     with torch.no_grad():
-        scores = normalize_scores(scorer(nlp, test_docs))
+        scores = score_docs(
+            nlp=nlp,
+            docs=test_docs,
+            scorer=scorer,
+            pipe_names=["ner"],
+        )
 
     metrics = {
         "dataset": dataset,
