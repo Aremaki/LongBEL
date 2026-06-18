@@ -312,6 +312,19 @@ def get_metric(metrics: dict[str, Any], metric_name: str) -> float:
     return float(value)
 
 
+def normalize_scores(scores: dict[str, Any]) -> dict[str, Any]:
+    """
+    Keep the old metric path:
+    ner/exact_ner/micro/f
+
+    even if the scorer itself returns:
+    micro/f
+    """
+    if "ner" in scores:
+        return scores
+    return {"ner": {"exact_ner": scores}}
+
+
 def clean_model_name(model_name: str) -> str:
     """Create a filesystem-friendly model tag from a HF name or local path."""
     model_name = str(model_name).rstrip("/")
@@ -712,7 +725,7 @@ def train(
                 if step % validation_interval == 0:
                     nlp.train(False)
                     with torch.no_grad():
-                        scores = scorer(nlp, val_docs)
+                        scores = normalize_scores(scorer(nlp, val_docs))
                     nlp.train(True)
 
                     metrics = {
@@ -831,7 +844,7 @@ def evaluate(
 
     nlp.train(False)
     with torch.no_grad():
-        scores = scorer(nlp, test_docs)
+        scores = normalize_scores(scorer(nlp, test_docs))
 
     metrics = {
         "dataset": dataset,
