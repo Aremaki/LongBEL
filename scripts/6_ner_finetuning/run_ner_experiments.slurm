@@ -35,11 +35,11 @@ echo "Starting training..."
 # Usage:
 #   sbatch run_ner_experiments.slurm <dataset> [base_model]
 #   sbatch run_ner_experiments.slurm medmentions
-#   sbatch run_ner_experiments.slurm quaero_emea ../../models/word-embedding/deberta-v3-large
+#   sbatch run_ner_experiments.slurm quaero_emea ../../models/deberta-v3-large
 
 CONFIG="train_ner.cfg"
 DATASET="${1:-medmentions}"
-BASE_MODEL="${2:-../../models/word-embedding/deberta-v3-large}"
+BASE_MODEL="${2:-../../models/deberta-v3-large}"
 
 echo "============================================================"
 echo "Training dataset=${DATASET} base_model=${BASE_MODEL}"

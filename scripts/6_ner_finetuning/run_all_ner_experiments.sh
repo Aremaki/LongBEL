@@ -4,7 +4,7 @@ set -e
 # Change to the script's directory so relative paths work properly
 cd "$(dirname "$0")"
 
-BASE_MODEL="${1:-../../models/word-embedding/deberta-v3-large}"
+BASE_MODEL="${1:-../../models/deberta-v3-large}"
 
 DATASETS=(
   "medmentions"

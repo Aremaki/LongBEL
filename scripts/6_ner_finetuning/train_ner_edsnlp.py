@@ -16,11 +16,11 @@ Typical usage
 
 python train_ner_edsnlp.py train configs/ner/train_ner.cfg \
   --vars.dataset quaero_emea \
-  --vars.base_model ../../models/word-embedding/deberta-v3-large
+  --vars.base_model ../../models/deberta-v3-large
 
 python train_ner_edsnlp.py evaluate configs/ner/train_ner.cfg \
   --vars.dataset quaero_emea \
-  --vars.base_model ../../models/word-embedding/deberta-v3-large
+  --vars.base_model ../../models/deberta-v3-large
 """
 
 from __future__ import annotations
@@ -102,32 +102,32 @@ SPACCC_LABELS = [
 
 DATASETS: dict[str, dict[str, Any]] = {
     "quaero_emea": {
-        "hf_dataset": "Aremaki/quaero",
-        "hf_config": "quaero_emea_bigbio_kb",
+        "hf_dataset": "Aremaki/EMEA",
+        "hf_config": "",
         "train_split": "train",
         "val_split": "validation",
         "test_split": "test",
         "span_getter": {"gold_spans": QUAERO_LABELS},
     },
     "quaero_medline": {
-        "hf_dataset": "Aremaki/quaero",
-        "hf_config": "quaero_medline_bigbio_kb",
+        "hf_dataset": "Aremaki/MEDLINE",
+        "hf_config": "",
         "train_split": "train",
         "val_split": "validation",
         "test_split": "test",
         "span_getter": {"gold_spans": QUAERO_LABELS},
     },
     "medmentions": {
-        "hf_dataset": "Aremaki/medmentions",
-        "hf_config": "medmentions_st21pv_bigbio_kb",
+        "hf_dataset": "Aremaki/MedMentions",
+        "hf_config": "",
         "train_split": "train",
         "val_split": "validation",
         "test_split": "test",
         "span_getter": {"gold_spans": MEDMENTIONS_ST21PV_LABELS},
     },
     "spaccc": {
-        "hf_dataset": "Aremaki/spaccc",
-        "hf_config": "spaccc_bigbio_kb",
+        "hf_dataset": "Aremaki/SPACCC",
+        "hf_config": "",
         "train_split": "train",
         "val_split": "validation",
         "test_split": "test",
