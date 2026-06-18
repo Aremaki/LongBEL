@@ -40,6 +40,7 @@ import torch
 from accelerate import Accelerator
 from confit import Cli, validate_arguments
 from confit.utils.random import set_seed
+from datasets import load_dataset
 from edsnlp.core.pipeline import Pipeline
 from edsnlp.core.registries import registry
 from edsnlp.pipes.trainable.embeddings.transformer.transformer import Transformer
@@ -104,33 +105,25 @@ DATASETS: dict[str, dict[str, Any]] = {
     "quaero_emea": {
         "hf_dataset": "Aremaki/EMEA",
         "hf_config": "",
-        "train_split": "train",
-        "val_split": "validation",
-        "test_split": "test",
+        "local_dir": "../../data/final_data/EMEA/bigbio_dataset/processed_data",
         "span_getter": {"gold_spans": QUAERO_LABELS},
     },
     "quaero_medline": {
         "hf_dataset": "Aremaki/MEDLINE",
         "hf_config": "",
-        "train_split": "train",
-        "val_split": "validation",
-        "test_split": "test",
+        "local_dir": "../../data/final_data/MEDLINE/bigbio_dataset/processed_data",
         "span_getter": {"gold_spans": QUAERO_LABELS},
     },
     "medmentions": {
         "hf_dataset": "Aremaki/MedMentions",
         "hf_config": "",
-        "train_split": "train",
-        "val_split": "validation",
-        "test_split": "test",
+        "local_dir": "../../data/final_data/MedMentions/bigbio_dataset/processed_data",
         "span_getter": {"gold_spans": MEDMENTIONS_ST21PV_LABELS},
     },
     "spaccc": {
         "hf_dataset": "Aremaki/SPACCC",
         "hf_config": "",
-        "train_split": "train",
-        "val_split": "validation",
-        "test_split": "test",
+        "local_dir": "../../data/final_data/SPACCC/bigbio_dataset/processed_data",
         "span_getter": {"gold_spans": SPACCC_LABELS},
     },
 }
@@ -146,81 +139,127 @@ def dataset_config(dataset: str) -> dict[str, Any]:
     return DATASETS[dataset]
 
 
-# This lets the TOML config contain:
-#
-# [dataset_config]
-# @misc = "ner_dataset_config"
-# dataset = ${vars.dataset}
-try:
-    registry.misc.register("ner_dataset_config", func=dataset_config)
-except Exception:
-    # Some registry implementations do not accept func=... and expect decorator use.
-    @registry.misc.register("ner_dataset_config")
-    def _registered_dataset_config(dataset: str) -> dict[str, Any]:  # type: ignore
-        return dataset_config(dataset)
+def load_dataset_with_fallback(
+    dataset: str,
+    config_name: str,
+    split: str,
+    local_dir: Path,
+):
+    """
+    Load a Hugging Face dataset split.
+
+    Priority:
+    1. Try loading from Hugging Face Hub.
+    2. If this fails, load from a local HF dataset folder with load_dataset().
+    3. As final fallback, try load_from_disk().
+    """
+
+    config_name = config_name or None  # type: ignore
+
+    try:
+        print(f"Loading {dataset} ({config_name}) [{split}] from Hugging Face...")
+
+        if config_name is None:
+            return load_dataset(dataset, split=split)
+        return load_dataset(dataset, config_name, split=split)
+
+    except Exception as e:
+        print(f"Could not load from Hugging Face: {e}")
+        print(f"Loading local dataset from {local_dir}")
+
+    return load_dataset(str(local_dir), split=split)
+
+
+def reconstruct_bigbio_text(page: dict[str, Any]) -> str:
+    """
+    Reconstruct the document text while preserving BigBio character offsets.
+    """
+    passages = sorted(
+        page.get("passages", []),
+        key=lambda p: p["offsets"][0][0],
+    )
+
+    text = ""
+    for passage in passages:
+        start = passage["offsets"][0][0]
+        passage_text = passage["text"][0]
+
+        if len(text) < start:
+            text += " " * (start - len(text))
+
+        text += passage_text
+
+    return text
 
 
 @registry.readers.register("bigbio_hf")
 def read_bigbio_hf(
-    dataset: str,
-    config_name: str,
-    split: str,
-    span_setter: dict[str, Any],
+    dataset_name: str,
+    split_name: str,
+    randomize: bool = False,
+    seed: int = 42,
 ):
     """
-    Read BigBio HF dataset and yield spaCy Doc objects.
+    Read a BigBio Hugging Face dataset and yield spaCy Doc objects.
+
+    randomize:
+        Shuffle documents. Use true for train, false for val/test.
     """
-    from datasets import load_dataset
+
+    cfg = dataset_config(dataset_name)
+
+    dataset = cfg["hf_dataset"]
+    config_name = cfg["hf_config"]
+    local_dir = Path(cfg["local_dir"])
+    span_setter = cfg["span_getter"]
 
     def generator(nlp) -> Iterable[Doc]:
-        print(f"Loading {dataset} ({config_name}) split {split} via HuggingFace...")
-        ds = load_dataset(dataset, config_name, split=split)
+        ds = load_dataset_with_fallback(
+            dataset=dataset,
+            config_name=config_name,
+            split=split_name,
+            local_dir=local_dir,
+        )
 
-        for page in ds:
-            # Reconstruct document text by sorting passages by offsets
-            passages = sorted(
-                page.get("passages", []),  # type: ignore
-                key=lambda p: p["offsets"][0][0],
-            )
-            doc_text = ""
-            for passage in passages:
-                start_offset = passage["offsets"][0][0]
-                if len(doc_text) < start_offset:
-                    doc_text += " " * (start_offset - len(doc_text))
-                doc_text += passage["text"][0]
+        pages = list(ds)
+        if randomize:
+            rng = random.Random(seed)
+            rng.shuffle(pages)
 
-            doc = nlp.make_doc(doc_text)
+        for page in pages:
+            doc = nlp.make_doc(reconstruct_bigbio_text(page))
 
-            spans_dict = (
-                {k: [] for k in span_setter.keys()} if span_setter else {"ents": []}
-            )
+            spans_dict = {k: [] for k in span_setter}
 
-            for entity in page.get("entities", []):  # type: ignore
-                if not entity.get("offsets"):
+            for entity in page.get("entities", []):
+                offsets = entity.get("offsets", [])
+                if not offsets:
                     continue
-                start_char = min(off[0] for off in entity["offsets"])
-                end_char = max(off[1] for off in entity["offsets"])
 
-                label = entity["type"]
+                start_char = min(start for start, _ in offsets)
+                end_char = max(end for _, end in offsets)
+
+                label = entity.get("type", "UNKNOWN")
                 if isinstance(label, list):
                     label = label[0] if label else "UNKNOWN"
 
                 span = doc.char_span(
-                    start_char, end_char, label=label, alignment_mode="expand"
+                    start_char,
+                    end_char,
+                    label=label,
+                    alignment_mode="expand",
                 )
-                if span is not None:
-                    if span_setter:
-                        for k, v in span_setter.items():
-                            if v is True or (isinstance(v, list) and label in v):
-                                spans_dict[k].append(span)
-                    else:
-                        spans_dict["ents"].append(span)
 
-            for k, spans in spans_dict.items():
-                if k == "ents":
-                    doc.ents = spans
-                else:
-                    doc.spans[k] = spans
+                if span is None:
+                    continue
+
+                for group_name, accepted_labels in span_setter.items():
+                    if accepted_labels is True or label in accepted_labels:
+                        spans_dict[group_name].append(span)
+
+            for group_name, spans in spans_dict.items():
+                doc.spans[group_name] = spans
+
             yield doc
 
     return generator
