@@ -67,46 +67,38 @@ app = Cli(pretty_exceptions_show_locals=False)
 # The QUAERO labels below follow your previous EMEA config.
 
 QUAERO_LABELS = [
-    "ANAT",
-    "CHEM",
-    "DEVI",
-    "DISO",
-    "GEOG",
-    "LIVB",
-    "OBJC",
-    "PHEN",
-    "PHYS",
-    "PROC",
+    "Procedures",
+    "Objects",
+    "Phenomena",
+    "Geographic Areas",
+    "Devices",
+    "Living Beings",
+    "Physiology",
+    "Disorders",
+    "Chemicals & Drugs",
+    "Anatomy",
 ]
-
-# TODO: replace these placeholders with the exact labels used in your standoff
-# files if they differ. For MedMentions ST21pv, these are usually UMLS semantic
-# type IDs. For SPACCC, many setups are disease-only, but keep the label name
-# consistent with your annotation files.
 MEDMENTIONS_ST21PV_LABELS = [
-    "T005",
-    "T007",
-    "T017",
-    "T022",
-    "T031",
-    "T033",
-    "T037",
-    "T038",
-    "T058",
-    "T062",
-    "T074",
-    "T082",
-    "T091",
-    "T092",
-    "T097",
-    "T098",
-    "T103",
-    "T168",
-    "T170",
-    "T201",
-    "T204",
+    "Living Beings",
+    "Disorders",
+    "Geographic Areas",
+    "Physiology",
+    "Objects",
+    "Procedures",
+    "Occupations",
+    "Phenomena",
+    "Chemicals & Drugs",
+    "Organizations",
+    "Anatomy",
+    "Concepts & Ideas",
+    "Genes & Molecular Sequences",
+    "Devices",
 ]
-SPACCC_LABELS = ["DISO"]
+SPACCC_LABELS = [
+    "SINTOMA",
+    "PROCEDIMIENTO",
+    "ENFERMEDAD",
+]
 
 DATASETS: dict[str, dict[str, Any]] = {
     "quaero_emea": {
