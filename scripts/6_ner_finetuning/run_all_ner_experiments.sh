@@ -17,7 +17,7 @@ echo "Submitting NER training jobs for datasets with base model: $BASE_MODEL"
 
 for DATASET in "${DATASETS[@]}"; do
   echo "Submitting job for: $DATASET"
-  sbatch --job-name="ner_${DATASET}" run_ner_experiments.slurm "$DATASET" "$BASE_MODEL"
+  sbatch --job-name="ner_${DATASET}" -A ssq@h100 run_ner_experiments.slurm "$DATASET" "$BASE_MODEL"
 done
 
 echo "All jobs submitted!"
