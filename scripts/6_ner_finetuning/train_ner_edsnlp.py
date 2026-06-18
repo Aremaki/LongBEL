@@ -158,10 +158,10 @@ def load_dataset_with_fallback(
     config_name = config_name or None  # type: ignore
 
     try:
-        print(f"Loading {dataset} ({config_name}) [{split}] from Hugging Face...")
-
         if config_name is None:
+            print(f"Loading {dataset} [{split}] from Hugging Face...")
             return load_dataset(dataset, split=split)
+        print(f"Loading {dataset} ({config_name}) [{split}] from Hugging Face...")
         return load_dataset(dataset, config_name, split=split)
 
     except Exception as e:
