@@ -30,29 +30,23 @@ echo "GPUs per node: $SLURM_GPUS_ON_NODE"
 echo "Job ID: $SLURM_JOB_ID"
 echo "Starting training..."
 
-# Run NER experiments for one dataset and one base model.
-#
-# Usage:
-#   sbatch run_ner_experiments.slurm <dataset> [base_model]
-#   sbatch run_ner_experiments.slurm medmentions
-#   sbatch run_ner_experiments.slurm quaero_emea ../../models/deberta-v3-large
 
-CONFIG="train_ner.cfg"
 DATASET="${1:-medmentions}"
-BASE_MODEL="${2:-../../models/deberta-v3-large}"
+CONFIG="train_ner_${DATASET}.cfg"
+
+if [[ ! -f "${CONFIG}" ]]; then
+  echo "ERROR: config file not found: ${CONFIG}"
+  exit 1
+fi
 
 echo "============================================================"
-echo "Training dataset=${DATASET} base_model=${BASE_MODEL}"
+echo "Training dataset=${DATASET}
 echo "============================================================"
 
-srun python train_ner_edsnlp.py train "${CONFIG}" \
-  --vars.dataset "${DATASET}" \
-  --vars.base_model "${BASE_MODEL}"
+srun python train_ner_edsnlp.py train "${CONFIG}"
 
 echo "============================================================"
-echo "Evaluating dataset=${DATASET} base_model=${BASE_MODEL}"
+echo "Evaluating dataset=${DATASET}
 echo "============================================================"
 
-srun python train_ner_edsnlp.py evaluate "${CONFIG}" \
-  --vars.dataset "${DATASET}" \
-  --vars.base_model "${BASE_MODEL}"
+srun python train_ner_edsnlp.py evaluate "${CONFIG}"

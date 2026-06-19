@@ -4,16 +4,14 @@ set -e
 # Change to the script's directory so relative paths work properly
 cd "$(dirname "$0")"
 
-BASE_MODEL="${1:-../../models/deberta-v3-large}"
-
 DATASETS=(
-  "medmentions"
-  "quaero_emea"
-  "quaero_medline"
-  "spaccc"
+  "MedMentions"
+  "EMEA"
+  "MEDLINE"
+  "SPACCC"
 )
 
-echo "Submitting NER training jobs for datasets with base model: $BASE_MODEL"
+echo "Submitting NER training jobs for datasets: ${DATASETS[*]}"
 
 for DATASET in "${DATASETS[@]}"; do
   echo "Submitting job for: $DATASET"
@@ -21,7 +19,7 @@ for DATASET in "${DATASETS[@]}"; do
   sbatch \
     --job-name="ner_${DATASET}" \
     -A ssq@h100 \
-    run_ner_experiments.slurm "$DATASET" "$BASE_MODEL"
+    run_ner_experiments.slurm "$DATASET"
 done
 
 echo "All jobs submitted!"

@@ -37,6 +37,8 @@ from itertools import chain, repeat
 from pathlib import Path
 from typing import Any
 
+import nltk
+import polars as pl
 import torch
 from accelerate import Accelerator
 from confit import Cli, validate_arguments
@@ -50,13 +52,16 @@ from edsnlp.utils.collections import batchify
 from rich_logger import RichTablePrinter
 from spacy.tokens import Doc, Span
 from torch.utils.data import DataLoader
-from tqdm import trange
+from tqdm import tqdm, trange
 
 try:
     import edsnlp
 except ImportError:  # pragma: no cover
     edsnlp = None
 
+
+if not Doc.has_extension("note_id"):
+    Doc.set_extension("note_id", default=None)
 
 BASE_DIR = Path.cwd()
 app = Cli(pretty_exceptions_show_locals=False)
@@ -103,25 +108,25 @@ SPACCC_LABELS = [
 ]
 
 DATASETS: dict[str, dict[str, Any]] = {
-    "quaero_emea": {
+    "EMEA": {
         "hf_dataset": "Aremaki/EMEA",
         "hf_config": "",
         "local_dir": "../../data/final_data/EMEA/bigbio_dataset/processed_data",
         "span_getter": {"gold_spans": QUAERO_LABELS},
     },
-    "quaero_medline": {
+    "MEDLINE": {
         "hf_dataset": "Aremaki/MEDLINE",
         "hf_config": "",
         "local_dir": "../../data/final_data/MEDLINE/bigbio_dataset/processed_data",
         "span_getter": {"gold_spans": QUAERO_LABELS},
     },
-    "medmentions": {
+    "MedMentions": {
         "hf_dataset": "Aremaki/MedMentions",
         "hf_config": "",
         "local_dir": "../../data/final_data/MedMentions/bigbio_dataset/processed_data",
         "span_getter": {"gold_spans": MEDMENTIONS_ST21PV_LABELS},
     },
-    "spaccc": {
+    "SPACCC": {
         "hf_dataset": "Aremaki/SPACCC",
         "hf_config": "",
         "local_dir": "../../data/final_data/SPACCC/bigbio_dataset/processed_data",
@@ -227,14 +232,21 @@ def read_bigbio_hf(
             rng = random.Random(seed)
             rng.shuffle(pages)
 
-        for page in pages:
+        for page_idx, page in enumerate(pages):
             doc = nlp.make_doc(reconstruct_bigbio_text(page))
 
-            spans_dict = {k: [] for k in span_setter}
+            doc._.note_id = str(page.get("id", page_idx))
+
+            all_spans = []
 
             for entity in page.get("entities", []):
                 offsets = entity.get("offsets", [])
                 if not offsets:
+                    continue
+
+                # Important: do not merge discontinuous entities.
+                # A flat CRF/BIO model cannot represent them.
+                if len(offsets) > 1:
                     continue
 
                 start_char = min(start for start, _ in offsets)
@@ -248,18 +260,29 @@ def read_bigbio_hf(
                     start_char,
                     end_char,
                     label=label,
-                    alignment_mode="expand",
+                    alignment_mode="strict",
                 )
 
                 if span is None:
                     continue
 
-                for group_name, accepted_labels in span_setter.items():
+                accepted = False
+                for _group_name, accepted_labels in span_setter.items():
                     if accepted_labels is True or label in accepted_labels:
-                        spans_dict[group_name].append(span)
+                        accepted = True
+                        break
 
-            for group_name, spans in spans_dict.items():
-                doc.spans[group_name] = spans
+                if accepted:
+                    all_spans.append(span)
+
+            doc.spans["gold_spans"] = all_spans
+
+            spans_by_label = defaultdict(list)
+            for span in all_spans:
+                spans_by_label[span.label_].append(span)
+
+            for label, label_spans in spans_by_label.items():
+                doc.spans[label] = label_spans
 
             yield doc
 
@@ -348,8 +371,7 @@ def score_docs(
     # Remove gold annotations from the prediction copies
     for doc in pred_docs:
         doc.ents = []
-        if "gold_spans" in doc.spans:
-            doc.spans["gold_spans"] = []
+        doc.spans.clear()
 
     # Run only the requested pipe if provided
     if pipe_names is None:
@@ -594,23 +616,381 @@ def connected_pipes(pipeline: Iterable[tuple[str, Any]]) -> list[list[str]]:
 
 def span_to_dict(span: Span) -> dict[str, Any]:
     return {
-        "text": span.text,
         "start": span.start_char,
         "end": span.end_char,
+        "text": span.text,
         "label": span.label_,
     }
 
 
-def write_predictions_jsonl(nlp: Pipeline, docs: list[Doc], output: Path) -> None:  # type: ignore
-    output.mkdir(parents=True, exist_ok=True)
-    pred_path = output / "predictions_test.jsonl"
-    with pred_path.open("w", encoding="utf8") as f:
-        for doc in nlp.pipe(docs):
-            item = {
-                "text": doc.text,
-                "entities": [span_to_dict(ent) for ent in doc.ents],
+def span_to_bigbio_entity(span: Span, entity_id: int) -> dict[str, Any]:
+    return {
+        "id": f"T{entity_id}",
+        "type": span.label_,
+        "text": [span.text],
+        "offsets": [[span.start_char, span.end_char]],
+    }
+
+
+def get_prediction_spans(doc: Doc, span_key: str = "gold_spans") -> list[Span]:
+    """
+    Get predicted spans from doc.spans.
+
+    In your setup, predictions are written to doc.spans["gold_spans"]
+    after prediction on cleaned documents.
+    """
+    return list(doc.spans.get(span_key, []))
+
+
+def get_doc_id(doc: Doc, index: int) -> str:
+    """
+    Return the original document id.
+
+    We require doc._.note_id because gold doc_id must align exactly
+    with the original test dataframe.
+    """
+    if not Doc.has_extension("note_id"):
+        raise ValueError("Doc extension note_id is not registered.")
+
+    note_id = getattr(doc._, "note_id", None)
+
+    if note_id is None:
+        raise ValueError(
+            f"Missing doc._.note_id for document at position {index}. "
+            "Set doc._.note_id in the reader before evaluation."
+        )
+
+    return str(note_id)
+
+
+def doc_to_bigbio_record(
+    doc: Doc,
+    spans: list[Span],
+    index: int,
+    doc_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Convert one predicted doc to a BigBio-like record.
+    """
+    if doc_id is None:
+        doc_id = get_doc_id(doc, index)
+
+    doc_id = str(doc_id)
+
+    return {
+        "id": doc_id,
+        "document_id": doc_id,
+        "passages": [
+            {
+                "id": f"{doc_id}_passage_0",
+                "type": "abstract",
+                "text": [doc.text],
+                "offsets": [[0, len(doc.text)]],
             }
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+        ],
+        "entities": [
+            span_to_bigbio_entity(span, entity_id=i) for i, span in enumerate(spans)
+        ],
+        "events": [],
+        "coreferences": [],
+        "relations": [],
+    }
+
+
+def write_predictions_jsonl_and_parquet(
+    pred_docs: list[Doc],
+    output: Path,
+    span_key: str = "gold_spans",
+    pipe_names: list[str] | None = None,
+    gold_test_df: pl.DataFrame | None = None,
+    match_on_label: bool = True,
+    sent_tokenizer: Any | None = None,
+) -> None:
+    """
+    Run NER prediction on clean copies of docs and export predictions.
+
+    Exports:
+        - predictions_test.jsonl: simple readable format
+        - predictions_test.parquet: BigBio-like format
+        - normalization_input_test.parquet: mixed dataframe for normalization/evaluation
+
+    The mixed dataframe contains:
+        - TP: predicted mention matched with gold
+        - FP: predicted mention not in gold
+        - FN: gold mention missed by NER
+
+    Tracking columns:
+        - is_predicted
+        - is_gold
+        - ner_status
+        - pred_mention_id
+        - gold_mention_id
+    """
+
+    output.mkdir(parents=True, exist_ok=True)
+
+    jsonl_path = output / "predictions_test.jsonl"
+    parquet_path = output / "predictions_test.parquet"
+    norm_input_path = output / "normalization_input_test.parquet"
+
+    # ------------------------------------------------------------------
+    # Prepare gold dataframe
+    # ------------------------------------------------------------------
+    gold_info = None
+
+    if gold_test_df is not None:
+        gold = gold_test_df.clone()
+
+        rename_map = {
+            "doc_id": "filename",
+            "semantic_group": "label",
+            "mention": "span",
+            "gold_concept_code": "code",
+            "gold_concept_name": "annotation",
+        }
+
+        gold = gold.rename({
+            old_name: new_name
+            for old_name, new_name in rename_map.items()
+            if old_name in gold.columns
+        })
+
+        for col in ["code", "semantic_rel", "annotation", "mention_id"]:
+            if col not in gold.columns:
+                gold = gold.with_columns(pl.lit("").alias(col))
+
+        gold = gold.with_columns([
+            pl.col("filename").cast(pl.Utf8),
+            pl.col("label").cast(pl.Utf8),
+            pl.col("start_span").cast(pl.Int64),
+            pl.col("end_span").cast(pl.Int64),
+            pl.col("span").fill_null("").cast(pl.Utf8),
+            pl.col("code").fill_null("").cast(pl.Utf8),
+            pl.col("semantic_rel").fill_null("").cast(pl.Utf8),
+            pl.col("annotation").fill_null("").cast(pl.Utf8),
+            pl.col("mention_id").fill_null("").cast(pl.Utf8),
+        ])
+
+        if match_on_label:
+            merge_cols = ["filename", "label", "start_span", "end_span"]
+        else:
+            merge_cols = ["filename", "start_span", "end_span"]
+
+        gold_info = (
+            gold.select([
+                "filename",
+                "label",
+                "start_span",
+                "end_span",
+                "mention_id",
+                "span",
+                "code",
+                "semantic_rel",
+                "annotation",
+            ])
+            .unique(subset=merge_cols, keep="first")
+            .rename({
+                "mention_id": "gold_mention_id",
+                "span": "gold_span",
+                "code": "gold_code",
+                "semantic_rel": "gold_semantic_rel",
+                "annotation": "gold_annotation",
+            })
+            .with_columns(pl.lit(True).alias("is_gold"))
+        )
+
+    # ------------------------------------------------------------------
+    # Write JSONL, BigBio-like parquet, and collect prediction rows
+    # ------------------------------------------------------------------
+    bigbio_records = []
+    pred_rows = []
+    doc_ids = [get_doc_id(doc, i) for i, doc in enumerate(pred_docs)]
+
+    with jsonl_path.open("w", encoding="utf8") as f:
+        for i, doc in enumerate(pred_docs):
+            # Important: use the document index to stay aligned with gold doc_id
+            filename = doc_ids[i]
+
+            spans = get_prediction_spans(doc, span_key=span_key)
+
+            spans = sorted(
+                spans,
+                key=lambda s: (s.start_char, s.end_char, s.label_),
+            )
+
+            simple_item = {
+                "id": filename,
+                "text": doc.text,
+                "entities": [span_to_dict(span) for span in spans],
+            }
+
+            f.write(json.dumps(simple_item, ensure_ascii=False) + "\n")
+
+            bigbio_records.append(
+                doc_to_bigbio_record(
+                    doc=doc,
+                    spans=spans,
+                    index=i,
+                    doc_id=filename,
+                )
+            )
+
+            for entity_id, span in enumerate(spans, start=1):
+                pred_rows.append({
+                    "filename": filename,
+                    "pred_mention_id": f"{filename}.{entity_id}",
+                    "label": span.label_,
+                    "start_span": int(span.start_char),
+                    "end_span": int(span.end_char),
+                    "span": span.text,
+                    "sentence": make_marked_sentence_from_doc(
+                        text=doc.text,
+                        start=span.start_char,
+                        end=span.end_char,
+                        label=span.label_,
+                        sent_tokenizer=sent_tokenizer,
+                    ),
+                    "is_predicted": True,
+                })
+    # ------------------------------------------------------------------
+    # Save BigBio-like Parquet
+    # ------------------------------------------------------------------
+    if len(bigbio_records) == 0:
+        bigbio_df = pl.DataFrame()
+    else:
+        bigbio_df = pl.DataFrame(bigbio_records)
+
+    bigbio_df.write_parquet(parquet_path)
+
+    # ------------------------------------------------------------------
+    # Build prediction dataframe
+    # ------------------------------------------------------------------
+    pred_schema = {
+        "filename": pl.Utf8,
+        "pred_mention_id": pl.Utf8,
+        "label": pl.Utf8,
+        "start_span": pl.Int64,
+        "end_span": pl.Int64,
+        "span": pl.Utf8,
+        "is_predicted": pl.Boolean,
+        "sentence": pl.Utf8,
+    }
+
+    if len(pred_rows) == 0:
+        pred_df = pl.DataFrame(schema=pred_schema)
+    else:
+        pred_df = pl.DataFrame(pred_rows).with_columns([
+            pl.col("filename").cast(pl.Utf8),
+            pl.col("pred_mention_id").cast(pl.Utf8),
+            pl.col("label").cast(pl.Utf8),
+            pl.col("start_span").cast(pl.Int64),
+            pl.col("end_span").cast(pl.Int64),
+            pl.col("span").cast(pl.Utf8),
+            pl.col("is_predicted").cast(pl.Boolean),
+            pl.col("sentence").cast(pl.Utf8),
+        ])
+
+    # ------------------------------------------------------------------
+    # Full join with gold dataframe
+    # ------------------------------------------------------------------
+    if gold_info is not None:
+        norm_df = pred_df.join(
+            gold_info,
+            on=merge_cols,  # type: ignore
+            how="full",
+            coalesce=True,
+        )
+
+        # If match_on_label=False, Polars may keep gold label as label_right.
+        # We keep predicted label when available, otherwise gold label.
+        if "label_right" in norm_df.columns:
+            norm_df = norm_df.with_columns(
+                pl.col("label").fill_null(pl.col("label_right")).alias("label")
+            ).drop("label_right")
+
+        norm_df = norm_df.with_columns([
+            pl.col("is_predicted").fill_null(False),
+            pl.col("is_gold").fill_null(False),
+            pl.col("pred_mention_id").fill_null(""),
+            pl.col("gold_mention_id").fill_null(""),
+            pl.col("span").fill_null(pl.col("gold_span")).alias("span"),
+            pl.col("sentence").fill_null("").alias("sentence"),
+            pl.col("gold_code").fill_null("").alias("code"),
+            pl.col("gold_semantic_rel").fill_null("").alias("semantic_rel"),
+            pl.col("gold_annotation").fill_null("").alias("annotation"),
+        ])
+
+        norm_df = norm_df.with_columns([
+            pl.when(pl.col("is_predicted") & pl.col("is_gold"))
+            .then(pl.lit("TP"))
+            .when(pl.col("is_predicted") & ~pl.col("is_gold"))
+            .then(pl.lit("FP"))
+            .otherwise(pl.lit("FN"))
+            .alias("ner_status"),
+            pl.when(pl.col("pred_mention_id") != "")
+            .then(pl.col("pred_mention_id"))
+            .otherwise(pl.col("gold_mention_id"))
+            .alias("mention_id"),
+        ])
+
+        norm_columns = [
+            "filename",
+            "mention_id",
+            "pred_mention_id",
+            "gold_mention_id",
+            "label",
+            "start_span",
+            "end_span",
+            "span",
+            "code",
+            "semantic_rel",
+            "annotation",
+            "is_predicted",
+            "is_gold",
+            "ner_status",
+        ]
+
+        norm_df = norm_df.select(norm_columns)
+
+    else:
+        norm_df = pred_df.with_columns([
+            pl.col("pred_mention_id").alias("mention_id"),
+            pl.lit("").alias("gold_mention_id"),
+            pl.lit("").alias("code"),
+            pl.lit("").alias("semantic_rel"),
+            pl.lit("").alias("annotation"),
+            pl.lit(False).alias("is_gold"),
+            pl.lit("PRED").alias("ner_status"),
+        ]).select([
+            "filename",
+            "mention_id",
+            "pred_mention_id",
+            "gold_mention_id",
+            "label",
+            "start_span",
+            "end_span",
+            "span",
+            "code",
+            "semantic_rel",
+            "annotation",
+            "is_predicted",
+            "is_gold",
+            "ner_status",
+        ])
+
+    norm_df = norm_df.sort([
+        "filename",
+        "start_span",
+        "end_span",
+        "label",
+        "ner_status",
+    ])
+
+    norm_df.write_parquet(norm_input_path)
+
+    print(f"Saved JSONL predictions to {jsonl_path}")
+    print(f"Saved BigBio-like Parquet predictions to {parquet_path}")
+    print(f"Saved normalization/evaluation dataframe to {norm_input_path}")
 
 
 # -----------------------------------------------------------------------------
@@ -765,7 +1145,6 @@ def train(
                             nlp=nlp,
                             docs=val_docs,
                             scorer=scorer,
-                            pipe_names=pipe_names,
                         )
                     nlp.train(True)
 
@@ -853,6 +1232,220 @@ def train(
     return nlp
 
 
+def _trim_span(text: str, start: int, end: int) -> tuple[int, int]:
+    """Trim leading/trailing whitespace while keeping offsets relative to text."""
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    return start, end
+
+
+def _break_inside_entity(
+    point: int, entity_spans: list[tuple[int, int]] | None
+) -> bool:
+    if not entity_spans:
+        return False
+    return any(start < point < end for start, end in entity_spans)
+
+
+def _process_chunk(
+    chunk: str,
+    offset: int,
+    full_text: str,
+    sent_spans: list[tuple[int, int]],
+    sent_tokenizer=None,
+) -> None:
+    """
+    Add sentence spans from a chunk.
+
+    If sent_tokenizer has span_tokenize(), use it.
+    Otherwise fallback to a simple punctuation-based splitter.
+    """
+
+    if not chunk.strip():
+        return
+
+    if sent_tokenizer is not None and hasattr(sent_tokenizer, "span_tokenize"):
+        local_spans = list(sent_tokenizer.span_tokenize(chunk))
+    else:
+        local_spans = []
+        start = 0
+        for match in re.finditer(r"[.!?]+(?:\s+|$)", chunk):
+            end = match.end()
+            local_spans.append((start, end))
+            start = end
+        if start < len(chunk):
+            local_spans.append((start, len(chunk)))
+
+    for local_start, local_end in local_spans:
+        global_start = offset + local_start
+        global_end = offset + local_end
+
+        global_start, global_end = _trim_span(
+            text=full_text,
+            start=global_start,
+            end=global_end,
+        )
+
+        if global_start < global_end:
+            sent_spans.append((global_start, global_end))
+
+
+def span_tokenize_with_trailing_newlines(
+    text: str,
+    sent_tokenizer=None,
+    entity_spans: list[tuple[int, int]] | None = None,
+) -> list[tuple[int, int]]:
+    """
+    Tokenize text into sentence spans.
+
+    Splits on:
+        - sentence punctuation if sent_tokenizer is provided
+        - newlines
+    Avoids splitting inside entity spans.
+    """
+
+    sent_spans: list[tuple[int, int]] = []
+    last_break = 0
+
+    newline_matches = list(re.finditer(r"\n+", text))
+
+    for match in newline_matches:
+        break_start = match.start()
+        break_end = match.end()
+
+        if _break_inside_entity(break_start, entity_spans):
+            continue
+
+        chunk = text[last_break:break_start]
+
+        _process_chunk(
+            chunk=chunk,
+            offset=last_break,
+            full_text=text,
+            sent_spans=sent_spans,
+            sent_tokenizer=sent_tokenizer,
+        )
+
+        # Important: skip the newline characters
+        last_break = break_end
+
+    if last_break < len(text):
+        chunk = text[last_break:]
+
+        _process_chunk(
+            chunk=chunk,
+            offset=last_break,
+            full_text=text,
+            sent_spans=sent_spans,
+            sent_tokenizer=sent_tokenizer,
+        )
+
+    return sent_spans
+
+
+def make_marked_sentence_from_doc(
+    text: str,
+    start: int,
+    end: int,
+    label: str,
+    sent_tokenizer=None,
+    start_entity: str = "[",
+    end_entity: str = "]",
+    start_group: str = "{",
+    end_group: str = "}",
+) -> str:
+    """
+    Create SynCABEL input:
+        sentence with [mention]{semantic_group}
+    """
+
+    start = int(start)
+    end = int(end)
+
+    entity_spans = [(start, end)]
+
+    sent_spans = span_tokenize_with_trailing_newlines(
+        text=text,
+        sent_tokenizer=sent_tokenizer,
+        entity_spans=entity_spans,
+    )
+
+    # Find sentence containing the entity start
+    sent_start, sent_end = 0, len(text)
+    for s_start, s_end in sent_spans:
+        if s_start <= start < s_end:
+            sent_start, sent_end = s_start, s_end
+            break
+
+    sent_text = text[sent_start:sent_end]
+
+    start_in_sent = start - sent_start
+    end_in_sent = end - sent_start
+
+    if (
+        start_in_sent < 0
+        or end_in_sent > len(sent_text)
+        or start_in_sent >= end_in_sent
+    ):
+        mention = text[start:end]
+        return f"{start_entity}{mention}{end_entity}{start_group}{label}{end_group}"
+
+    marked_sentence = (
+        sent_text[:start_in_sent]
+        + start_entity
+        + sent_text[start_in_sent:end_in_sent]
+        + end_entity
+        + start_group
+        + str(label)
+        + end_group
+        + sent_text[end_in_sent:]
+    )
+
+    return " ".join(marked_sentence.split())
+
+
+def predict_docs(
+    nlp: Pipeline,  # type: ignore
+    docs: list[Doc],
+    pipe_names: list[str] | None = None,
+    desc: str = "Running inference",
+) -> list[Doc]:
+    """
+    Create clean prediction docs and run inference once.
+
+    Important:
+        - gold annotations are removed from prediction copies
+        - doc._.note_id is preserved for alignment with gold dataframe
+    """
+    pred_docs = deepcopy(docs)
+
+    for doc in pred_docs:
+        doc.ents = []
+        doc.spans.clear()
+
+    if pipe_names is None:
+        pred_docs = list(
+            tqdm(
+                nlp.pipe(pred_docs),
+                total=len(pred_docs),
+                desc=desc,
+            )
+        )
+    else:
+        with nlp.select_pipes(enable=pipe_names):
+            pred_docs = list(
+                tqdm(
+                    nlp.pipe(pred_docs),
+                    total=len(pred_docs),
+                    desc=desc,
+                )
+            )
+
+    return pred_docs
+
+
 @app.command(name="evaluate", registry=registry)
 def evaluate(
     *,
@@ -863,13 +1456,20 @@ def evaluate(
     output_root: Path,
     prediction_root: Path,
     model_name: str = "model-best",
-    cpu: bool = False,
 ) -> dict[str, Any]:
     """Evaluate a trained model on the test set and export JSON metrics/predictions."""
 
     if edsnlp is None:
         raise ImportError("Could not import edsnlp. Please install edsnlp first.")
 
+    if dataset in ["EMEA", "MEDLINE"]:  # type: ignore
+        sent_tokenizer = nltk.data.load("tokenizers/punkt/french.pickle")
+    elif dataset == "MedMentions":  # type: ignore
+        sent_tokenizer = nltk.data.load("tokenizers/punkt/english.pickle")
+    elif dataset == "SPACCC":  # type: ignore
+        sent_tokenizer = nltk.data.load("tokenizers/punkt/spanish.pickle")
+    else:
+        sent_tokenizer = None
     output_dir = compute_output_dir(output_root, base_model, dataset)
     model_path = output_dir / model_name
     metrics_path = output_dir / "test_metrics.json"
@@ -877,20 +1477,26 @@ def evaluate(
 
     print(f"Loading model from {model_path}")
     nlp = edsnlp.load(model_path)
-    if cpu:
-        nlp.to("cpu")
+
+    # ------------------------------------------------------------------
+    # Move model to GPU for inference
+    # ------------------------------------------------------------------
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    nlp.to(device)
+    print(f"Inference device: {device}")
 
     test_docs: list[Doc] = [d for reader in data for d in reader(nlp)]
     print(f"Test documents: {len(test_docs)}")
 
     nlp.train(False)
     with torch.no_grad():
-        scores = score_docs(
+        pred_docs = predict_docs(
             nlp=nlp,
             docs=test_docs,
-            scorer=scorer,
-            pipe_names=["ner"],
+            pipe_names=None,
+            desc=f"Predicting {dataset} test set",
         )
+        scores = normalize_scores(scorer(test_docs, pred_docs))
 
     metrics = {
         "dataset": dataset,
@@ -901,7 +1507,26 @@ def evaluate(
     save_json(metrics_path, metrics)
     print(f"Saved test metrics to {metrics_path}")
 
-    write_predictions_jsonl(nlp, test_docs, prediction_dir)
+    gold_test_df = pl.read_csv(
+        Path(f"../../data/final_data/{dataset}/test_tfidf_annotations_short.tsv"),
+        separator="\t",
+        has_header=True,
+        schema_overrides={
+            "gold_concept_code": str,
+            "mention_id": str,
+            "doc_id": str,  # force as string
+        },  # type: ignore
+    )
+
+    write_predictions_jsonl_and_parquet(
+        pred_docs=pred_docs,
+        output=prediction_dir,
+        span_key="gold_spans",
+        pipe_names=None,
+        gold_test_df=gold_test_df,
+        match_on_label=True,
+        sent_tokenizer=sent_tokenizer,
+    )
     print(f"Saved predictions to {prediction_dir / 'predictions_test.jsonl'}")
 
     print(json.dumps(metrics, indent=2, ensure_ascii=False))
